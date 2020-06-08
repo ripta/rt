@@ -1,0 +1,7 @@
+steps:
+  - name: 'golang:1.14-stretch'
+    args:
+      - bash
+      - -c
+      - |
+        go test ./...
