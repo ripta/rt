@@ -51,7 +51,7 @@ func (m *mapper) run(c *cobra.Command, args []string) error {
 
 func (m *mapper) validate(_ *cobra.Command, args []string) error {
 	if len(args) != 1 {
-		return ErrMapSchemeRequired
+		return fmt.Errorf("%w, available %+v", ErrMapSchemeRequired, mapscheme.Names())
 	}
 
 	name := args[0]
