@@ -1,6 +1,6 @@
 module github.com/ripta/rt
 
-go 1.14
+go 1.17
 
 require (
 	github.com/spf13/cobra v1.0.0
