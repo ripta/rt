@@ -1,6 +1,7 @@
 Ripta's collection of tools
 
-## `uni`
+`uni`
+-----
 
 ```
 go install github.com/ripta/rt/cmd/uni
