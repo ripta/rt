@@ -42,9 +42,9 @@ func (d *describer) run(c *cobra.Command, args []string) error {
 	for _, r := range []rune(string(in)) {
 		name := runenames.Name(r)
 		if unicode.IsControl(r) {
-			fmt.Fprintf(os.Stderr, "%U\t%q\t%s\n", r, string(r), name)
+			fmt.Printf("%U\t%q\t%s\n", r, string(r), name)
 		} else {
-			fmt.Fprintf(os.Stderr, "%U\t%s\t%s\n", r, string(r), name)
+			fmt.Printf("%U\t%s\t%s\n", r, string(r), name)
 
 		}
 	}
