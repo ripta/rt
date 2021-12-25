@@ -7,8 +7,11 @@ func NewCommand() *cobra.Command {
 		Use:   "uni",
 		Short: "Unicode commands",
 	}
+
 	c.AddCommand(newDescribeCommand())
 	c.AddCommand(newListCommand())
 	c.AddCommand(newMapCommand())
+	c.AddCommand(newNFCCommand())
+	c.AddCommand(newNFDCommand())
 	return &c
 }

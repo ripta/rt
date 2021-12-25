@@ -32,3 +32,13 @@ Hᴇʟʟᴏ Wᴏʀʟᴅ
 ❯ echo Hello World | uni map italics
 𝐻𝑒𝑙𝑙𝑜 𝑊𝑜𝑟𝑙𝑑
 ```
+
+Canonically compose runes:
+
+```
+❯ echo 감 | uni nfc
+감
+
+❯ echo 감 | uni nfd
+감
+```
