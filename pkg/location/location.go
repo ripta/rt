@@ -31,6 +31,9 @@ type Location struct {
 	VerticalAccuracy float64 `json:"vertical_accuracy"`
 	// Timestamp is the time when the information was produced.
 	Timestamp time.Time `json:"timestamp"`
+
+	HasPlacemark bool               `json:"has_placemark"`
+	Placemark    *LocationPlacemark `json:"placemark"`
 }
 
 type LocationError int
@@ -67,20 +70,60 @@ func (e LocationError) Error() string {
 	return fmt.Sprintf("error querying location: CLLocationManager returned code %d", int(e))
 }
 
+type LocationPlacemark struct {
+	Name                  string   `json:"name"`
+	ISOCountryCode        string   `json:"iso_country_code"`
+	Country               string   `json:"country"`
+	PostalCode            string   `json:"postal_code"`
+	AdministrativeArea    string   `json:"administrative_area"`
+	SubadministrativeArea string   `json:"subadministrative_area"`
+	Locality              string   `json:"locality"`
+	Sublocality           string   `json:"sublocality"`
+	Thoroughfare          string   `json:"thoroughfare"`
+	Subthoroughfare       string   `json:"subthoroughfare"`
+	Region                string   `json:"region"`
+	InlandWater           string   `json:"inland_water"`
+	Ocean                 string   `json:"ocean"`
+	AreasOfInterest       []string `json:"areas_of_interest"`
+}
+
 func CurrentLocation() (*Location, error) {
-	raw := C.Location{}
-	if code := C.currentLocation(&raw); code != 0 {
+	cloc := C.Location{}
+	cpla := C.Placemark{}
+	if code := C.currentLocation(&cloc, &cpla); code != 0 {
 		return nil, LocationError(code)
 	}
 
 	loc := Location{
-		Latitude:            float64(C.float(raw.latitude)),
-		Longitude:           float64(C.float(raw.longitude)),
-		Altitude:            float64(C.float(raw.altitude)),
-		EllipsoidalAltitude: float64(C.float(raw.ellipsoidalAltitude)),
-		HorizontalAccuracy:  float64(C.float(raw.horizontalAccuracy)),
-		VerticalAccuracy:    float64(C.float(raw.verticalAccuracy)),
-		Timestamp:           time.Unix(int64(C.int(raw.timestamp)), 0),
+		Latitude:            float64(C.float(cloc.latitude)),
+		Longitude:           float64(C.float(cloc.longitude)),
+		Altitude:            float64(C.float(cloc.altitude)),
+		EllipsoidalAltitude: float64(C.float(cloc.ellipsoidalAltitude)),
+		HorizontalAccuracy:  float64(C.float(cloc.horizontalAccuracy)),
+		VerticalAccuracy:    float64(C.float(cloc.verticalAccuracy)),
+		Timestamp:           time.Unix(int64(C.int(cloc.timestamp)), 0),
+
+		HasPlacemark: cloc.hasPlacemark == C.BOOL(1),
 	}
+
+	if loc.HasPlacemark {
+		loc.Placemark = &LocationPlacemark{
+			Name:                  NSStringToGoString(cpla.name),
+			ISOCountryCode:        NSStringToGoString(cpla.isoCountryCode),
+			Country:               NSStringToGoString(cpla.country),
+			PostalCode:            NSStringToGoString(cpla.postalCode),
+			AdministrativeArea:    NSStringToGoString(cpla.administrativeArea),
+			SubadministrativeArea: NSStringToGoString(cpla.subadministrativeArea),
+			Locality:              NSStringToGoString(cpla.locality),
+			Sublocality:           NSStringToGoString(cpla.sublocality),
+			Thoroughfare:          NSStringToGoString(cpla.thoroughfare),
+			Subthoroughfare:       NSStringToGoString(cpla.subthoroughfare),
+			Region:                NSStringToGoString(cpla.region),
+			InlandWater:           NSStringToGoString(cpla.inlandWater),
+			Ocean:                 NSStringToGoString(cpla.ocean),
+			AreasOfInterest:       NSArrayNSStringToGoStringSlice(cpla.areasOfInterest),
+		}
+	}
+
 	return &loc, nil
 }
