@@ -19,6 +19,7 @@ func newDescribeCommand() *cobra.Command {
 		Use:                   "describe",
 		DisableFlagsInUseLine: true,
 		SilenceErrors:         true,
+		Aliases:               []string{"d", "desc"},
 
 		Short: "Describe characters",
 		Args:  d.validate,
