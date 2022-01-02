@@ -43,3 +43,25 @@ Canonically compose runes:
 ❯ echo 감 | uni nfd
 감
 ```
+
+Sometimes it may be useful to decompose runes before describing:
+
+```
+❯ echo 쭈꾸쭈꾸 | uni d
+U+CB48	쭈	<Hangul Syllable>
+U+AFB8	꾸	<Hangul Syllable>
+U+CB48	쭈	<Hangul Syllable>
+U+AFB8	꾸	<Hangul Syllable>
+U+000A	"\n"	<control>
+
+❯ echo 쭈꾸쭈꾸 | uni nfd | uni describe
+U+110D	ᄍ	HANGUL CHOSEONG SSANGCIEUC
+U+116E	ᅮ	HANGUL JUNGSEONG U
+U+1101	ᄁ	HANGUL CHOSEONG SSANGKIYEOK
+U+116E	ᅮ	HANGUL JUNGSEONG U
+U+110D	ᄍ	HANGUL CHOSEONG SSANGCIEUC
+U+116E	ᅮ	HANGUL JUNGSEONG U
+U+1101	ᄁ	HANGUL CHOSEONG SSANGKIYEOK
+U+116E	ᅮ	HANGUL JUNGSEONG U
+U+000A	"\n"	<control>
+```
