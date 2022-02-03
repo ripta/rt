@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
+	"strings"
 	"unicode"
 
 	"github.com/spf13/cobra"
@@ -35,12 +36,20 @@ type describer struct {
 }
 
 func (d *describer) run(c *cobra.Command, args []string) error {
+	if len(args) > 0 {
+		return d.display(strings.Join(args, ""))
+	}
+
 	in, err := ioutil.ReadAll(os.Stdin)
 	if err != nil {
 		return fmt.Errorf("reading from stdin: %w", err)
 	}
 
-	for _, r := range []rune(string(in)) {
+	return d.display(string(in))
+}
+
+func (d *describer) display(in string) error {
+	for _, r := range []rune(in) {
 		name := runenames.Name(r)
 		if unicode.IsControl(r) {
 			fmt.Printf("%U\t%q\t%s\n", r, string(r), name)
