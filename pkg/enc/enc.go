@@ -31,6 +31,10 @@ func NewCommand() *cobra.Command {
 
 	c.PersistentFlags().BoolVarP(&e.Decode, "decode", "d", false, "Decode instead of encode")
 
+	c.AddCommand(newAscii85Command(e))
+	c.AddCommand(newBase32Command(e))
+	c.AddCommand(newBase58Command(e))
 	c.AddCommand(newBase64Command(e))
+	c.AddCommand(newHexCommand(e))
 	return &c
 }
