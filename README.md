@@ -1,10 +1,52 @@
 Ripta's collection of tools
 
+Tools:
+
+* [enc](#enc) to encode and decode strings
+* [place](#place) for macOS Location Services
+* [uni](#uni) for unicode utils
+
+`enc`
+----
+
+```
+go install github.com/ripta/rt/cmd/enc@latest
+```
+
+Encode and decode strings using various encodings:
+
+* `a85` for ascii85;
+* `b32` for base32;
+* `b58` for base58;
+* `b64` for base64; and
+* `hex` for hexadecimal.
+
+`place`
+------
+
+Talk to macOS Location Services from the command line.
+
+```
+go install github.com/ripta/rt/cmd/place@latest
+```
+
+Query as plaintext:
+
+```
+❯ place
+Latitude: 34.009414
+Longitude: -118.162233
+Accuracy: 45.751999
+Last observed: 2022-02-02T21:24:40-08:00
+```
+
+or as JSON by giving `-j` or `--json`.
+
 `uni`
 -----
 
 ```
-go install github.com/ripta/rt/cmd/uni
+go install github.com/ripta/rt/cmd/uni@latest
 ```
 
 List characters:
