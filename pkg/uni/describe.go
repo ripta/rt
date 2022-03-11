@@ -1,11 +1,13 @@
 package uni
 
 import (
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"os"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/text/unicode/runenames"
@@ -50,6 +52,9 @@ func (d *describer) run(c *cobra.Command, args []string) error {
 
 func (d *describer) display(in string) error {
 	for _, r := range []rune(in) {
+		if r == utf8.RuneError {
+			return errors.New("not valid utf8 encoding")
+		}
 		name := runenames.Name(r)
 		if unicode.IsControl(r) {
 			fmt.Printf("%U\t%q\t%s\t%s\n", r, string(r), fmt.Sprintf("[%s]", runeToHexBytes(r)), name)
