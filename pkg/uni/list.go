@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/text/unicode/rangetable"
@@ -17,7 +18,7 @@ var (
 
 func newListCommand() *cobra.Command {
 	l := &lister{
-		output: []string{"id", "rune", "name"},
+		output: []string{"id", "rune", "hexbytes", "name"},
 		table:  unicode.Version,
 	}
 
@@ -51,7 +52,7 @@ func (l *lister) run(c *cobra.Command, args []string) error {
 		return fmt.Errorf("unicode table version %s: %w", l.table, ErrNoUnicodeTable)
 	}
 
-	cols := make(map[string]bool)
+	cols := map[string]bool{}
 	for _, o := range l.output {
 		cols[o] = true
 	}
@@ -71,6 +72,9 @@ func (l *lister) run(c *cobra.Command, args []string) error {
 					v = fmt.Sprintf("%q", string(r))
 				}
 				disp = append(disp, v)
+			}
+			if cols["hexbytes"] {
+				disp = append(disp, fmt.Sprintf("[%s]", runeToHexBytes(r)))
 			}
 			if cols["name"] {
 				disp = append(disp, name)
@@ -102,4 +106,20 @@ func runeMatches(normalized []string, name string) bool {
 		}
 	}
 	return true
+}
+
+func runeToHexBytes(r rune) string {
+	bytes := make([]byte, utf8.UTFMax)
+	utf8.EncodeRune(bytes, r)
+
+	hexbytes := []string{}
+	for _, b := range bytes {
+		if b == 0 {
+			hexbytes = append(hexbytes, "  ")
+			continue
+		}
+		hexbytes = append(hexbytes, fmt.Sprintf("%02X", b))
+	}
+
+	return strings.Join(hexbytes, " ")
 }

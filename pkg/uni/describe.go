@@ -52,9 +52,9 @@ func (d *describer) display(in string) error {
 	for _, r := range []rune(in) {
 		name := runenames.Name(r)
 		if unicode.IsControl(r) {
-			fmt.Printf("%U\t%q\t%s\n", r, string(r), name)
+			fmt.Printf("%U\t%q\t%s\t%s\n", r, string(r), fmt.Sprintf("[%s]", runeToHexBytes(r)), name)
 		} else {
-			fmt.Printf("%U\t%s\t%s\n", r, string(r), name)
+			fmt.Printf("%U\t%s\t%s\t%s\n", r, string(r), fmt.Sprintf("[%s]", runeToHexBytes(r)), name)
 
 		}
 	}
