@@ -4,8 +4,9 @@ import "github.com/spf13/cobra"
 
 func NewCommand() *cobra.Command {
 	c := cobra.Command{
-		Use:   "uni",
-		Short: "Unicode commands",
+		Use:          "uni",
+		Short:        "Unicode commands",
+		SilenceUsage: true,
 	}
 
 	c.AddCommand(newDescribeCommand())
