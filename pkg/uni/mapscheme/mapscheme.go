@@ -1,5 +1,7 @@
 package mapscheme
 
+import "sort"
+
 var (
 	registry = make(map[string]func(rune) rune)
 )
@@ -23,5 +25,7 @@ func Names() []string {
 	for name := range registry {
 		names = append(names, name)
 	}
+
+	sort.Strings(names)
 	return names
 }
