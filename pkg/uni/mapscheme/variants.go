@@ -1,35 +1,6 @@
 package mapscheme
 
 func init() {
-	// registry["smallcaps"] = GenerateFromMap(map[string]string{
-	// 	"a": "ᴀ",
-	// 	"b": "ʙ",
-	// 	"c": "ᴄ",
-	// 	"d": "ᴅ",
-	// 	"e": "ᴇ",
-	// 	"f": "ғ",
-	// 	"g": "ɢ",
-	// 	"h": "ʜ",
-	// 	"i": "ɪ",
-	// 	"j": "ᴊ",
-	// 	"k": "ᴋ",
-	// 	"l": "ʟ",
-	// 	"m": "ᴍ",
-	// 	"n": "ɴ",
-	// 	"o": "ᴏ",
-	// 	"p": "ᴘ",
-	// 	"q": "ǫ",
-	// 	"r": "ʀ",
-	// 	"s": "s",
-	// 	"t": "ᴛ",
-	// 	"u": "ᴜ",
-	// 	"v": "ᴠ",
-	// 	"w": "ᴡ",
-	// 	"x": "x",
-	// 	"y": "ʏ",
-	// 	"z": "ᴢ",
-	// })
-
 	registry["bolded"] = MustGenerateFromString(
 		"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ",
 		"𝐚𝐛𝐜𝐝𝐞𝐟𝐠𝐡𝐢𝐣𝐤𝐥𝐦𝐧𝐨𝐩𝐪𝐫𝐬𝐭𝐮𝐯𝐰𝐱𝐲𝐳𝐀𝐁𝐂𝐃𝐄𝐅𝐆𝐇𝐈𝐉𝐊𝐋𝐌𝐍𝐎𝐏𝐐𝐑𝐒𝐓𝐔𝐕𝐖𝐗𝐘𝐙",
