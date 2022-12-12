@@ -1,8 +1,14 @@
 package mapscheme
 
-import "sort"
+import (
+	"errors"
+	"fmt"
+	"sort"
+)
 
 var (
+	ErrMapschemeAlreadyRegistered = errors.New("mapscheme already registered")
+
 	registry = make(map[string]func(rune) rune)
 )
 
@@ -28,4 +34,19 @@ func Names() []string {
 
 	sort.Strings(names)
 	return names
+}
+
+func MustRegister(name string, fn func(rune) rune) {
+	if err := Register(name, fn); err != nil {
+		panic(err)
+	}
+}
+
+func Register(name string, fn func(rune) rune) error {
+	if Has(name) {
+		return fmt.Errorf("cannot register mapscheme %q: %w", name, ErrMapschemeAlreadyRegistered)
+	}
+
+	registry[name] = fn
+	return nil
 }
