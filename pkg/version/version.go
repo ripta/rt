@@ -27,18 +27,36 @@ func NewCommand() *cobra.Command {
 	return &c
 }
 
+type VersionInfo struct {
+	*debug.BuildInfo
+	Version string
+}
+
 func (v *versioner) run(cmd *cobra.Command, args []string) error {
 	bi, ok := debug.ReadBuildInfo()
 	if !ok {
 		return errors.New("version not available: binary was not built with module support")
 	}
 
-	if bi.Main.Version == "(devel)" && Version != "" {
-		bi.Main.Version = Version
+	version := bi.Main.Version
+	if version == "(devel)" {
+		if Version != "" {
+			version = Version
+		} else {
+			for _, s := range bi.Settings {
+				if s.Key == "vcs.revision" {
+					version = s.Value
+				}
+			}
+		}
 	}
 
 	if v.JSON {
-		bs, err := json.MarshalIndent(&bi, "", "  ")
+		vi := VersionInfo{
+			BuildInfo: bi,
+			Version:   version,
+		}
+		bs, err := json.MarshalIndent(&vi, "", "  ")
 		if err != nil {
 			return err
 		}
@@ -47,6 +65,6 @@ func (v *versioner) run(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	fmt.Printf("%s version %s\n", bi.Path, bi.Main.Version)
+	fmt.Printf("%s version %s\n", bi.Path, version)
 	return nil
 }
