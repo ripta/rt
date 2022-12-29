@@ -39,6 +39,7 @@ func (v *versioner) run(cmd *cobra.Command, args []string) error {
 	}
 
 	version := bi.Main.Version
+	dirty := false
 	if version == "(devel)" {
 		if Version != "" {
 			version = Version
@@ -47,8 +48,15 @@ func (v *versioner) run(cmd *cobra.Command, args []string) error {
 				if s.Key == "vcs.revision" {
 					version = s.Value
 				}
+				if s.Key == "vcs.modified" && s.Value == "true" {
+					dirty = true
+				}
 			}
 		}
+	}
+
+	if dirty {
+		version = version + "-dirty"
 	}
 
 	if v.JSON {
