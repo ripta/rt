@@ -42,6 +42,31 @@ Last observed: 2022-02-02T21:24:40-08:00
 
 or as JSON by giving `-j` or `--json`.
 
+`toto`
+------
+
+Some dynamic protobuf inspection tools.
+
+```
+go install github.com/ripta/rt/cmd/toto@latest
+```
+
+You can build file descriptor set, and use protoc to inspect it:
+
+```
+toto compile samples
+cat samples/.file_descriptor_set | protoc --decode_raw
+```
+
+Or generate an example protobuf message and dynamically convert it to json:
+
+```
+toto sample | toto recode -p samples/.file_descriptor_set -f json samples.data.v1.Envelope
+```
+
+The `toto compile` step is necessary, because you can't currently parse proto
+files directly in go (or at least, I wasn't able to).
+
 `uni`
 -----
 

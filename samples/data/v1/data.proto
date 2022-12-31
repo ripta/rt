@@ -1,0 +1,63 @@
+syntax = "proto3";
+package samples.data.v1;
+
+import "google/protobuf/any.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/ripta/rt/samples/data/v1";
+
+message Envelope {
+  reserved 1;
+  google.protobuf.Any message = 2;
+  string key_id = 3;
+  string signature = 4;
+  google.protobuf.Timestamp signed_at = 5;
+}
+
+message Bytes {
+  bytes content = 1;
+}
+
+message MultipartBytes {
+  message Part {
+    string blob_ref = 1;
+    int64 offset = 2;
+    int32 size = 3;
+  }
+
+  repeated Part parts = 1;
+}
+
+message UnixMeta {
+  message UnixExtendedAttribute {
+    string name = 1;
+    string value = 2;
+  }
+
+  message UnixExtendedTimestamps {
+    google.protobuf.Timestamp create_time = 1;
+    google.protobuf.Timestamp modify_time = 2;
+    google.protobuf.Timestamp access_time = 3;
+  }
+
+  string permission = 1;
+  string owner_name = 2;
+  int32 owner_id = 3;
+  string group_name = 4;
+  int32 group_id = 5;
+  repeated UnixExtendedAttribute attrs = 6;
+  UnixExtendedTimestamps times = 7;
+}
+
+message File {
+  string name = 1;
+  UnixMeta metadata = 2;
+  MultipartBytes multipart = 3;
+}
+
+message Directory {
+  string name = 1;
+  UnixMeta metadata = 2;
+  repeated Directory directories = 3;
+  repeated File files = 4;
+}

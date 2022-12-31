@@ -11,6 +11,7 @@ require (
 	github.com/spf13/cobra v1.5.0
 	github.com/thediveo/enumflag/v2 v2.0.1
 	golang.org/x/text v0.3.7
+	google.golang.org/protobuf v1.28.1
 	gopkg.in/yaml.v3 v3.0.1
 	k8s.io/apimachinery v0.25.4
 )
@@ -28,5 +29,4 @@ require (
 	golang.org/x/sys v0.0.0-20220811171246-fbc7d0a398ab // indirect
 	google.golang.org/appengine v1.6.6 // indirect
 	google.golang.org/genproto v0.0.0-20220502173005-c8bf987b8c21 // indirect
-	google.golang.org/protobuf v1.28.0 // indirect
 )
