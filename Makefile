@@ -3,3 +3,9 @@ generate-proto:
 
 install-protoc:
 	go install -v google.golang.org/protobuf/cmd/protoc-gen-go@v1.28.1
+
+fast-test:
+	go test -v -tags skipnative ./...
+
+test:
+	go test -v ./...
