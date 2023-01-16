@@ -42,6 +42,15 @@
   return loc;
 }
 
+- (int)authorizationStatus {
+  return [mgr authorizationStatus];
+}
+
+- (void)requestWhenInUseAuthorization {
+  [mgr requestWhenInUseAuthorization];
+  [mgr requestAlwaysAuthorization];
+}
+
 - (void)locationManager:(CLLocationManager *)mgr
      didUpdateLocations:(NSArray<CLLocation *> *)locations {
   CFRunLoopStop(CFRunLoopGetCurrent());
@@ -55,6 +64,13 @@
 
 @end
 
+int authorizationStatus() {
+  RTLocationDelegate *del = [[RTLocationDelegate alloc] init];
+  int status = [del authorizationStatus];
+  [del release];
+  return status;
+}
+
 int currentLocation(Location *loc, Placemark *pla) {
   int enabled = [CLLocationManager locationServicesEnabled];
   if (!enabled) {
@@ -62,6 +78,8 @@ int currentLocation(Location *loc, Placemark *pla) {
   }
 
   RTLocationDelegate *del = [[RTLocationDelegate alloc] init];
+  [del requestWhenInUseAuthorization];
+
   CLLocation *raw = [del currentLocation];
   if (del.error != 0) {
     [del release];
