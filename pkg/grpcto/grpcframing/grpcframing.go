@@ -39,6 +39,10 @@ func Decode(bs []byte, maxBytes int) (Payload, error) {
 	return DecodeReader(bytes.NewReader(bs), maxBytes)
 }
 
+var (
+	ErrShortRead = errors.New("short read")
+)
+
 func DecodeReader(r io.Reader, maxBytes int) (Payload, error) {
 	var header [5]byte
 	if _, err := r.Read(header[:]); err != nil {
@@ -55,11 +59,18 @@ func DecodeReader(r io.Reader, maxBytes int) (Payload, error) {
 	}
 
 	p.message = make([]byte, int(p.length))
-	if _, err := r.Read(p.message); err != nil {
+	n, err := r.Read(p.message)
+	if err != nil {
 		if err == io.EOF {
 			err = io.ErrUnexpectedEOF
 		}
 		return Payload{}, err
+	}
+
+	if int(p.length) > n {
+		return Payload{}, fmt.Errorf("payload's size header %d bytes is larger than the amount read %d bytes: %w", p.length, n, ErrShortRead)
+	} else if int(p.length) < n {
+		return Payload{}, fmt.Errorf("payload's size header %d bytes is too small for read %d bytes: %w", p.length, n, io.ErrShortBuffer)
 	}
 
 	return p, nil
