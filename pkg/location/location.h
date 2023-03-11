@@ -28,4 +28,5 @@ typedef struct _Location {
   BOOL hasPlacemark;
 } Location;
 
+int authorizationStatus();
 int currentLocation(Location *loc, Placemark *pla);

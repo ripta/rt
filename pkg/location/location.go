@@ -11,6 +11,21 @@ import (
 	"time"
 )
 
+type AuthorizationStatusCode int
+
+const (
+	AuthorizationStatusCodeNotDetermined       AuthorizationStatusCode = 0
+	AuthorizationStatusCodeRestricted                                  = 1
+	AuthorizationStatusCodeDenied                                      = 2
+	AuthorizationStatusCodeAuthorizedAlways                            = 3
+	AuthorizationStatusCodeAuthorizedWhenInUse                         = 4
+)
+
+func AuthorizationStatus() AuthorizationStatusCode {
+	code := C.authorizationStatus()
+	return AuthorizationStatusCode(code)
+}
+
 // Location encapsulates location services information.
 type Location struct {
 	// Latitude is the latitude in degrees. Positive values indicate locations

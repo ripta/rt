@@ -36,8 +36,11 @@ func main() {
 }
 
 func (p *placer) run(cmd *cobra.Command, args []string) error {
+	status := location.AuthorizationStatus()
+
 	loc, err := location.CurrentLocation()
 	if err != nil {
+		fmt.Printf("Authorization status: %d\n", status)
 		return err
 	}
 
