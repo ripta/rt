@@ -3,7 +3,9 @@ Ripta's collection of tools
 Tools:
 
 * [enc](#enc) to encode and decode strings
+* [grpcto](#grpcto) to frame and unframe gRPC messages
 * [place](#place) for macOS Location Services
+* [toto](#toto) to inspect some protobuf messages
 * [uni](#uni) for unicode utils
 
 `enc`
@@ -20,6 +22,38 @@ Encode and decode strings using various encodings:
 * `b58` for base58;
 * `b64` for base64; and
 * `hex` for hexadecimal.
+
+`grpcto`
+--------
+
+```
+go install github.com/ripta/rt/cmd/grpcto@latest
+```
+
+Frame and unframe raw bytes in a gRPC envelope. For example, assuming a proto
+message crafted using either `toto` (included in this repo) or `protoc
+--encode` (the official protobuf compiler), you can frame the message using:
+
+```
+echo 'hello:"world"' \
+    | protoc --encode foo.bar.v1.Thing ./thing.proto \
+    | grpcto frame > message.raw
+```
+
+where the resulting `message.raw` can be sent directly to a running gRPC
+service using `curl`:
+
+```
+curl -X POST --data-binary @message.raw -o response.raw -H 'content-type: application/grpc' --raw https://localhost:8443/foo.bar.v1.Thinger/Thing
+```
+
+and the `response.raw` can be unframed and decoded using `protoc`:
+
+```
+cat response.raw \
+    | grpcto unframe \
+    | protoc --decode_raw
+```
 
 `place`
 ------
