@@ -11,7 +11,7 @@ require (
 	github.com/spf13/cobra v1.6.1
 	github.com/thediveo/enumflag/v2 v2.0.2
 	golang.org/x/text v0.7.0
-	google.golang.org/protobuf v1.28.1
+	google.golang.org/protobuf v1.30.0
 	gopkg.in/yaml.v3 v3.0.1
 	k8s.io/apimachinery v0.25.4
 )
