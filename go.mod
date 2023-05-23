@@ -13,7 +13,7 @@ require (
 	golang.org/x/text v0.9.0
 	google.golang.org/protobuf v1.30.0
 	gopkg.in/yaml.v3 v3.0.1
-	k8s.io/apimachinery v0.27.1
+	k8s.io/apimachinery v0.27.2
 )
 
 require (
