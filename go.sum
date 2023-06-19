@@ -39,8 +39,9 @@ github.com/stretchr/objx v0.1.0/go.mod h1:HFkY916IF+rwdDfMAkV7OtwuqBVzrE8GR6GFx+
 github.com/stretchr/testify v1.5.1/go.mod h1:5W2xD1RspED5o8YsWQXVCued0rvSQ+mT+I5cxcmMvtA=
 github.com/stretchr/testify v1.6.1/go.mod h1:6Fq8oRcR53rry900zMqJjRRixrwX3KX962/h/Wwjteg=
 github.com/stretchr/testify v1.8.1 h1:w7B6lhMri9wdJUVmEZPGGhZzrYTPvgJArz7wNPgYKsk=
-github.com/thediveo/enumflag/v2 v2.0.3 h1:9Y2S6xowtVWIh7Fz+JKWFdYwb9cM1iWbSbjtUFD5z60=
-github.com/thediveo/enumflag/v2 v2.0.3/go.mod h1:obz2iwglQIA2Yn00qTpVnQk8hg0WOh7f7U0ZgMsmo9Q=
+github.com/thediveo/enumflag/v2 v2.0.4 h1:CPez2ZDJMkJ0iPiueJ6/vwsFeFy+w5kIJNFwxKPSUGo=
+github.com/thediveo/enumflag/v2 v2.0.4/go.mod h1:K5VGebAdhHGZyVprL7WEnEJ3CA16YzWhDH2ERwddA0I=
+github.com/thediveo/success v1.0.1 h1:NVwUOwKUwaN8szjkJ+vsiM2L3sNBFscldoDJ2g2tAPg=
 github.com/vmihailenco/msgpack/v5 v5.3.5 h1:5gO0H1iULLWGhs2H5tbAHIZTV8/cYafcFOr9znI5mJU=
 github.com/vmihailenco/msgpack/v5 v5.3.5/go.mod h1:7xyJ9e+0+9SaZT0Wt1RGleJXzli6Q/V5KbhBonMG9jc=
 github.com/vmihailenco/tagparser/v2 v2.0.0 h1:y09buUbR+b5aycVFQs/g70pqKVZNBmxwAhO7/IwNM9g=
