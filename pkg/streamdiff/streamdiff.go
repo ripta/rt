@@ -26,7 +26,7 @@ type options struct {
 
 func NewCommand() *cobra.Command {
 	o := options{
-		KeyExpression: "[obj.kind, obj.metadata.name]",
+		KeyExpression: "[obj.kind, obj.metadata.namespace, obj.metadata.name]",
 		// KeyExpression: `obj.kind + "/" + obj.metadata.name`,
 		WhenFirstSeen: EmitKeysOnFirstSeen,
 	}
@@ -89,7 +89,7 @@ func run(o *options) error {
 
 		key, err := asKey(out)
 		if prev, ok := history[key]; ok {
-			changes, err := diff.Diff(prev, obj, diff.AllowTypeMismatch(true))
+			changes, err := diff.Diff(prev, obj)
 			if err != nil {
 				return fmt.Errorf("calculating diff for key %q: %w", key, err)
 			}
