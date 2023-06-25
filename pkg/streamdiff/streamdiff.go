@@ -3,17 +3,19 @@ package streamdiff
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/google/cel-go/common/types/ref"
-	"github.com/r3labs/diff/v3"
-	"github.com/ripta/rt/cmd/streamdiff/program"
-	"github.com/ripta/rt/pkg/streamdiff/ui"
-	"github.com/spf13/cobra"
-	"github.com/thediveo/enumflag/v2"
-	"k8s.io/apimachinery/pkg/util/duration"
 	"os"
 	"reflect"
 	"strings"
 	"time"
+
+	"github.com/google/cel-go/common/types/ref"
+	"github.com/r3labs/diff/v3"
+	"github.com/spf13/cobra"
+	"github.com/thediveo/enumflag/v2"
+	"k8s.io/apimachinery/pkg/util/duration"
+
+	"github.com/ripta/rt/pkg/streamdiff/program"
+	"github.com/ripta/rt/pkg/streamdiff/ui"
 )
 
 type options struct {
