@@ -90,7 +90,7 @@ func run(o *options) error {
 			}
 
 			changes = changes.FilterOut([]string{"^metadata$", "^resourceVersion$"})
-			//changes = changes.FilterOut([]string{"^status$", "^conditions$", ".+", "^lastHeartbeatTime$"})
+			changes = changes.FilterOut([]string{"^status$", "^conditions$", ".+", "^lastHeartbeatTime$"})
 
 			// conditionChanges := changes.Filter([]string{"^status$", "^conditions$", ".+", "^lastHeartbeatTime$"})
 			// for _, conditionChange := range conditionChanges {
