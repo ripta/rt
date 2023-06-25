@@ -5,6 +5,7 @@ Tools:
 * [enc](#enc) to encode and decode strings
 * [grpcto](#grpcto) to frame and unframe gRPC messages
 * [place](#place) for macOS Location Services
+* [streamdiff](#streamdiff) to help you pick out field changes off a stream of JSON
 * [toto](#toto) to inspect some protobuf messages
 * [uni](#uni) for unicode utils
 
@@ -75,6 +76,66 @@ Last observed: 2022-02-02T21:24:40-08:00
 ```
 
 or as JSON by giving `-j` or `--json`.
+
+`streamdiff`
+------------
+
+Helps you pick out field changes off a stream of JSON.
+
+```
+go install github.com/ripta/rt/cmd/streamdiff@latest
+```
+
+It's technically usable  on any stream as long as the format is one JSON per
+line.
+
+It's convenient for viewing Kubernetes resource changes over time.
+
+For example, you can start a watch (`-w`) on pods (`kubectl get pods`) and
+pipe it to streamdiff. Most fields won't be printed, except when they change.
+Consider this output:
+
+```
+❯ kubectl get pods -o json -w | streamdiff
+T+23s Pod:pomerium-cache-6c9f84b747-cr2rx
+  (1/2): spec.nodeName \ -> gke-vqjp-preemptible-065-38c45f41-wtnb
+  (2/2): status.conditions \ -> [map[lastProbeTime:<nil> lastTransitionTime:2023-06-22T06:27:43Z status:True type:PodScheduled]]
+
+T+24s Pod:pomerium-cache-6c9f84b747-cr2rx
+  (1/6): status.conditions.0 \ -> map[lastProbeTime:<nil> lastTransitionTime:2023-06-22T06:27:43Z status:True type:Initialized]
+  (2/6): status.conditions.1 \ -> map[lastProbeTime:<nil> lastTransitionTime:2023-06-22T06:27:43Z message:containers with unready status: [cache] reason:ContainersNotReady status:False type:Ready]
+  (3/6): status.conditions.2 \ -> map[lastProbeTime:<nil> lastTransitionTime:2023-06-22T06:27:43Z message:containers with unready status: [cache] reason:ContainersNotReady status:False type:ContainersReady]
+  (4/6): status.startTime \ -> 2023-06-22T06:27:43Z
+  (5/6): status.containerStatuses \ -> [map[image:us.gcr.io/dc-02/gke-vqjp/pomerium-cache:v1.0.23.1390 imageID: lastState:map[] name:cache ready:false restartCount:0 started:false state:map[waiting:map[reason:ContainerCreating]]]]
+  (6/6): status.hostIP \ -> 10.52.0.34
+
+T+26s Pod:pomerium-cache-6c9f84b747-cr2rx
+  (1/8): status.containerStatuses.0.ready false -> true
+  (2/8): status.containerStatuses.0.started false -> true
+  (3/8): status.containerStatuses.0.state.waiting map[reason:ContainerCreating] -> \
+  (4/8): status.containerStatuses.0.state.running \ -> map[startedAt:2023-06-22T06:27:46Z]
+  (5/8): status.containerStatuses.0.containerID \ -> containerd://293972feb5b498c80a585137299990c77f44ea46d6236432aba08e72108c35dc
+  (6/8): status.phase Pending -> Running
+  (7/8): status.podIP \ -> 10.53.1.92
+  (8/8): status.podIPs \ -> [map[ip:10.53.1.92]]
+```
+
+While there is still some noise, it clearly shows when the pod was assigned to
+a node, when the pod finished initializing, and when it changed phases from
+Pending to Running.
+
+In addition to a running log (as above), you can also run `streamdiff -i`,
+which updates status on the same line instead of printing a new line for
+every resource update. YMMV.
+
+```
+❯ kubectl get nodes -o json -w | streamdiff -i
+\ Node:gke-vqjp-ondemand-370-504f82ce-r0d8	status.conditions.0.{type: FrequentContainerdRestart; status: True -> False} 
+\ Node:gke-vqjp-preemptible-065-38c45f41-kvjd	status.conditions.0.lastHeartbeatTime: 2023-06-22T06:44:18Z -> 2023-06-22T06:49:19Z
+| Node:gke-vqjp-preemptible-065-38c45f41-pklf	status.conditions.0.lastHeartbeatTime: 2023-06-22T06:44:15Z -> 2023-06-22T06:49:16Z
+/ Node:gke-vqjp-preemptible-065-38c45f41-wtnb	status.conditions.0.lastHeartbeatTime: 2023-06-22T06:45:05Z -> 2023-06-22T06:50:11Z
+```
+
 
 `toto`
 ------
