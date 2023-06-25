@@ -1,5 +1,5 @@
 steps:
-  - name: 'golang:1.19-bullseye'
+  - name: 'golang:1.20-bookworm'
     args:
       - bash
       - -c
