@@ -88,13 +88,10 @@ func run(o *options) error {
 		}
 
 		key, err := asKey(out)
-		// fmt.Fprintf(os.Stderr, "%s\n", key)
 		if prev, ok := history[key]; ok {
 			changes, err := diff.Diff(prev, obj, diff.AllowTypeMismatch(true))
 			if err != nil {
 				return fmt.Errorf("calculating diff for key %q: %w", key, err)
-				//fmt.Fprintf(os.Stderr, "Error: %+v\n", fmt.Errorf("calculating diff for key %q: %w", key, err))
-				//continue
 			}
 
 			changes = changes.FilterOut([]string{"^metadata$", "^resourceVersion$"})
