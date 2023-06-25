@@ -107,7 +107,7 @@ func run(o *options) error {
 						w.Set(key, ts.Next(key)+msg[1:])
 					}
 				}
-			} else {
+			} else if len(changes) > 0 {
 				fmt.Fprintf(os.Stdout, "T+%s %s\n", time.Since(start).Truncate(time.Millisecond), key)
 				for i, change := range changes {
 					path := strings.Join(change.Path, ".")
