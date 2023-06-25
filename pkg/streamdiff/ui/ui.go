@@ -2,12 +2,13 @@ package ui
 
 import (
 	"fmt"
-	"github.com/containerd/console"
-	"github.com/gosuri/uilive"
 	"io"
 	"sort"
 	"sync"
 	"time"
+
+	"github.com/containerd/console"
+	"github.com/gosuri/uilive"
 )
 
 type Handle struct {

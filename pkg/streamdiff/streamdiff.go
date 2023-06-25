@@ -27,6 +27,7 @@ func NewCommand() *cobra.Command {
 	o := options{
 		KeyExpression: "[obj.kind, obj.metadata.name]",
 		// KeyExpression: `obj.kind + "/" + obj.metadata.name`,
+		WhenFirstSeen: EmitKeysOnFirstSeen,
 	}
 	c := cobra.Command{
 		Use:           "streamdiff",
@@ -49,7 +50,6 @@ func run(o *options) error {
 	lines := 0
 	uniques := 0
 	r := os.Stdin
-	start := time.Now()
 
 	keyPrg, err := program.New("obj", o.KeyExpression)
 	if err != nil {
@@ -57,15 +57,20 @@ func run(o *options) error {
 	}
 
 	history := map[string]any{}
-	ts := ui.NewThrobberSet([]string{"-", "\\", "|", "/"})
+	viewer := (ui.Viewer)(nil)
 
-	w, err := ui.New(os.Stdout)
-	if err != nil {
-		return fmt.Errorf("initializing persistent UI: %w", err)
+	if o.InPlace {
+		ts := ui.NewThrobberSet([]string{"-", "\\", "|", "/"})
+		ipv, closer, err := ui.NewInPlaceView(os.Stdout, ts, 150*time.Millisecond)
+		if err != nil {
+			return err
+		}
+
+		viewer = ipv
+		defer closer()
+	} else {
+		viewer = ui.NewTerminalView(os.Stdout)
 	}
-
-	defer w.Stop()
-	go w.UpdateEvery(150 * time.Millisecond)
 
 	d := json.NewDecoder(r)
 	for d.More() {
@@ -97,39 +102,13 @@ func run(o *options) error {
 			// 	strconv.Itoa(conditionChange.Path[2])
 			// }
 
-			if o.InPlace {
-				if len(changes) > 0 {
-					change := changes[0]
-					// w.Setf(key, "%s %s\t%+v", ts.Next(key), key, change)
-					w.Setf(key, "%s %s\t%s: %+v -> %+v", ts.Next(key), key, strings.Join(change.Path, "."), change.From, change.To)
-				} else {
-					if msg := w.Get(key); msg != "" {
-						w.Set(key, ts.Next(key)+msg[1:])
-					}
-				}
-			} else if len(changes) > 0 {
-				fmt.Fprintf(os.Stdout, "T+%s %s\n", time.Since(start).Truncate(time.Millisecond), key)
-				for i, change := range changes {
-					path := strings.Join(change.Path, ".")
-					switch change.Type {
-					case diff.CREATE:
-						fmt.Fprintf(os.Stdout, "  (%d/%d): %s \\ -> %v\n", i+1, len(changes), path, change.To)
-					case diff.DELETE:
-						fmt.Fprintf(os.Stdout, "  (%d/%d): %s %v -> \\\n", i+1, len(changes), path, change.From)
-					case diff.UPDATE:
-						fmt.Fprintf(os.Stdout, "  (%d/%d): %s %v -> %v\n", i+1, len(changes), path, change.From, change.To)
-					default:
-						fmt.Fprintf(os.Stdout, "  (%d/%d): %+v\n", i+1, len(changes), change)
-					}
-				}
-				fmt.Fprint(os.Stdout, "\n")
-			}
+			viewer.Update(key, changes)
 
 			// res := map[string]any{}
 			// diff.Patch(changes, &res)
 			// fmt.Fprintf(os.Stdout, "%+v\n", res)
-		} else if o.InPlace {
-			w.Setf(key, "%s %s\t(new)", ts.Next(key), key)
+		} else {
+			viewer.Update(key, nil)
 		}
 		history[key] = obj
 
