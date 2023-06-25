@@ -1,6 +1,6 @@
-Ripta's collection of tools
+rt: Ripta's collection of tools
 
-Tools:
+Said tools:
 
 * [enc](#enc) to encode and decode strings
 * [grpcto](#grpcto) to frame and unframe gRPC messages
@@ -8,6 +8,9 @@ Tools:
 * [streamdiff](#streamdiff) to help you pick out field changes off a stream of JSON
 * [toto](#toto) to inspect some protobuf messages
 * [uni](#uni) for unicode utils
+* [yfmt](#yfmt) to reindent YAML while preserving comments
+
+Pull requests welcome, though you should probably check first before sinking any time.
 
 `enc`
 ----
@@ -165,6 +168,8 @@ files directly in go (or at least, I wasn't able to).
 `uni`
 -----
 
+Unicode-related stuff.
+
 ```
 go install github.com/ripta/rt/cmd/uni@latest
 ```
@@ -226,4 +231,33 @@ U+116E	ᅮ	HANGUL JUNGSEONG U
 U+1101	ᄁ	HANGUL CHOSEONG SSANGKIYEOK
 U+116E	ᅮ	HANGUL JUNGSEONG U
 U+000A	"\n"	<control>
+```
+
+
+`yfmt`
+------
+
+Reindent YAML while preserving comments.
+
+```
+go install github.com/ripta/rt/cmd/yfmt@latest
+```
+
+This tool treats comments as nodes and therefore will _not_ preserve comment
+indentation. For example:
+
+```
+❯ cat in.yaml
+# does this work?
+foo:
+   - 123   # I hope
+           # maybe
+   - 456
+
+❯ yfmt < in.yaml
+# does this work?
+foo:
+  - 123 # I hope
+  # maybe
+  - 456
 ```
