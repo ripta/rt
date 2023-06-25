@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/thediveo/enumflag/v2"
 
+	"github.com/ripta/rt/pkg/streamdiff/decoder"
 	"github.com/ripta/rt/pkg/streamdiff/program"
 	"github.com/ripta/rt/pkg/streamdiff/ui"
 )
@@ -72,7 +73,7 @@ func run(o *options) error {
 		viewer = ui.NewTerminalView(os.Stdout)
 	}
 
-	d := json.NewDecoder(r)
+	d := decoder.NewStream(r, decoder.KubernetesListSplitter)
 	for d.More() {
 		lines++
 
@@ -89,9 +90,11 @@ func run(o *options) error {
 		key, err := asKey(out)
 		// fmt.Fprintf(os.Stderr, "%s\n", key)
 		if prev, ok := history[key]; ok {
-			changes, err := diff.Diff(prev, obj)
+			changes, err := diff.Diff(prev, obj, diff.AllowTypeMismatch(true))
 			if err != nil {
-				return fmt.Errorf("calculating diff: %w", err)
+				return fmt.Errorf("calculating diff for key %q: %w", key, err)
+				//fmt.Fprintf(os.Stderr, "Error: %+v\n", fmt.Errorf("calculating diff for key %q: %w", key, err))
+				//continue
 			}
 
 			changes = changes.FilterOut([]string{"^metadata$", "^resourceVersion$"})
