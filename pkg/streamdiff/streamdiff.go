@@ -79,7 +79,7 @@ func run(o *options) error {
 
 		out, _, err := keyPrg.Run(obj)
 		if err != nil {
-			return fmt.Errorf("evaluating program for input line %d: %w", lines, err)
+			return NewProgramEvaluationError(err, o.KeyExpression, obj)
 		}
 
 		key, err := asKey(out)
