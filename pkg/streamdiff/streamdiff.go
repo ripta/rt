@@ -12,7 +12,6 @@ import (
 	"github.com/r3labs/diff/v3"
 	"github.com/spf13/cobra"
 	"github.com/thediveo/enumflag/v2"
-	"k8s.io/apimachinery/pkg/util/duration"
 
 	"github.com/ripta/rt/pkg/streamdiff/program"
 	"github.com/ripta/rt/pkg/streamdiff/ui"
@@ -109,7 +108,7 @@ func run(o *options) error {
 					}
 				}
 			} else {
-				fmt.Fprintf(os.Stdout, "T+%s %s\n", duration.HumanDuration(time.Since(start)), key)
+				fmt.Fprintf(os.Stdout, "T+%s %s\n", time.Since(start).Truncate(time.Millisecond), key)
 				for i, change := range changes {
 					path := strings.Join(change.Path, ".")
 					switch change.Type {
