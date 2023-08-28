@@ -4,7 +4,7 @@ go 1.20
 
 require (
 	github.com/containerd/console v1.0.3
-	github.com/google/cel-go v0.17.2
+	github.com/google/cel-go v0.17.6
 	github.com/gosuri/uilive v0.0.4
 	github.com/mr-tron/base58 v1.2.0
 	github.com/r3labs/diff/v3 v3.0.1
