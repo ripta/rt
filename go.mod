@@ -4,7 +4,7 @@ go 1.20
 
 require (
 	github.com/containerd/console v1.0.3
-	github.com/google/cel-go v0.17.6
+	github.com/google/cel-go v0.18.0
 	github.com/gosuri/uilive v0.0.4
 	github.com/mr-tron/base58 v1.2.0
 	github.com/r3labs/diff/v3 v3.0.1
@@ -29,6 +29,6 @@ require (
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
 	golang.org/x/exp v0.0.0-20230713183714-613f0c0eb8a1 // indirect
 	golang.org/x/sys v0.10.0 // indirect
-	google.golang.org/genproto/googleapis/api v0.0.0-20230717213848-3f92550aa753 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20230717213848-3f92550aa753 // indirect
+	google.golang.org/genproto/googleapis/api v0.0.0-20230803162519-f966b187b2e5 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20230803162519-f966b187b2e5 // indirect
 )
