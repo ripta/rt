@@ -4,7 +4,7 @@ go 1.20
 
 require (
 	github.com/containerd/console v1.0.3
-	github.com/google/cel-go v0.18.1
+	github.com/google/cel-go v0.18.2
 	github.com/gosuri/uilive v0.0.4
 	github.com/mr-tron/base58 v1.2.0
 	github.com/r3labs/diff/v3 v3.0.1
@@ -17,7 +17,7 @@ require (
 )
 
 require (
-	github.com/antlr/antlr4/runtime/Go/antlr/v4 v4.0.0-20230305170008-8188dc5388df // indirect
+	github.com/antlr4-go/antlr/v4 v4.13.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/google/pprof v0.0.0-20210720184732-4bb14d4b1be1 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
