@@ -9,8 +9,11 @@ updates:
     commit-message:
       prefix: 'go.mod: '
     groups:
+
       # Split out any heavy-weights
       most-deps:
+        patterns:
+          - '*'
         exclude-patterns:
           - 'k8s.io/*'
           - 'sigs.k8s.io/*'
