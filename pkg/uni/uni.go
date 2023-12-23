@@ -9,6 +9,7 @@ func NewCommand() *cobra.Command {
 		SilenceUsage: true,
 	}
 
+	c.AddCommand(newCategoriesCommand())
 	c.AddCommand(newDescribeCommand())
 	c.AddCommand(newListCommand())
 	c.AddCommand(newMapCommand())
