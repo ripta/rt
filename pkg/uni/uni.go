@@ -9,10 +9,12 @@ func NewCommand() *cobra.Command {
 		SilenceUsage: true,
 	}
 
+	c.AddCommand(newCategoriesCommand())
 	c.AddCommand(newDescribeCommand())
 	c.AddCommand(newListCommand())
 	c.AddCommand(newMapCommand())
 	c.AddCommand(newNFCCommand())
 	c.AddCommand(newNFDCommand())
+	c.AddCommand(newSortCommand())
 	return &c
 }

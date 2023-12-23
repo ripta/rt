@@ -178,8 +178,51 @@ List characters:
 
 ```
 ❯ uni list java cecak
-U+A981 	ꦁ	JAVANESE SIGN CECAK
-U+A9B3 	꦳	JAVANESE SIGN CECAK TELU
+U+A981 	ꦁ	[EA A6 81   ]	<M,Mn>	JAVANESE SIGN CECAK
+U+A9B3 	꦳	[EA A6 B3   ]	<M,Mn>	JAVANESE SIGN CECAK TELU
+```
+
+List characters with fewer details:
+
+```
+❯ uni list java cecak -o hexbytes,name
+[EA A6 81   ]	JAVANESE SIGN CECAK
+[EA A6 B3   ]	JAVANESE SIGN CECAK TELU
+```
+
+Show only the aggregate count (`-c`), skipping output (`-o none`):
+
+```
+❯ uni list java cecak -o none -c
+Matched 2 runes
+```
+
+Show only characters in a specific character category, e.g.:
+
+```
+# All "Pd" (punctuation, dash)
+❯ uni list -C Pd
+
+# All "S" (symbols)
+❯ uni list -C S
+
+# All "N" (numbers) that aren't "No" (other)
+❯ uni list -C N,!No
+
+# All "Lu" (letters, uppercase) and "Ll" (letters, lowercase)
+❯ uni list -C Lu,Ll
+```
+
+List all character categories, their names, and counts:
+
+```
+❯ uni cats
+KEY   NAME                    RUNE COUNT
+C     Other                   139751
+Cc    Control                 65
+Cf    Format                  170
+Co    Private Use             137468
+[...]
 ```
 
 Describe characters:
@@ -231,6 +274,30 @@ U+116E	ᅮ	HANGUL JUNGSEONG U
 U+1101	ᄁ	HANGUL CHOSEONG SSANGKIYEOK
 U+116E	ᅮ	HANGUL JUNGSEONG U
 U+000A	"\n"	<control>
+```
+
+Sort input with different collation (`-l`):
+
+```
+❯ cat input.txt
+Œthelwald
+Zeus
+Achilles
+
+❯ cat input.txt | uni sort -l en-US
+Achilles
+Œthelwald
+Zeus
+
+❯ cat input.txt | uni sort -l da
+Achilles
+Zeus
+Œthelwald
+
+❯ cat input.txt | uni sort -l da -r
+Œthelwald
+Zeus
+Achilles
 ```
 
 
