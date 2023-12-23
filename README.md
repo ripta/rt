@@ -276,6 +276,30 @@ U+116E	ᅮ	HANGUL JUNGSEONG U
 U+000A	"\n"	<control>
 ```
 
+Sort input with different collation (`-l`):
+
+```
+❯ cat input.txt
+Œthelwald
+Zeus
+Achilles
+
+❯ cat input.txt | uni sort -l en-US
+Achilles
+Œthelwald
+Zeus
+
+❯ cat input.txt | uni sort -l da
+Achilles
+Zeus
+Œthelwald
+
+❯ cat input.txt | uni sort -l da -r
+Œthelwald
+Zeus
+Achilles
+```
+
 
 `yfmt`
 ------
