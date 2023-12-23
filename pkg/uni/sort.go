@@ -28,7 +28,24 @@ func newSortCommand() *cobra.Command {
 
 	c.Flags().StringVarP(&s.langStr, "language", "l", s.langStr, "Collation language tag")
 	c.Flags().BoolVarP(&s.reverse, "reverse", "r", s.reverse, "Reverse sort order")
+
+	cl := cobra.Command{
+		Use:                   "list",
+		DisableFlagsInUseLine: true,
+		SilenceErrors:         true,
+
+		RunE: doCollationList,
+	}
+	c.AddCommand(&cl)
+
 	return &c
+}
+
+func doCollationList(_ *cobra.Command, _ []string) error {
+	for _, tag := range collate.Supported() {
+		fmt.Printf("%s\n", tag.String())
+	}
+	return nil
 }
 
 type sorter struct {
