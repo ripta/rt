@@ -15,6 +15,8 @@ func NewCommand() *cobra.Command {
 	c.AddCommand(newMapCommand())
 	c.AddCommand(newNFCCommand())
 	c.AddCommand(newNFDCommand())
+	c.AddCommand(newNFKCCommand())
+	c.AddCommand(newNFKDCommand())
 	c.AddCommand(newSortCommand())
 	return &c
 }

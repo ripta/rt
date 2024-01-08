@@ -27,6 +27,22 @@ func newNFDCommand() *cobra.Command {
 	}
 }
 
+func newNFKCCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "nfkc",
+		Short: "Output the compatibility composition form for input",
+		RunE:  generateForm(norm.NFKC),
+	}
+}
+
+func newNFKDCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "nfkd",
+		Short: "Output the compatibility decomposition form for input",
+		RunE:  generateForm(norm.NFKD),
+	}
+}
+
 func generateForm(form norm.Form) func(*cobra.Command, []string) error {
 	return func(_ *cobra.Command, args []string) error {
 		in, err := io.ReadAll(os.Stdin)
