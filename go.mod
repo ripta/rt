@@ -3,7 +3,7 @@ module github.com/ripta/rt
 go 1.20
 
 require (
-	github.com/containerd/console v1.0.3
+	github.com/containerd/console v1.0.4
 	github.com/google/cel-go v0.19.0
 	github.com/gosuri/uilive v0.0.4
 	github.com/liggitt/tabwriter v0.0.0-20181228230101-89fcab3d43de
