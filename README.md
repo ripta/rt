@@ -1,9 +1,17 @@
 rt: Ripta's collection of tools
 
-Said tools:
+Expectations:
 
-* [enc](#enc) to encode and decode strings
+- tools read from STDIN, write to STDOUT, and hopefully print errors to STDERR;
+- tools are meant to be combined with others, e.g., `hs` might be less useful
+  to you, because it prints file hashes in binary output instead of hex (but
+  `enc hex` converts it to hex strings).
+
+Alphabetical list of said tools:
+
+* [enc](#enc) to encode and decode STDIN
 * [grpcto](#grpcto) to frame and unframe gRPC messages
+* [hs](#hs) to hash STDIN
 * [place](#place) for macOS Location Services
 * [streamdiff](#streamdiff) to help you pick out field changes off a stream of JSON
 * [toto](#toto) to inspect some protobuf messages
@@ -11,6 +19,8 @@ Said tools:
 * [yfmt](#yfmt) to reindent YAML while preserving comments
 
 Pull requests welcome, though you should probably check first before sinking any time.
+
+
 
 `enc`
 ----
@@ -26,6 +36,44 @@ Encode and decode strings using various encodings:
 * `b58` for base58;
 * `b64` for base64; and
 * `hex` for hexadecimal.
+
+
+`hs`
+----
+
+```
+go install github.com/ripta/rt/cmd/hs@latest
+```
+
+Hash the input and print the resulting hash in binary bytes. Run with `-h` to
+see the list of supported hash functions that are compiled into the binary,
+which is approximately:
+
+* `sha1` for SHA-1;
+* `sha224` for SHA-224;
+* `sha256` for SHA-256;
+* `sha3` for SHA-3/512;
+* `sha384` for SHA-384; and
+* `sha512` for SHA-512.
+
+To output hexadecimal, pipe the output to `enc hex`. My knowledge graph uses a
+different representation for hashes, so it's useful to me to not have the hex
+representation.
+
+```
+❯ head -n 2 hamlet.txt
+To be, or not to be: that is the question:
+Whether 'tis nobler in the mind to suffer
+
+❯ cat hamlet.txt | hs sha256 | enc hex
+e26671d53d74b6751373ad34768580af77847aa1513203d9a06c292617ab5c4b%
+
+❯ cat hamlet.txt | hs sha256 | enc base64
+4mZx1T10tnUTc600doWAr3eEeqFRMgPZoGwpJherXEs=%
+```
+
+(ICYDK, that `%` at the end is zsh's `PROMPT_EOL_MARK`.)
+
 
 `grpcto`
 --------
