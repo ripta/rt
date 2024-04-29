@@ -49,7 +49,10 @@ func NewCommand() *cobra.Command {
 	c := cobra.Command{
 		Use:     "hashsum",
 		Aliases: []string{"hash", "hs"},
-		Short:   "Run a hash function against the input",
+		Short:   "Run a hash function against the input and output binary hash",
+		Long: `Run a hash function against the input and output binary hash.
+Pipe the output to "enc hex" to get a hex-encoded hash.`,
+		Example: `echo -n "hello" | hs sha256 | enc hex`,
 	}
 
 	for name, hasher := range hashers {
