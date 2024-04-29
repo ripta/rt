@@ -7,7 +7,19 @@ Expectations:
   to you, because it prints file hashes in binary output instead of hex (but
   `enc hex` converts it to hex strings).
 
-Alphabetical list of said tools:
+You can install the all-in-one hyperbinary:
+
+```
+go install github.com/ripta/rt/hypercmd/rt@latest
+```
+
+or install all tools as individual binaries:
+
+```
+go install github.com/ripta/rt/cmd/...@latest
+```
+
+or pick-and-choose each tool to individually install:
 
 * [enc](#enc) to encode and decode STDIN
 * [grpcto](#grpcto) to frame and unframe gRPC messages
