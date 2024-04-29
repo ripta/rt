@@ -72,6 +72,8 @@ e26671d53d74b6751373ad34768580af77847aa1513203d9a06c292617ab5c4b%
 4mZx1T10tnUTc600doWAr3eEeqFRMgPZoGwpJherXEs=%
 ```
 
+(ICYDK, that `%` at the end is zsh's `PROMPT_EOL_MARK`.)
+
 
 `grpcto`
 --------
