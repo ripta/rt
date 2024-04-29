@@ -34,8 +34,9 @@ Encode and decode strings using various encodings:
 * `a85` for ascii85;
 * `b32` for base32;
 * `b58` for base58;
-* `b64` for base64; and
-* `hex` for hexadecimal.
+* `b64` for base64;
+* `hex` for hexadecimal; and
+* `url` for URL escape/unescape.
 
 
 `hs`
