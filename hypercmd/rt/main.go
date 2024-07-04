@@ -4,8 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/spf13/cobra"
-
+	"github.com/ripta/hypercmd/pkg/hypercmd"
 	"github.com/ripta/rt/pkg/enc"
 	"github.com/ripta/rt/pkg/grpcto"
 	"github.com/ripta/rt/pkg/hashsum"
@@ -17,11 +16,8 @@ import (
 )
 
 func main() {
-	root := &cobra.Command{
-		Use:           "rt",
-		SilenceErrors: true,
-		SilenceUsage:  true,
-	}
+	root := hypercmd.New("rt")
+	root.Root().AddCommand(version.NewCommand())
 
 	root.AddCommand(enc.NewCommand())
 	root.AddCommand(hashsum.NewCommand())
@@ -34,9 +30,13 @@ func main() {
 
 	root.AddCommand(streamdiff.NewCommand())
 
-	root.AddCommand(version.NewCommand())
+	cmd, err := root.Resolve(os.Args, true)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %+v\n", err)
+		os.Exit(1)
+	}
 
-	if err := root.Execute(); err != nil {
+	if err := cmd.Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %+v\n", err)
 		os.Exit(1)
 	}
