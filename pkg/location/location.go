@@ -120,7 +120,7 @@ func CurrentLocation() (*Location, error) {
 		VerticalAccuracy:    float64(C.float(cloc.verticalAccuracy)),
 		Timestamp:           time.Unix(int64(C.int(cloc.timestamp)), 0),
 
-		HasPlacemark: cloc.hasPlacemark == C.BOOL(1),
+		HasPlacemark: cloc.hasPlacemark == C.BOOL(true),
 	}
 
 	if loc.HasPlacemark {
