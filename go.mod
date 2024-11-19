@@ -17,7 +17,7 @@ require (
 	github.com/thediveo/enumflag/v2 v2.0.5
 	golang.org/x/crypto v0.29.0
 	golang.org/x/text v0.20.0
-	google.golang.org/protobuf v1.35.1
+	google.golang.org/protobuf v1.35.2
 	gopkg.in/yaml.v3 v3.0.1
 )
 
