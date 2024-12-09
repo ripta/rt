@@ -26,8 +26,7 @@ type options struct {
 
 func NewCommand() *cobra.Command {
 	o := options{
-		KeyExpression: "[obj.kind, obj.metadata.namespace, obj.metadata.name]",
-		// KeyExpression: `obj.kind + "/" + obj.metadata.name`,
+		KeyExpression: "[obj.kind, has(obj.metadata.namespace) ? obj.metadata.namespace : '', obj.metadata.name]",
 		WhenFirstSeen: EmitKeysOnFirstSeen,
 	}
 	c := cobra.Command{
@@ -43,6 +42,7 @@ func NewCommand() *cobra.Command {
 	efs := enumflag.New(&o.WhenFirstSeen, "seen-mode", FirstSeenModeOptions, enumflag.EnumCaseInsensitive)
 	c.Flags().VarP(efs, "seen-mode", "s", "What to do when an object is first seen: keys-only, silence, or full")
 	c.Flags().BoolVarP(&o.InPlace, "in-place", "i", false, "Update and show in place")
+	c.Flags().StringVarP(&o.KeyExpression, "key-expr", "k", o.KeyExpression, "CEL expression to use as key (variables: obj)")
 
 	return &c
 }
