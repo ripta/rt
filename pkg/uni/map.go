@@ -72,7 +72,10 @@ func (m *mapper) runAll(r io.Reader) error {
 }
 
 func (m *mapper) runOne(r io.Reader, name string) error {
-	scheme := mapscheme.Get(name)
+	scheme, err := mapscheme.Find(name)
+	if err != nil {
+		return err
+	}
 
 	in, err := io.ReadAll(r)
 	if err != nil {
@@ -94,8 +97,8 @@ func (m *mapper) validate(_ *cobra.Command, args []string) error {
 	}
 
 	name := args[0]
-	if !mapscheme.Has(name) {
-		return fmt.Errorf("%w, available %+v", ErrMapSchemeUnknown, mapscheme.Names())
+	if _, err := mapscheme.Find(name); err != nil {
+		return err
 	}
 
 	return nil
