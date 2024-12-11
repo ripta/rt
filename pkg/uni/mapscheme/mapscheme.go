@@ -4,13 +4,39 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 )
 
 var (
 	ErrMapschemeAlreadyRegistered = errors.New("mapscheme already registered")
 
+	ErrMapschemeNotFound  = errors.New("mapscheme not found")
+	ErrMapschemeNotUnique = errors.New("mapscheme not unique")
+
 	registry = make(map[string]func(rune) rune)
 )
+
+func Find(name string) (func(rune) rune, error) {
+	if fn, ok := registry[name]; ok {
+		return fn, nil
+	}
+
+	cands := []string{}
+	for k := range registry {
+		if strings.Contains(k, name) {
+			cands = append(cands, k)
+		}
+	}
+
+	if len(cands) == 0 {
+		return nil, fmt.Errorf("mapscheme %q: %w", name, ErrMapschemeNotFound)
+	}
+	if len(cands) == 1 {
+		return registry[cands[0]], nil
+	}
+
+	return nil, fmt.Errorf("mapscheme %q: %w (candidates: %s)", name, ErrMapschemeNotUnique, strings.Join(cands, ", "))
+}
 
 func Get(name string) func(rune) rune {
 	return registry[name]
