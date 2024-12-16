@@ -17,7 +17,6 @@ import (
 
 func main() {
 	root := hypercmd.New("rt")
-	root.Root().AddCommand(version.NewCommand())
 
 	root.AddCommand(enc.NewCommand())
 	root.AddCommand(hashsum.NewCommand())
@@ -29,6 +28,12 @@ func main() {
 	root.AddCommand(yfmt.NewCommand())
 
 	root.AddCommand(streamdiff.NewCommand())
+
+	v := version.NewCommand()
+	root.Root().AddCommand(v)
+	for _, c := range root.Commands() {
+		c.AddCommand(v)
+	}
 
 	cmd, err := root.Resolve(os.Args, true)
 	if err != nil {
