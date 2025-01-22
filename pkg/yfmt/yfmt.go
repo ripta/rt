@@ -1,10 +1,11 @@
 package yfmt
 
 import (
-	"github.com/spf13/cobra"
-	"gopkg.in/yaml.v3"
 	"io"
 	"os"
+
+	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
 )
 
 type formatter struct {
