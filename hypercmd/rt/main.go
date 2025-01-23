@@ -10,6 +10,7 @@ import (
 	"github.com/ripta/rt/pkg/hashsum"
 	"github.com/ripta/rt/pkg/location"
 	"github.com/ripta/rt/pkg/streamdiff"
+	"github.com/ripta/rt/pkg/structfiles"
 	"github.com/ripta/rt/pkg/toto"
 	"github.com/ripta/rt/pkg/uni"
 	"github.com/ripta/rt/pkg/version"
@@ -25,6 +26,7 @@ func main() {
 	root.AddCommand(uni.NewCommand())
 
 	root.AddCommand(grpcto.NewCommand())
+	root.AddCommand(structfiles.NewCommand())
 	root.AddCommand(toto.NewCommand())
 	root.AddCommand(yfmt.NewCommand())
 
