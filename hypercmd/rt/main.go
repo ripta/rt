@@ -8,7 +8,6 @@ import (
 	"github.com/ripta/rt/pkg/enc"
 	"github.com/ripta/rt/pkg/grpcto"
 	"github.com/ripta/rt/pkg/hashsum"
-	"github.com/ripta/rt/pkg/location"
 	"github.com/ripta/rt/pkg/streamdiff"
 	"github.com/ripta/rt/pkg/structfiles"
 	"github.com/ripta/rt/pkg/toto"
@@ -31,8 +30,6 @@ func main() {
 	root.AddCommand(yfmt.NewCommand())
 
 	root.AddCommand(streamdiff.NewCommand())
-
-	root.AddCommand(location.NewCommand())
 
 	v := version.NewCommand()
 	root.Root().AddCommand(v)
