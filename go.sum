@@ -37,6 +37,8 @@ github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZb
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 github.com/r3labs/diff/v3 v3.0.1 h1:CBKqf3XmNRHXKmdU7mZP1w7TV0pDyVCis1AUHtA4Xtg=
 github.com/r3labs/diff/v3 v3.0.1/go.mod h1:f1S9bourRbiM66NskseyUdo0fTmEE0qKrikYJX63dgo=
+github.com/ripta/gxti v0.0.0-20250124084530-ff40d13b3034 h1:XQ/9J650at4JfSVR9BbO4IsI9EtX8QSY1eaav1X8JDo=
+github.com/ripta/gxti v0.0.0-20250124084530-ff40d13b3034/go.mod h1:OSYKNH7Wr+VtZQlENW4netlYqWmiOer3ewKXWTusMMM=
 github.com/ripta/hypercmd v0.3.0 h1:RMeubU+wzJee+2RAGG3R5Q+fX5tp/EVd8FJCq57rxO4=
 github.com/ripta/hypercmd v0.3.0/go.mod h1:7+EulQyZhSiDTafVjBBetmP6dliwcaqvxYv2uvMm2Kc=
 github.com/russross/blackfriday/v2 v2.1.0/go.mod h1:+Rmxgy9KzJVeS9/2gXHxylqXiyQDYRxCVz55jmeOWTM=

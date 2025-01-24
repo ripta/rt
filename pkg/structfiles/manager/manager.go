@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"sort"
 )
 
@@ -227,9 +228,9 @@ func (m *Manager) Copy() *Manager {
 	}
 }
 
-func (m *Manager) Flatten() error {
+func (m *Manager) AllInOne() error {
 	dg := &DocumentGroup{
-		Name:      "flattened",
+		Name:      "all-in-one",
 		Documents: []*DocumentInfo{},
 	}
 
@@ -245,8 +246,10 @@ func (m *Manager) Flatten() error {
 }
 
 var (
-	boolType   = reflect.TypeOf(true)
-	stringType = reflect.TypeOf("")
+	anySliceType = reflect.TypeOf([]any{})
+	boolType     = reflect.TypeOf(true)
+	intType      = reflect.TypeOf(0)
+	stringType   = reflect.TypeOf("")
 )
 
 func (m *Manager) GroupBy(expr string) error {
@@ -310,6 +313,65 @@ func (m *Manager) GroupBy(expr string) error {
 	return errors.Join(errs...)
 }
 
+func (m *Manager) SortByFunc(expr string) error {
+	objA := cel.Variable("a", cel.MapType(cel.StringType, cel.DynType))
+	objB := cel.Variable("b", cel.MapType(cel.StringType, cel.DynType))
+	env, err := cel.NewEnv(objA, objB)
+	if err != nil {
+		return err
+	}
+
+	ast, res := env.Compile(expr)
+	if res != nil && res.Err() != nil {
+		return res.Err()
+	}
+
+	prog, err := env.Program(ast)
+	if err != nil {
+		return err
+	}
+
+	var errs []error
+	for _, g := range m.Groups {
+		slices.SortFunc(g.Documents, func(i, j *DocumentInfo) int {
+			v1 := map[string]any{
+				"doc": *i.Document,
+				"source": map[string]any{
+					"name":  i.SrcName,
+					"index": i.SrcIndex,
+				},
+			}
+
+			v2 := map[string]any{
+				"doc": *j.Document,
+				"source": map[string]any{
+					"name":  j.SrcName,
+					"index": j.SrcIndex,
+				},
+			}
+
+			val, _, err := prog.Eval(map[string]any{
+				"a": v1,
+				"b": v2,
+			})
+			if err != nil {
+				errs = append(errs, err)
+				return 0
+			}
+
+			v, err := val.ConvertToNative(intType)
+			if err != nil {
+				errs = append(errs, err)
+				return 0
+			}
+
+			return v.(int)
+		})
+	}
+
+	return errors.Join(errs...)
+}
+
 func (m *Manager) SortBy(expr string) error {
 	objA := cel.Variable("a", cel.MapType(cel.StringType, cel.DynType))
 	objB := cel.Variable("b", cel.MapType(cel.StringType, cel.DynType))
@@ -332,7 +394,7 @@ func (m *Manager) SortBy(expr string) error {
 	for _, g := range m.Groups {
 		sort.Slice(g.Documents, func(i, j int) bool {
 			v1 := map[string]any{
-				"doc": g.Documents[i].Document,
+				"doc": *g.Documents[i].Document,
 				"source": map[string]any{
 					"name":  g.Documents[i].SrcName,
 					"index": g.Documents[i].SrcIndex,
@@ -340,7 +402,7 @@ func (m *Manager) SortBy(expr string) error {
 			}
 
 			v2 := map[string]any{
-				"doc": g.Documents[j].Document,
+				"doc": *g.Documents[j].Document,
 				"source": map[string]any{
 					"name":  g.Documents[j].SrcName,
 					"index": g.Documents[j].SrcIndex,
@@ -367,6 +429,16 @@ func (m *Manager) SortBy(expr string) error {
 	}
 
 	return errors.Join(errs...)
+}
+
+func (m *Manager) Emit(wcf WriteCloserFactory, format string) error {
+	for _, g := range m.Groups {
+		if err := dumpTo(wcf, format, g); err != nil {
+			return fmt.Errorf("writing group %q: %w", g.Name, err)
+		}
+	}
+
+	return nil
 }
 
 func dumpTo(wcf WriteCloserFactory, format string, dg *DocumentGroup) error {
