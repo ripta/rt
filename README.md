@@ -26,6 +26,7 @@ or pick-and-choose each tool to individually install:
 * [hs](#hs) to hash STDIN
 * [place](#place) for macOS Location Services
 * [streamdiff](#streamdiff) to help you pick out field changes off a stream of JSON
+* [structfiles](#structfiles) to examine and compare a pile of structured files
 * [toto](#toto) to inspect some protobuf messages
 * [uni](#uni) for unicode utils
 * [yfmt](#yfmt) to reindent YAML while preserving comments
@@ -198,6 +199,67 @@ every resource update. YMMV.
 \ Node:gke-vqjp-preemptible-065-38c45f41-kvjd	status.conditions.0.lastHeartbeatTime: 2023-06-22T06:44:18Z -> 2023-06-22T06:49:19Z
 | Node:gke-vqjp-preemptible-065-38c45f41-pklf	status.conditions.0.lastHeartbeatTime: 2023-06-22T06:44:15Z -> 2023-06-22T06:49:16Z
 / Node:gke-vqjp-preemptible-065-38c45f41-wtnb	status.conditions.0.lastHeartbeatTime: 2023-06-22T06:45:05Z -> 2023-06-22T06:50:11Z
+```
+
+
+`structfiles` (`sf`)
+--------------------
+
+Proof of concept tool to examine and compare a pile of structured files (e.g.,
+Kubernetes manifests) strewn across multiple directories or files, with any
+number of documents per file.
+
+Supports YAML and JSON as input.
+
+Resulting diff currently only in unified diff of YAML (see example).
+
+```
+go install github.com/ripta/rt/cmd/sf@latest
+```
+
+For example, compare two directories of Kubernetes manifests containing all-in-one
+manifests (`foo_aio`) and one-resource-per-file (`foo_each`):
+
+```
+❯ structfiles diff ./samples/manifests/foo_aio ./samples/manifests/foo_each
+--- before
++++ after
+@@ -17,7 +17,7 @@
+         - image: nginx:latest
+           name: web
+           ports:
+-            - containerPort: 80
++            - containerPort: 8080
+ ---
+ apiVersion: batch/v1beta1
+ kind: CronJob
+@@ -36,7 +36,7 @@
+               - date; echo "Hello, World!"
+             image: ubuntu:latest
+             name: web
+-  schedule: '*/1 * * * *'
++  schedule: '* * * * *'
+ ---
+ apiVersion: v1
+ kind: Service
+@@ -45,7 +45,7 @@
+   namespace: foo
+ spec:
+   ports:
+-    - port: 80
++    - port: 8080
+-      targetPort: 80
++      targetPort: 8080
+   selector:
+     app: bar
+```
+
+You can diff multiple files against one file by using the `::` delimiter. Arguments
+before the delimiter are taken as one input, while arguments after are taken as
+the second input to the diff:
+
+```
+❯ structfiles diff ./samples/manifests/foo_aio :: ./samples/manifests/foo_each/*.yaml
 ```
 
 
