@@ -59,6 +59,13 @@ func DynamicFileWriter(filePattern string, fileFlag int, fileMode os.FileMode) (
 	}, nil
 }
 
+// MemoryWriter writes to the given buffer. The buffer must not be nil.
+func MemoryWriter(buf *bytes.Buffer) WriteCloserFactory {
+	return func(_ *DocumentGroup) (io.WriteCloser, error) {
+		return &noCloseWriter{buf}, nil
+	}
+}
+
 // SingleFileWriter always returns the same file handle for writing. The handle
 // is opened before the first write.
 func SingleFileWriter(file string) (WriteCloserFactory, error) {
