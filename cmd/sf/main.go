@@ -1,17 +1,15 @@
-//go:build darwin && !skipnative
-
 package main
 
 import (
 	"fmt"
 	"os"
 
-	"github.com/ripta/rt/pkg/location"
+	"github.com/ripta/rt/pkg/structfiles"
 	"github.com/ripta/rt/pkg/version"
 )
 
 func main() {
-	cmd := location.NewCommand()
+	cmd := structfiles.NewCommand()
 	cmd.AddCommand(version.NewCommand())
 
 	if err := cmd.Execute(); err != nil {

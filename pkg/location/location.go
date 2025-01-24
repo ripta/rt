@@ -7,9 +7,61 @@ package location
 // #import "location.h"
 import "C"
 import (
+	"encoding/json"
 	"fmt"
+	"github.com/spf13/cobra"
 	"time"
 )
+
+func NewCommand() *cobra.Command {
+	p := &placer{}
+	cmd := &cobra.Command{
+		Use:           "place",
+		Short:         "Geolocation information from macOS Location Services",
+		RunE:          p.run,
+		SilenceErrors: true,
+		SilenceUsage:  true,
+	}
+
+	cmd.Flags().BoolVarP(&p.JSON, "json", "j", false, "Print out JSON instead of human-readable text")
+
+	return cmd
+}
+
+type placer struct {
+	JSON bool
+}
+
+func (p *placer) run(cmd *cobra.Command, args []string) error {
+	status := AuthorizationStatus()
+
+	loc, err := CurrentLocation()
+	if err != nil {
+		fmt.Printf("Authorization status: %d\n", status)
+		return err
+	}
+
+	if p.JSON {
+		bs, err := json.MarshalIndent(&loc, "", "  ")
+		if err != nil {
+			return err
+		}
+
+		fmt.Println(string(bs))
+		return nil
+	}
+
+	fmt.Printf("Latitude: %f\n", loc.Latitude)
+	fmt.Printf("Longitude: %f\n", loc.Longitude)
+	fmt.Printf("Accuracy: %f\n", loc.HorizontalAccuracy)
+	if loc.VerticalAccuracy >= 0 {
+		fmt.Printf("Altitude: %f (accuracy: %f)\n", loc.Altitude, loc.VerticalAccuracy)
+	}
+
+	fmt.Printf("Last observed: %s\n", loc.Timestamp.Format(time.RFC3339))
+
+	return nil
+}
 
 type AuthorizationStatusCode int
 
