@@ -6,7 +6,7 @@ toolchain go1.22.6
 
 require (
 	github.com/containerd/console v1.0.4
-	github.com/google/cel-go v0.23.0
+	github.com/google/cel-go v0.23.2
 	github.com/gosuri/uilive v0.0.4
 	github.com/liggitt/tabwriter v0.0.0-20181228230101-89fcab3d43de
 	github.com/mr-tron/base58 v1.2.0
