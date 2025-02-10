@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"hash"
 	"io"
+	"lukechampine.com/blake3"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -19,6 +20,13 @@ type Hasher struct {
 }
 
 var hashers = map[string]Hasher{
+	"blake3/256": {
+		HashFunc: func() hash.Hash { return blake3.New(32, nil) },
+	},
+	"blake3/512": {
+		Aliases:  []string{"blake3"},
+		HashFunc: func() hash.Hash { return blake3.New(64, nil) },
+	},
 	"sha1": {
 		Aliases:  []string{"sha-1"},
 		HashFunc: sha1.New,
