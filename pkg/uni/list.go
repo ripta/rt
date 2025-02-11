@@ -138,6 +138,13 @@ func (l *lister) validate(_ *cobra.Command, args []string) error {
 
 func runeMatches(normalized []string, name string) bool {
 	for _, n := range normalized {
+		if post, ok := strings.CutPrefix(n, "!"); ok {
+			if strings.Contains(name, post) {
+				return false
+			}
+			continue
+		}
+
 		if !strings.Contains(name, n) {
 			return false
 		}
