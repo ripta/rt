@@ -334,7 +334,15 @@ Show only characters in a specific character category, e.g.:
 
 # All "Lu" (letters, uppercase) and "Ll" (letters, lowercase)
 ❯ uni list -C Lu,Ll
+
+# All Cyrillic uppercase and lowercase letters (i.e., excluding modifiers and subscripts)
+❯ uni list -C Lu,Ll cyrillic
+
+# All iotified Cyrillic letters not containing 'small'
+❯ uni list cyrillic iotified !small
 ```
+
+Don't forget to escape `!` in your shell if necessary.
 
 List all character categories, their names, and counts:
 
