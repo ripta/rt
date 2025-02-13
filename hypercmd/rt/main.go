@@ -18,6 +18,8 @@ import (
 
 func main() {
 	root := hypercmd.New("rt")
+	root.Root().SilenceErrors = true
+	root.Root().SilenceUsage = true
 
 	root.AddCommand(enc.NewCommand())
 	root.AddCommand(hashsum.NewCommand())

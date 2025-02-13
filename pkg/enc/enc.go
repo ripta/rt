@@ -25,8 +25,10 @@ func (e *encoder) choose(enc, dec func(io.Writer, io.Reader) error) func(*cobra.
 func NewCommand() *cobra.Command {
 	e := &encoder{}
 	c := cobra.Command{
-		Use:   "enc",
-		Short: "Encodings (and their decodings)",
+		Use:           "enc",
+		Short:         "Encodings (and their decodings)",
+		SilenceUsage:  true,
+		SilenceErrors: true,
 	}
 
 	c.PersistentFlags().BoolVarP(&e.Decode, "decode", "d", false, "Decode instead of encode")

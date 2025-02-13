@@ -21,6 +21,9 @@ func NewCommand() *cobra.Command {
 		Use:   "version",
 		Short: "Print version information",
 		RunE:  v.run,
+
+		SilenceUsage:  true,
+		SilenceErrors: true,
 	}
 
 	c.PersistentFlags().BoolVarP(&v.JSON, "json", "j", false, "Print out version and debug information in JSON")
