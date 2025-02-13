@@ -61,6 +61,9 @@ func NewCommand() *cobra.Command {
 		Long: `Run a hash function against the input and output binary hash.
 Pipe the output to "enc hex" to get a hex-encoded hash.`,
 		Example: `echo -n "hello" | hs sha256 | enc hex`,
+
+		SilenceUsage:  true,
+		SilenceErrors: true,
 	}
 
 	for name, hasher := range hashers {

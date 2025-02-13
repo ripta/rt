@@ -23,6 +23,8 @@ func NewCommand() *cobra.Command {
 		RunE: func(_ *cobra.Command, args []string) error {
 			return f.run(args)
 		},
+		SilenceUsage:  true,
+		SilenceErrors: true,
 	}
 
 	c.PersistentFlags().IntVarP(&f.Indent, "indent", "i", f.Indent, "Number of spaces for indent")
