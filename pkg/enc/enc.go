@@ -39,5 +39,6 @@ func NewCommand() *cobra.Command {
 	c.AddCommand(newBase64Command(e))
 	c.AddCommand(newHexCommand(e))
 	c.AddCommand(newURLEscapeCommand(e))
+	c.AddCommand(newVarselCommand(e))
 	return &c
 }
