@@ -51,6 +51,20 @@ func init() {
 		"ᴀʙᴄᴅᴇғɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢ",
 	)
 
+	registry["subscript"] = MustGenerateFromString(
+		// no codepoint assigned for: miniscule b, c, d, f, g, q, r.
+		// codepoints provisional for: miniscule w, y, z (209D…209F), see 181-C35 (2024-11-07).
+		// no codepoint assigned for capitals.
+		"aehijklmnoprstuvx",
+		"ₐₑₕᵢⱼₖₗₘₙₒᵖᵣₛₜᵤᵥₓ",
+	)
+
+	registry["superscript"] = MustGenerateFromString(
+		// no codepoint assigned for: capitals X, Y, or Z.
+		"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVW",
+		"ᵃᵇᶜᵈᵉᶠᵍʰⁱʲᵏˡᵐⁿᵒᵖ𐞥ʳˢᵗᵘᵛʷˣʸᶻᴬᴮꟲᴰᴱꟳᴳᴴᴵᴶᴷᴸᴹᴺᴼᴾꟴᴿ*ᵀᵁⱽᵂ",
+	)
+
 	registry["squared"] = MustGenerateFromString(
 		"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ",
 		"🄰🄱🄲🄳🄴🄵🄶🄷🄸🄹🄺🄻🄼🄽🄾🄿🅀🅁🅂🅃🅄🅅🅆🅇🅈🅉🄰🄱🄲🄳🄴🄵🄶🄷🄸🄹🄺🄻🄼🄽🄾🄿🅀🅁🅂🅃🅄🅅🅆🅇🅈🅉",
