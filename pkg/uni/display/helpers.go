@@ -34,3 +34,12 @@ func RuneToCategories(r rune) string {
 	sort.Strings(cats)
 	return strings.Join(cats, ",")
 }
+
+func RuneToScript(r rune) string {
+	for name, rt := range unicode.Scripts {
+		if unicode.Is(rt, r) {
+			return name
+		}
+	}
+	return ""
+}

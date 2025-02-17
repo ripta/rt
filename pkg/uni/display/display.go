@@ -32,6 +32,9 @@ var displayFuncs = map[string]displayFunc{
 	"categories": func(r rune) string {
 		return fmt.Sprintf("<%s>", RuneToCategories(r))
 	},
+	"script": func(r rune) string {
+		return fmt.Sprintf("<%s>", RuneToScript(r))
+	},
 	"name": func(r rune) string {
 		return runenames.Name(r)
 	},
