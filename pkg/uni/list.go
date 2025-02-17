@@ -24,7 +24,7 @@ func newListCommand() *cobra.Command {
 	}
 
 	c := cobra.Command{
-		Use:                   "list [--all | --categories <CATEGORIES> | <RUNE-NAME>]",
+		Use:                   "list [--categories <CATEGORIES>] [--scripts <SCRIPTS>] [--all | <RUNE-NAME-FILTER...>]",
 		DisableFlagsInUseLine: true,
 		SilenceErrors:         true,
 
@@ -34,19 +34,21 @@ func newListCommand() *cobra.Command {
 	}
 
 	c.Flags().BoolVarP(&l.all, "all", "A", l.all, "List all")
-	c.Flags().StringSliceVarP(&l.cats, "categories", "C", l.cats, "Categories to limit to")
+	c.Flags().StringSliceVarP(&l.cats, "categories", "C", l.cats, "Categories to limit to (see `uni catsegories`); by default all categories")
 	c.Flags().BoolVarP(&l.count, "count", "c", l.count, "Show count of matches")
 	c.Flags().StringSliceVarP(&l.output, "output", "o", l.output, "Output columns")
+	c.Flags().StringSliceVarP(&l.scripts, "scripts", "S", l.scripts, "Scripts to limit to (see `uni scripts`); by default all scripts")
 	c.Flags().StringVarP(&l.table, "table", "t", l.table, "Unicode Table version")
 	return &c
 }
 
 type lister struct {
-	all    bool
-	cats   []string
-	count  bool
-	output []string
-	table  string
+	all     bool
+	cats    []string
+	count   bool
+	output  []string
+	scripts []string
+	table   string
 }
 
 func (l *lister) run(c *cobra.Command, args []string) error {
@@ -78,6 +80,18 @@ func (l *lister) run(c *cobra.Command, args []string) error {
 		t = rangetable.Merge(rts...)
 	}
 
+	scriptFilter := []*unicode.RangeTable{}
+	if len(l.scripts) > 0 {
+		for _, s := range l.scripts {
+			rt, ok := unicode.Scripts[s]
+			if !ok {
+				return fmt.Errorf("unicode script %q does not exist; see `uni scripts`", s)
+			}
+
+			scriptFilter = append(scriptFilter, rt)
+		}
+	}
+
 	cols := map[string]bool{}
 	for _, o := range l.output {
 		cols[o] = true
@@ -89,6 +103,14 @@ func (l *lister) run(c *cobra.Command, args []string) error {
 		if len(excludes) > 0 {
 			for _, exclude := range excludes {
 				if unicode.Is(exclude, r) {
+					return
+				}
+			}
+		}
+
+		if len(scriptFilter) > 0 {
+			for _, script := range scriptFilter {
+				if !unicode.Is(script, r) {
 					return
 				}
 			}
