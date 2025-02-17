@@ -13,7 +13,7 @@ require (
 	github.com/r3labs/diff/v3 v3.0.1
 	github.com/ripta/gxti v0.0.0-20250124084530-ff40d13b3034
 	github.com/ripta/hypercmd v0.3.0
-	github.com/spf13/cobra v1.8.1
+	github.com/spf13/cobra v1.9.1
 	github.com/stretchr/testify v1.10.0
 	github.com/thediveo/enumflag/v2 v2.0.7
 	golang.org/x/crypto v0.33.0
