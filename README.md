@@ -342,6 +342,16 @@ Show only characters in a specific character category, e.g.:
 ❯ uni list cyrillic iotified !small
 ```
 
+Show only characters in a specific script, e.g.:
+
+```
+# All Sundanese characters, by codepoint name:
+❯ uni list sundanese
+
+# All Sundanese characters, by script name, which needs the --all flag:
+❯ uni list -S Sundanese --all
+```
+
 Don't forget to escape `!` in your shell if necessary.
 
 List all character categories, their names, and counts:
@@ -353,6 +363,17 @@ C     Other                   139751
 Cc    Control                 65
 Cf    Format                  170
 Co    Private Use             137468
+[...]
+```
+
+List all scripts and counts:
+
+```
+❯ uni scripts
+NAME                     RUNE COUNT
+Adlam                    88
+Ahom                     65
+Anatolian_Hieroglyphs    583
 [...]
 ```
 
