@@ -3,7 +3,7 @@ package uni
 import (
 	"errors"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"os"
 	"strings"
 	"unicode"
@@ -37,12 +37,12 @@ type describer struct {
 	table string
 }
 
-func (d *describer) run(c *cobra.Command, args []string) error {
+func (d *describer) run(_ *cobra.Command, args []string) error {
 	if len(args) > 0 {
 		return d.display(strings.Join(args, ""))
 	}
 
-	in, err := ioutil.ReadAll(os.Stdin)
+	in, err := io.ReadAll(os.Stdin)
 	if err != nil {
 		return fmt.Errorf("reading from stdin: %w", err)
 	}
@@ -67,6 +67,6 @@ func (d *describer) display(in string) error {
 	return nil
 }
 
-func (d *describer) validate(_ *cobra.Command, args []string) error {
+func (d *describer) validate(_ *cobra.Command, _ []string) error {
 	return nil
 }

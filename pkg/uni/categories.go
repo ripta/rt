@@ -78,7 +78,7 @@ type catter struct {
 	table string
 }
 
-func (_ *catter) run(c *cobra.Command, args []string) error {
+func (_ *catter) run(_ *cobra.Command, _ []string) error {
 	cats := []string{}
 	for cat := range Categories {
 		cats = append(cats, cat)
