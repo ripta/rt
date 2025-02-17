@@ -3,14 +3,14 @@ package uni
 import (
 	"errors"
 	"fmt"
-	"sort"
 	"strings"
 	"unicode"
-	"unicode/utf8"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/text/unicode/rangetable"
 	"golang.org/x/text/unicode/runenames"
+
+	"github.com/ripta/rt/pkg/uni/display"
 )
 
 var (
@@ -52,6 +52,11 @@ type lister struct {
 }
 
 func (l *lister) run(c *cobra.Command, args []string) error {
+	disp, err := display.New(l.output)
+	if err != nil {
+		return err
+	}
+
 	t := rangetable.Assigned(l.table)
 	if t == nil {
 		return fmt.Errorf("unicode table version %s: %w", l.table, ErrNoUnicodeTable)
@@ -92,11 +97,6 @@ func (l *lister) run(c *cobra.Command, args []string) error {
 		}
 	}
 
-	cols := map[string]bool{}
-	for _, o := range l.output {
-		cols[o] = true
-	}
-
 	count := 0
 	norm := strings.Split(strings.ToUpper(strings.Join(args, ":")), ":")
 	rangetable.Visit(t, func(r rune) {
@@ -118,28 +118,8 @@ func (l *lister) run(c *cobra.Command, args []string) error {
 
 		name := runenames.Name(r)
 		if runeMatches(norm, name) {
-			disp := []string{}
-			if cols["id"] {
-				disp = append(disp, fmt.Sprintf("%U", r))
-			}
-			if cols["rune"] {
-				v := string(r)
-				if unicode.IsControl(r) {
-					v = fmt.Sprintf("%q", string(r))
-				}
-				disp = append(disp, v)
-			}
-			if cols["hexbytes"] {
-				disp = append(disp, fmt.Sprintf("[%s]", runeToHexBytes(r)))
-			}
-			if cols["cats"] || cols["categories"] {
-				disp = append(disp, fmt.Sprintf("<%s>", runeToCategories(r)))
-			}
-			if cols["name"] {
-				disp = append(disp, name)
-			}
-			if len(disp) > 0 {
-				fmt.Println(strings.Join(disp, "\t"))
+			if cols := disp.Generate(r); len(cols) > 0 {
+				fmt.Println(strings.Join(cols, "\t"))
 			}
 			count++
 		}
@@ -172,31 +152,4 @@ func runeMatches(normalized []string, name string) bool {
 		}
 	}
 	return true
-}
-
-func runeToHexBytes(r rune) string {
-	bytes := make([]byte, utf8.UTFMax)
-	utf8.EncodeRune(bytes, r)
-
-	hexbytes := []string{}
-	for _, b := range bytes {
-		if b == 0 {
-			hexbytes = append(hexbytes, "  ")
-			continue
-		}
-		hexbytes = append(hexbytes, fmt.Sprintf("%02X", b))
-	}
-
-	return strings.Join(hexbytes, " ")
-}
-
-func runeToCategories(r rune) string {
-	cats := []string{}
-	for cat, rt := range unicode.Categories {
-		if unicode.Is(rt, r) {
-			cats = append(cats, cat)
-		}
-	}
-	sort.Strings(cats)
-	return strings.Join(cats, ",")
 }

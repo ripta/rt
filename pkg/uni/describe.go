@@ -11,6 +11,8 @@ import (
 
 	"github.com/spf13/cobra"
 	"golang.org/x/text/unicode/runenames"
+
+	"github.com/ripta/rt/pkg/uni/display"
 )
 
 func newDescribeCommand() *cobra.Command {
@@ -19,12 +21,12 @@ func newDescribeCommand() *cobra.Command {
 	}
 
 	c := cobra.Command{
-		Use:                   "describe",
+		Use:                   "describe [<CHARACTERS...]",
 		DisableFlagsInUseLine: true,
 		SilenceErrors:         true,
 		Aliases:               []string{"d", "desc"},
 
-		Short: "Describe characters",
+		Short: "Describe characters, either as arguments or from STDIN",
 		Args:  d.validate,
 		RunE:  d.run,
 	}
@@ -57,9 +59,9 @@ func (d *describer) display(in string) error {
 		}
 		name := runenames.Name(r)
 		if unicode.IsControl(r) {
-			fmt.Printf("%U\t%q\t%s\t%s\n", r, string(r), fmt.Sprintf("[%s]", runeToHexBytes(r)), name)
+			fmt.Printf("%U\t%q\t%s\t%s\n", r, string(r), fmt.Sprintf("[%s]", display.RuneToHexBytes(r)), name)
 		} else {
-			fmt.Printf("%U\t%s\t%s\t%s\n", r, string(r), fmt.Sprintf("[%s]", runeToHexBytes(r)), name)
+			fmt.Printf("%U\t%s\t%s\t%s\n", r, string(r), fmt.Sprintf("[%s]", display.RuneToHexBytes(r)), name)
 
 		}
 	}
