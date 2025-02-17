@@ -381,9 +381,9 @@ Describe characters:
 
 ```
 ❯ echo 𝗀𝘨| uni describe
-U+1D5C0	𝗀	MATHEMATICAL SANS-SERIF SMALL G
-U+1D628	𝘨	MATHEMATICAL SANS-SERIF ITALIC SMALL G
-U+000A	"\n"	<control>
+U+1D5C0 𝗀       [F0 9D 97 80]   <L,Ll>  MATHEMATICAL SANS-SERIF SMALL G
+U+1D628 𝘨       [F0 9D 98 A8]   <L,Ll>  MATHEMATICAL SANS-SERIF ITALIC SMALL G
+U+000A  "\n"    [0A         ]   <C,Cc>  <control>
 ```
 
 Map characters for fun:
@@ -410,22 +410,22 @@ Sometimes it may be useful to decompose runes before describing:
 
 ```
 ❯ echo 쭈꾸쭈꾸 | uni d
-U+CB48	쭈	<Hangul Syllable>
-U+AFB8	꾸	<Hangul Syllable>
-U+CB48	쭈	<Hangul Syllable>
-U+AFB8	꾸	<Hangul Syllable>
-U+000A	"\n"	<control>
+U+CB48  쭈      [EC AD 88   ]   <L,Lo>  <Hangul Syllable>
+U+AFB8  꾸      [EA BE B8   ]   <L,Lo>  <Hangul Syllable>
+U+CB48  쭈      [EC AD 88   ]   <L,Lo>  <Hangul Syllable>
+U+AFB8  꾸      [EA BE B8   ]   <L,Lo>  <Hangul Syllable>
+U+000A  "\n"    [0A         ]   <C,Cc>  <control>
 
 ❯ echo 쭈꾸쭈꾸 | uni nfd | uni describe
-U+110D	ᄍ	HANGUL CHOSEONG SSANGCIEUC
-U+116E	ᅮ	HANGUL JUNGSEONG U
-U+1101	ᄁ	HANGUL CHOSEONG SSANGKIYEOK
-U+116E	ᅮ	HANGUL JUNGSEONG U
-U+110D	ᄍ	HANGUL CHOSEONG SSANGCIEUC
-U+116E	ᅮ	HANGUL JUNGSEONG U
-U+1101	ᄁ	HANGUL CHOSEONG SSANGKIYEOK
-U+116E	ᅮ	HANGUL JUNGSEONG U
-U+000A	"\n"	<control>
+U+110D  ᄍ      [E1 84 8D   ]   <L,Lo>  HANGUL CHOSEONG SSANGCIEUC
+U+116E          [E1 85 AE   ]   <L,Lo>  HANGUL JUNGSEONG U
+U+1101  ᄁ      [E1 84 81   ]   <L,Lo>  HANGUL CHOSEONG SSANGKIYEOK
+U+116E          [E1 85 AE   ]   <L,Lo>  HANGUL JUNGSEONG U
+U+110D  ᄍ      [E1 84 8D   ]   <L,Lo>  HANGUL CHOSEONG SSANGCIEUC
+U+116E          [E1 85 AE   ]   <L,Lo>  HANGUL JUNGSEONG U
+U+1101  ᄁ      [E1 84 81   ]   <L,Lo>  HANGUL CHOSEONG SSANGKIYEOK
+U+116E          [E1 85 AE   ]   <L,Lo>  HANGUL JUNGSEONG U
+U+000A  "\n"    [0A         ]   <C,Cc>  <control>
 ```
 
 Sort input with different collation (`-l`):

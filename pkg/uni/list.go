@@ -19,7 +19,7 @@ var (
 
 func newListCommand() *cobra.Command {
 	l := &lister{
-		output: []string{"id", "rune", "hexbytes", "categories", "name"},
+		output: display.DefaultColumns(),
 		table:  unicode.Version,
 	}
 

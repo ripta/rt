@@ -63,6 +63,19 @@ func New(cols []string) (*Config, error) {
 	}, nil
 }
 
+func Default() *Config {
+	cfg, err := New(DefaultColumns())
+	if err != nil {
+		panic(err)
+	}
+
+	return cfg
+}
+
+func DefaultColumns() []string {
+	return []string{"id", "rune", "hexbytes", "cats", "name"}
+}
+
 func (d *Config) Generate(r rune) []string {
 	disp := []string{}
 	for _, col := range d.columns {

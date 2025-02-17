@@ -10,14 +10,14 @@ import (
 	"unicode/utf8"
 
 	"github.com/spf13/cobra"
-	"golang.org/x/text/unicode/runenames"
 
 	"github.com/ripta/rt/pkg/uni/display"
 )
 
 func newDescribeCommand() *cobra.Command {
 	d := &describer{
-		table: unicode.Version,
+		output: display.DefaultColumns(),
+		table:  unicode.Version,
 	}
 
 	c := cobra.Command{
@@ -31,12 +31,14 @@ func newDescribeCommand() *cobra.Command {
 		RunE:  d.run,
 	}
 
+	c.Flags().StringSliceVarP(&d.output, "output", "o", d.output, "Output columns")
 	c.Flags().StringVarP(&d.table, "table", "t", d.table, "Unicode Table version")
 	return &c
 }
 
 type describer struct {
-	table string
+	output []string
+	table  string
 }
 
 func (d *describer) run(_ *cobra.Command, args []string) error {
@@ -53,16 +55,17 @@ func (d *describer) run(_ *cobra.Command, args []string) error {
 }
 
 func (d *describer) display(in string) error {
+	disp, err := display.New(d.output)
+	if err != nil {
+		return err
+	}
+
 	for _, r := range []rune(in) {
 		if r == utf8.RuneError {
 			return errors.New("not valid utf8 encoding")
 		}
-		name := runenames.Name(r)
-		if unicode.IsControl(r) {
-			fmt.Printf("%U\t%q\t%s\t%s\n", r, string(r), fmt.Sprintf("[%s]", display.RuneToHexBytes(r)), name)
-		} else {
-			fmt.Printf("%U\t%s\t%s\t%s\n", r, string(r), fmt.Sprintf("[%s]", display.RuneToHexBytes(r)), name)
-
+		if cols := disp.Generate(r); len(cols) > 0 {
+			fmt.Println(strings.Join(cols, "\t"))
 		}
 	}
 
