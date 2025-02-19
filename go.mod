@@ -5,6 +5,7 @@ go 1.22.0
 toolchain go1.22.6
 
 require (
+	github.com/BurntSushi/toml v1.4.0
 	github.com/containerd/console v1.0.4
 	github.com/google/cel-go v0.23.2
 	github.com/gosuri/uilive v0.0.4

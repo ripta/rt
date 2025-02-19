@@ -4,6 +4,10 @@ import "io"
 
 type Closer func() error
 
+func noCloser() error {
+	return nil
+}
+
 type Encoder interface {
 	Encode(v any) error
 }

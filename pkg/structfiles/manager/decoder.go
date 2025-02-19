@@ -9,3 +9,11 @@ type Decoder interface {
 }
 
 type DecoderFactory func(io.Reader) Decoder
+
+type DecoderFunc func(any) error
+
+func (f DecoderFunc) Decode(v any) error {
+	return f(v)
+}
+
+var _ Decoder = DecoderFunc(nil)
