@@ -16,7 +16,9 @@ func TOMLDecoder(r io.Reader) Decoder {
 		return err
 	}
 
-	return DecoderFunc(d)
+	return &OnceDecoder{
+		Decoder: DecoderFunc(d),
+	}
 }
 
 func TOMLEncoder(w io.Writer) (Encoder, Closer) {
