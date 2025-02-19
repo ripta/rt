@@ -65,7 +65,7 @@ func (r *runner) eval(files []string) error {
 	//}
 
 	if err := m.GroupBy(`doc.apiVersion + "." + doc.kind`); err != nil {
-		return err
+		return fmt.Errorf("grouping documents: %w", err)
 	}
 
 	bs, err := json.MarshalIndent(m, "", "  ")
@@ -88,7 +88,7 @@ func eval(files []string) (*bytes.Buffer, error) {
 	}
 
 	if err := m.SortBy(`a.doc.apiVersion + "." + a.doc.kind < b.doc.apiVersion + "." + b.doc.kind`); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("sorting documents: %w", err)
 	}
 
 	buf := &bytes.Buffer{}
