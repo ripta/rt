@@ -1,0 +1,28 @@
+name = "two"
+title = "Example Two"
+
+[owner]
+name = "Jane Doe"
+dob = 1990-05-04T02:34:56-08:00
+
+[database]
+enabled = true
+ports = [ 8000, 8001, 8002 ]
+
+[servers]
+
+    [servers.gamma]
+    ip = "10.0.0.3"
+    role = "frontend"
+
+    [servers.delta]
+    ip = "10.0.0.4"
+    role = "backend"
+
+[[autoscaling_rules]]
+type = "cpu"
+max_threshold_percent = 70.0
+
+[[autoscaling_rules]]
+type = "memory"
+max_threshold_percent = 80.0
