@@ -228,6 +228,7 @@ func (m *Manager) Copy() *Manager {
 	}
 }
 
+// AllInOne merges documents from all groups into a single group.
 func (m *Manager) AllInOne() error {
 	dg := &DocumentGroup{
 		Name:      "all-in-one",
@@ -252,9 +253,14 @@ var (
 	stringType   = reflect.TypeOf("")
 )
 
+// GroupBy regroups documents based on the result of evaluating the expression.
+// The document is available as `doc` in the expression.
 func (m *Manager) GroupBy(expr string) error {
-	doc := cel.Variable("doc", cel.DynType)
-	env, err := cel.NewEnv(doc)
+	opts := []cel.EnvOption{}
+	opts = append(opts, cel.Variable("doc", cel.DynType))
+	opts = append(opts, cel.Variable("index", cel.IntType))
+
+	env, err := cel.NewEnv(opts...)
 	if err != nil {
 		return err
 	}
@@ -271,15 +277,19 @@ func (m *Manager) GroupBy(expr string) error {
 
 	groups := map[string]*DocumentGroup{}
 	var errs []error
+	var index int
 	for _, g := range m.Groups {
 		for i, di := range g.Documents {
 			val, _, err := prog.Eval(map[string]any{
-				"doc": *di.Document,
+				"doc":   *di.Document,
+				"index": index,
 			})
 			if err != nil {
 				errs = append(errs, fmt.Errorf("evaluating expression %q for document %d in group %s: %w", expr, i, g.Name, err))
 				continue
 			}
+
+			index++
 
 			key, err := val.ConvertToNative(stringType)
 			if err != nil {
@@ -313,6 +323,9 @@ func (m *Manager) GroupBy(expr string) error {
 	return errors.Join(errs...)
 }
 
+// SortByFunc sorts documents in each group based on the result of evaluating
+// the expression. The two documents being compared are available as `a.doc`
+// and `b.doc`.
 func (m *Manager) SortByFunc(expr string) error {
 	objA := cel.Variable("a", cel.MapType(cel.StringType, cel.DynType))
 	objB := cel.Variable("b", cel.MapType(cel.StringType, cel.DynType))
