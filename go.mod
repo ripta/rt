@@ -1,8 +1,7 @@
 module github.com/ripta/rt
 
 go 1.22.0
-
-toolchain go1.22.6
+toolchain go1.23.6
 
 require (
 	github.com/containerd/console v1.0.4
@@ -16,7 +15,7 @@ require (
 	github.com/spf13/cobra v1.9.1
 	github.com/stretchr/testify v1.10.0
 	github.com/thediveo/enumflag/v2 v2.0.7
-	golang.org/x/crypto v0.33.0
+	golang.org/x/crypto v0.35.0
 	golang.org/x/text v0.22.0
 	google.golang.org/protobuf v1.36.5
 	gopkg.in/yaml.v3 v3.0.1
