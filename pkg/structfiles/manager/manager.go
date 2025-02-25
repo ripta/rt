@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/google/cel-go/cel"
+	"github.com/google/cel-go/common/types"
 	"io"
 	"io/fs"
 	"os"
@@ -291,7 +292,7 @@ func (m *Manager) GroupBy(expr string) error {
 
 			index++
 
-			key, err := val.ConvertToNative(stringType)
+			key, err := val.ConvertToType(types.StringType).ConvertToNative(stringType)
 			if err != nil {
 				errs = append(errs, err)
 				continue
