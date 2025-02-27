@@ -130,8 +130,8 @@ func (r *runner) eval(files []string) (*bytes.Buffer, error) {
 
 func NewCommand() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:           "structfiles",
-		Aliases:       []string{"sf"},
+		Use:           "sf",
+		Aliases:       []string{"structfiles"},
 		Short:         "Normalize and compare files with structured data",
 		SilenceErrors: true,
 		SilenceUsage:  true,
