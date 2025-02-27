@@ -1,5 +1,5 @@
 name = "two"
-title = "Example Two"
+title = "TOML Example Two"
 
 [owner]
 name = "Jane Doe"

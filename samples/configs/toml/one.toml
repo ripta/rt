@@ -1,6 +1,6 @@
 # This is a document
 name = "one"
-title = "Example One"
+title = "TOML Example One"
 
 [owner]
 name = "John Doe"
