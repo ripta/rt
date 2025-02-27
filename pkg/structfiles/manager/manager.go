@@ -10,7 +10,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"slices"
 	"sort"
 )
 
@@ -284,6 +283,10 @@ func (m *Manager) GroupBy(expr string) error {
 			val, _, err := prog.Eval(map[string]any{
 				"doc":   *di.Document,
 				"index": index,
+				"source": map[string]any{
+					"name":  di.SrcName,
+					"index": di.SrcIndex,
+				},
 			})
 			if err != nil {
 				errs = append(errs, fmt.Errorf("evaluating expression %q for document %d in group %s: %w", expr, i, g.Name, err))
@@ -325,67 +328,18 @@ func (m *Manager) GroupBy(expr string) error {
 }
 
 // SortByFunc sorts documents in each group based on the result of evaluating
-// the expression. The two documents being compared are available as `a.doc`
-// and `b.doc`.
-func (m *Manager) SortByFunc(expr string) error {
-	objA := cel.Variable("a", cel.MapType(cel.StringType, cel.DynType))
-	objB := cel.Variable("b", cel.MapType(cel.StringType, cel.DynType))
-	env, err := cel.NewEnv(objA, objB)
-	if err != nil {
-		return err
+// the expression. The value of the document is available as `doc`. See also
+// SortBy.
+func (m *Manager) SortByFunc(expr string, reverse bool) error {
+	if reverse {
+		return m.SortBy(fmt.Sprintf(`b.%s < a.%s`, expr, expr))
 	}
-
-	ast, res := env.Compile(expr)
-	if res != nil && res.Err() != nil {
-		return res.Err()
-	}
-
-	prog, err := env.Program(ast)
-	if err != nil {
-		return err
-	}
-
-	var errs []error
-	for _, g := range m.Groups {
-		slices.SortFunc(g.Documents, func(i, j *DocumentInfo) int {
-			v1 := map[string]any{
-				"doc": *i.Document,
-				"source": map[string]any{
-					"name":  i.SrcName,
-					"index": i.SrcIndex,
-				},
-			}
-
-			v2 := map[string]any{
-				"doc": *j.Document,
-				"source": map[string]any{
-					"name":  j.SrcName,
-					"index": j.SrcIndex,
-				},
-			}
-
-			val, _, err := prog.Eval(map[string]any{
-				"a": v1,
-				"b": v2,
-			})
-			if err != nil {
-				errs = append(errs, err)
-				return 0
-			}
-
-			v, err := val.ConvertToNative(intType)
-			if err != nil {
-				errs = append(errs, err)
-				return 0
-			}
-
-			return v.(int)
-		})
-	}
-
-	return errors.Join(errs...)
+	return m.SortBy(fmt.Sprintf(`a.%s < b.%s`, expr, expr))
 }
 
+// SortBy sorts documents in each group based on the result of evaluating
+// the expression. The two documents being compared are available as `a.doc`
+// and `b.doc`. See also SortByFunc.
 func (m *Manager) SortBy(expr string) error {
 	objA := cel.Variable("a", cel.MapType(cel.StringType, cel.DynType))
 	objB := cel.Variable("b", cel.MapType(cel.StringType, cel.DynType))
@@ -459,6 +413,10 @@ func dumpTo(wcf WriteCloserFactory, format string, dg *DocumentGroup) error {
 	out, err := wcf(dg)
 	if err != nil {
 		return err
+	}
+
+	if format == "" {
+		return fmt.Errorf("%w: no format specified", ErrUnknownFormat)
 	}
 
 	df := GetEncoderFactory(format)
