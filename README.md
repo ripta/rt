@@ -218,40 +218,41 @@ go install github.com/ripta/rt/cmd/sf@latest
 ```
 
 For example, compare two directories of Kubernetes manifests containing all-in-one
-manifests (`foo_aio`) and one-resource-per-file (`foo_each`):
+manifests (`foo_aio`) and one-resource-per-file (`foo_each`), use `-k`:
 
 ```
-❯ structfiles diff ./samples/manifests/foo_aio ./samples/manifests/foo_each
---- before
-+++ after
-@@ -17,7 +17,7 @@
-         - image: nginx:latest
-           name: web
-           ports:
--            - containerPort: 80
-+            - containerPort: 8080
- ---
- apiVersion: batch/v1beta1
- kind: CronJob
-@@ -36,7 +36,7 @@
-               - date; echo "Hello, World!"
-             image: ubuntu:latest
-             name: web
--  schedule: '*/1 * * * *'
-+  schedule: '* * * * *'
- ---
- apiVersion: v1
- kind: Service
-@@ -45,7 +45,7 @@
-   namespace: foo
- spec:
-   ports:
--    - port: 80
-+    - port: 8080
--      targetPort: 80
-+      targetPort: 8080
-   selector:
-     app: bar
+❯ sf diff -k ./samples/manifests/foo_aio ./samples/manifests/foo_each
+--- ./samples/manifests/foo_aio
++++ ./samples/manifests/foo_each
+@@ -25,7 +25,7 @@
+             "name": "web",
+             "ports": [
+               {
+-                "containerPort": 80
++                "containerPort": 8080
+               }
+             ]
+           }
+@@ -60,7 +60,7 @@
+         }
+       }
+     },
+-    "schedule": "*/1 * * * *"
++    "schedule": "* * * * *"
+   }
+ }
+ {
+@@ -73,8 +73,8 @@
+   "spec": {
+     "ports": [
+       {
+-        "port": 80,
++        "port": 8080,
+-        "targetPort": 80
++        "targetPort": 8080
+       }
+     ],
+     "selector": {
 ```
 
 You can diff multiple files against one file by using the `::` delimiter. Arguments
@@ -259,7 +260,32 @@ before the delimiter are taken as one input, while arguments after are taken as
 the second input to the diff:
 
 ```
-❯ structfiles diff ./samples/manifests/foo_aio :: ./samples/manifests/foo_each/*.yaml
+❯ sf diff -k ./samples/manifests/foo_aio :: ./samples/manifests/foo_each/*.yaml
+```
+
+You can compare piles of structured files of differing formats and control the
+output format being diffed with `-f`
+
+```
+❯ sf diff -f json ./samples/configs/yaml_each ./samples/configs/toml
+--- ./samples/configs/yaml_each
++++ ./samples/configs/toml
+@@ -32,7 +32,7 @@
+       "role": "backend"
+     }
+   },
+-  "title": "YAML Example One"
++  "title": "TOML Example One"
+ }
+ {
+   "autoscaling_rules": [
+@@ -68,5 +68,5 @@
+       "role": "frontend"
+     }
+   },
+-  "title": "YAML Example Two"
++  "title": "TOML Example Two"
+ }
 ```
 
 
