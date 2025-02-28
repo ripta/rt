@@ -2,8 +2,9 @@ package manager
 
 import (
 	"fmt"
-	"gopkg.in/yaml.v3"
 	"io"
+
+	"gopkg.in/yaml.v3"
 )
 
 func init() {

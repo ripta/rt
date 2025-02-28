@@ -7,8 +7,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/ripta/rt/pkg/uni/mapscheme"
 	"github.com/spf13/cobra"
+
+	"github.com/ripta/rt/pkg/uni/mapscheme"
 )
 
 var (

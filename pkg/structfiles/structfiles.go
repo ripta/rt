@@ -7,8 +7,9 @@ import (
 	"slices"
 
 	"github.com/ripta/gxti/diff"
-	"github.com/ripta/rt/pkg/structfiles/manager"
 	"github.com/spf13/cobra"
+
+	"github.com/ripta/rt/pkg/structfiles/manager"
 )
 
 var (

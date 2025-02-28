@@ -9,9 +9,9 @@ import (
 
 func newHexCommand(e *encoder) *cobra.Command {
 	c := cobra.Command{
-		Use:     "hex",
-		Short:   "Hexadecimal",
-		RunE:    e.choose(e.hexEncode, e.hexDecode),
+		Use:   "hex",
+		Short: "Hexadecimal",
+		RunE:  e.choose(e.hexEncode, e.hexDecode),
 	}
 
 	return &c
@@ -34,4 +34,3 @@ func (e *encoder) hexEncode(dst io.Writer, src io.Reader) error {
 
 	return nil
 }
-

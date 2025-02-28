@@ -37,4 +37,3 @@ func (e *encoder) a85Encode(dst io.Writer, src io.Reader) error {
 
 	return nil
 }
-

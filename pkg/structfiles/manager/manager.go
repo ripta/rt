@@ -3,14 +3,15 @@ package manager
 import (
 	"errors"
 	"fmt"
-	"github.com/google/cel-go/cel"
-	"github.com/google/cel-go/common/types"
 	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
 	"sort"
+
+	"github.com/google/cel-go/cel"
+	"github.com/google/cel-go/common/types"
 )
 
 var ErrUnknownFormat = errors.New("unknown format")

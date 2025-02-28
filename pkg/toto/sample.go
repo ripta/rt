@@ -1,13 +1,14 @@
 package toto
 
 import (
+	"os"
+
 	"github.com/spf13/cobra"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
-	"os"
 
-	"github.com/ripta/rt/samples/data/v1"
+	v1 "github.com/ripta/rt/samples/data/v1"
 )
 
 func newSampleCommand(t *options) *cobra.Command {

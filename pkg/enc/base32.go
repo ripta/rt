@@ -1,10 +1,10 @@
 package enc
 
 import (
-"encoding/base32"
-"io"
+	"encoding/base32"
+	"io"
 
-"github.com/spf13/cobra"
+	"github.com/spf13/cobra"
 )
 
 func newBase32Command(e *encoder) *cobra.Command {
@@ -37,4 +37,3 @@ func (e *encoder) b32Encode(dst io.Writer, src io.Reader) error {
 
 	return nil
 }
-

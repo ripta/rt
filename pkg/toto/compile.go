@@ -2,11 +2,12 @@ package toto
 
 import (
 	"fmt"
-	"github.com/spf13/cobra"
 	"io"
 	"log"
 	"os"
 	"path/filepath"
+
+	"github.com/spf13/cobra"
 )
 
 func newCompileCommand(t *options) *cobra.Command {

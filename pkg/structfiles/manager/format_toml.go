@@ -1,8 +1,9 @@
 package manager
 
 import (
-	"github.com/BurntSushi/toml"
 	"io"
+
+	"github.com/BurntSushi/toml"
 )
 
 func init() {
