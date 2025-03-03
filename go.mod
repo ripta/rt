@@ -1,12 +1,11 @@
 module github.com/ripta/rt
 
 go 1.22.0
-
-toolchain go1.22.6
+toolchain go1.23.6
 
 require (
 	github.com/containerd/console v1.0.4
-	github.com/google/cel-go v0.23.2
+	github.com/google/cel-go v0.24.1
 	github.com/gosuri/uilive v0.0.4
 	github.com/liggitt/tabwriter v0.0.0-20181228230101-89fcab3d43de
 	github.com/mr-tron/base58 v1.2.0
@@ -16,11 +15,11 @@ require (
 	github.com/spf13/cobra v1.9.1
 	github.com/stretchr/testify v1.10.0
 	github.com/thediveo/enumflag/v2 v2.0.7
-	golang.org/x/crypto v0.33.0
+	golang.org/x/crypto v0.35.0
 	golang.org/x/text v0.22.0
 	google.golang.org/protobuf v1.36.5
 	gopkg.in/yaml.v3 v3.0.1
-	lukechampine.com/blake3 v1.3.0
+	lukechampine.com/blake3 v1.4.0
 )
 
 require (
