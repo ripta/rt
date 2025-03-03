@@ -1,7 +1,9 @@
 package manager
 
 import (
+	"fmt"
 	"io"
+	"reflect"
 	"sync/atomic"
 )
 
@@ -40,3 +42,21 @@ func (d *OnceDecoder) Decode(v any) error {
 }
 
 var _ Decoder = (*OnceDecoder)(nil)
+
+// ToDecoder converts a function that reads from an io.Reader into a Decoder.
+func ToDecoder(f func(io.Reader) (any, error), r io.Reader) Decoder {
+	return DecoderFunc(func(v any) error {
+		rv := reflect.ValueOf(v)
+		if rv.Kind() != reflect.Ptr || rv.IsNil() {
+			return fmt.Errorf("expected a pointer to a struct, got %T", v)
+		}
+
+		out, err := f(r)
+		if err != nil {
+			return fmt.Errorf("converting: %w", err)
+		}
+
+		rv.Elem().Set(reflect.ValueOf(out))
+		return nil
+	})
+}
