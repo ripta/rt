@@ -11,7 +11,7 @@ import (
 )
 
 func init() {
-	RegisterFormat("hcl2", []string{".hcl"}, nil, HCL2Decoder)
+	RegisterFormat("hcl2", []string{".hcl"}, HCL2Encoder, HCL2Decoder)
 }
 
 func HCL2Decoder(r io.Reader) Decoder {

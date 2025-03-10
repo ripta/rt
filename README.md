@@ -209,7 +209,11 @@ Proof of concept tool to examine and compare a pile of structured files (e.g.,
 Kubernetes manifests) strewn across multiple directories or files, with any
 number of documents per file.
 
-Supports YAML and JSON as input.
+Supports YAML, JSON, TOML, and HCLv2 as input.
+
+Supports YAML, JSON, TOML, and HCLv2 as output. HCLv2 is experimental, due to
+the way that HCLv2 is schema-driven and the lack of a way to represent the
+schema in structfiles.
 
 Resulting diff currently only in unified diff of YAML (see example).
 
