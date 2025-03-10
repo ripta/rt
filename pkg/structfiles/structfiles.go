@@ -96,11 +96,18 @@ func (r *runner) Defaulting(_ *cobra.Command, _ []string) error {
 
 func (r *runner) eval(files []string) (*bytes.Buffer, error) {
 	m := manager.New()
+	if err := m.ProcessAll(files); err != nil {
+		return nil, err
+	}
 
-	for _, f := range files {
-		if err := m.ProcessDir(f); err != nil {
-			return nil, err
-		}
+	//for _, f := range files {
+	//	if err := m.ProcessDir(f); err != nil {
+	//		return nil, err
+	//	}
+	//}
+
+	if m.Len() == 0 {
+		return nil, errors.New("no documents found")
 	}
 
 	if group := r.GroupBy; group != "" {

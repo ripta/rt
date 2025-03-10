@@ -436,3 +436,11 @@ func dumpTo(wcf WriteCloserFactory, format string, dg *DocumentGroup) error {
 
 	return nil
 }
+
+func (m *Manager) Len() int {
+	docs := 0
+	for _, g := range m.Groups {
+		docs += len(g.Documents)
+	}
+	return docs
+}

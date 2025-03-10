@@ -2,10 +2,12 @@ package manager
 
 import (
 	"fmt"
+	"io"
+
 	"github.com/hashicorp/hcl/v2"
 	"github.com/hashicorp/hcl/v2/hclsyntax"
+
 	"github.com/ripta/rt/pkg/structfiles/hcl2any"
-	"io"
 )
 
 func init() {
@@ -39,4 +41,19 @@ func hcl2converter(r io.Reader) (any, error) {
 	}
 
 	return out, nil
+}
+
+func HCL2Encoder(w io.Writer) (Encoder, Closer) {
+	return EncoderFunc(func(v any) error {
+		hf, err := hcl2any.Encode(v)
+		if err != nil {
+			return fmt.Errorf("encoding HCL2: %w", err)
+		}
+
+		if _, err := w.Write(hf.Bytes()); err != nil {
+			return fmt.Errorf("writing HCL2: %w", err)
+		}
+
+		return nil
+	}), noCloser
 }

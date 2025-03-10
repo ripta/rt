@@ -13,3 +13,9 @@ type Encoder interface {
 }
 
 type EncoderFactory func(io.Writer) (Encoder, Closer)
+
+type EncoderFunc func(v any) error
+
+func (f EncoderFunc) Encode(v any) error {
+	return f(v)
+}
