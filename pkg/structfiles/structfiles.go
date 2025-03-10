@@ -72,7 +72,7 @@ func (r *runner) RunEval(files []string) error {
 		return fmt.Errorf("evaluating files: %w", err)
 	}
 
-	fmt.Println(buf.String())
+	fmt.Print(buf.String())
 	return nil
 }
 
@@ -202,7 +202,7 @@ func newEvalCommand() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVarP(&sf.Format, "format", "f", sf.Format, "Output format, one of: json, yaml")
+	cmd.Flags().StringVarP(&sf.Format, "format", "f", sf.Format, "Output format, one of: json, yaml, toml, hclv2, gob")
 
 	cmd.Flags().BoolVarP(&sf.Kubernetes, "kubernetes", "k", sf.Kubernetes, "Process files as Kubernetes resources (see help)")
 
