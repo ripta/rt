@@ -209,11 +209,12 @@ Proof of concept tool to examine and compare a pile of structured files (e.g.,
 Kubernetes manifests) strewn across multiple directories or files, with any
 number of documents per file.
 
-Supports YAML, JSON, TOML, HCLv2, and GOB as input.
+Supports YAML, JSON, TOML, HCLv2, GOB, and CSV as input and output.
 
-Supports YAML, JSON, TOML, HCLv2, and GOB as output. HCLv2 is experimental, due
-to the way that HCLv2 is schema-driven and the lack of a way to represent the
-schema in structfiles.
+- HCLv2 output is experimental, due to the way that HCLv2 is schema-driven and
+  the lack of a way to represent the schema in structfiles.
+- CSV does not support nested maps. CSV treats each row as a separate document.
+  The first row of a CSV file is assumed to be the header.
 
 The formats YAML, JSON, and GOB support multiple documents in one stream.
 
