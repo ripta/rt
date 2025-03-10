@@ -4,8 +4,11 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"os"
 	"slices"
+	"strings"
 
+	"github.com/liggitt/tabwriter"
 	"github.com/ripta/gxti/diff"
 	"github.com/spf13/cobra"
 
@@ -147,6 +150,7 @@ func NewCommand() *cobra.Command {
 
 	cmd.AddCommand(newDiffCommand())
 	cmd.AddCommand(newEvalCommand())
+	cmd.AddCommand(newFormatsCommand())
 	return cmd
 }
 
@@ -211,4 +215,33 @@ func newEvalCommand() *cobra.Command {
 	cmd.Flags().StringVarP(&sf.SortByFunc, "sort-by-func", "S", sf.SortByFunc, "Sort documents by the result of evaluating the expression; variables: doc, index, source.name, source.index")
 
 	return cmd
+}
+
+func newFormatsCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:     "formats",
+		Aliases: []string{"format", "fmt"},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			tw := tabwriter.NewWriter(os.Stdout, 6, 4, 3, ' ', tabwriter.RememberWidths)
+
+			fmt.Fprintln(tw, "FORMAT\tEXTENSIONS\tINPUT\tOUTPUT")
+			for _, f := range manager.GetFormats() {
+				exts := strings.Join(manager.GetExtensions(f), " ")
+
+				hasDecoder := "no"
+				if manager.GetDecoderFactory(f) != nil {
+					hasDecoder = "yes"
+				}
+
+				hasEncoder := "no"
+				if manager.GetEncoderFactory(f) != nil {
+					hasEncoder = "yes"
+				}
+
+				fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", f, exts, hasDecoder, hasEncoder)
+			}
+
+			return tw.Flush()
+		},
+	}
 }
