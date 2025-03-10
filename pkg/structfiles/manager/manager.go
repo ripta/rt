@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"sort"
+	"strings"
 
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/common/types"
@@ -45,7 +46,13 @@ func (m *Manager) ProcessAll(files []string) error {
 	errs := []error{}
 	for _, file := range files {
 		if file == "-" {
-			if err := m.ProcessReader("stdin://", os.Stdin); err != nil {
+			if err := m.ProcessReader("stdin://", os.Stdin, AutoFormat); err != nil {
+				errs = append(errs, err)
+			}
+			continue
+		}
+		if after, found := strings.CutPrefix(file, "stdin://"); found {
+			if err := m.ProcessReader("stdin://", os.Stdin, after); err != nil {
 				errs = append(errs, err)
 			}
 			continue
@@ -125,8 +132,8 @@ func (m *Manager) ProcessFile(file string) error {
 	return nil
 }
 
-func (m *Manager) ProcessReader(name string, in io.Reader) error {
-	docs, err := loadFrom(in, "")
+func (m *Manager) ProcessReader(name string, in io.Reader, format string) error {
+	docs, err := loadFrom(in, format)
 	if err != nil {
 		return fmt.Errorf("loading documents from reader for %q: %w", name, err)
 	}
@@ -180,7 +187,7 @@ func processFile(file string) ([]*DocumentInfo, error) {
 func loadFrom(in io.Reader, format string) ([]*Document, error) {
 	df := GetDecoderFactory(format)
 	if df == nil {
-		if format == "" {
+		if format == AutoFormat {
 			df = AutoDecoder
 		} else {
 			return nil, fmt.Errorf("%w %q", ErrUnknownFormat, format)
@@ -196,7 +203,7 @@ func loadFrom(in io.Reader, format string) ([]*Document, error) {
 			if err == io.EOF {
 				break
 			}
-			return nil, err
+			return nil, fmt.Errorf("decoding document #%d: %w", len(docs)+1, err)
 		}
 
 		docs = append(docs, &doc)

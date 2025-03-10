@@ -8,6 +8,8 @@ func noCloser() error {
 	return nil
 }
 
+var _ Closer = noCloser
+
 type Encoder interface {
 	Encode(v any) error
 }

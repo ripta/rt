@@ -6,6 +6,8 @@ import (
 	"io"
 )
 
+var AutoFormat string = ""
+
 type autoDecoder struct {
 	decs []DecoderFactory
 	dec  Decoder
