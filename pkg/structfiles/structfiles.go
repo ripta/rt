@@ -20,7 +20,8 @@ var (
 )
 
 type runner struct {
-	Format string
+	Format  string
+	Options map[string]string
 
 	Kubernetes bool
 
@@ -207,6 +208,7 @@ func newEvalCommand() *cobra.Command {
 	}
 
 	cmd.Flags().StringVarP(&sf.Format, "format", "f", sf.Format, "Output format, one of: json, yaml, toml, hclv2, gob")
+	cmd.Flags().StringToStringVarP(&sf.Options, "option", "o", sf.Options, "Options for the output format")
 
 	cmd.Flags().BoolVarP(&sf.Kubernetes, "kubernetes", "k", sf.Kubernetes, "Process files as Kubernetes resources (see help)")
 
