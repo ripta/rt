@@ -7,7 +7,14 @@ import (
 )
 
 func Decode(r io.Reader) (*Document, error) {
+	return CustomDecode(r, nil)
+}
+
+func CustomDecode(r io.Reader, hook func(*csv.Reader)) (*Document, error) {
 	cr := csv.NewReader(r)
+	if hook != nil {
+		hook(cr)
+	}
 
 	hs, err := cr.Read()
 	if err != nil {
@@ -42,7 +49,15 @@ func Decode(r io.Reader) (*Document, error) {
 }
 
 func Encode(w io.Writer, d *Document) error {
+	return CustomEncode(w, nil, d)
+}
+
+func CustomEncode(w io.Writer, hook func(*csv.Writer), d *Document) error {
 	cw := csv.NewWriter(w)
+	if hook != nil {
+		hook(cw)
+	}
+
 	if err := cw.Write(d.Header); err != nil {
 		return err
 	}
