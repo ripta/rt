@@ -1,6 +1,9 @@
 generate-proto:
 	protoc --go_out=. --go_opt=paths=source_relative ./samples/data/v1/data.proto
 
+imports:
+	goimports -w -l -local github.com/ripta/rt .
+
 install:
 	go install -v ./cmd/...
 

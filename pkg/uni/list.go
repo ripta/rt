@@ -3,14 +3,14 @@ package uni
 import (
 	"errors"
 	"fmt"
-	"sort"
 	"strings"
 	"unicode"
-	"unicode/utf8"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/text/unicode/rangetable"
 	"golang.org/x/text/unicode/runenames"
+
+	"github.com/ripta/rt/pkg/uni/display"
 )
 
 var (
@@ -19,12 +19,12 @@ var (
 
 func newListCommand() *cobra.Command {
 	l := &lister{
-		output: []string{"id", "rune", "hexbytes", "categories", "name"},
+		output: display.DefaultColumns(),
 		table:  unicode.Version,
 	}
 
 	c := cobra.Command{
-		Use:                   "list [--all | --categories <CATEGORIES> | <RUNE-NAME>]",
+		Use:                   "list [--categories <CATEGORIES>] [--scripts <SCRIPTS>] [--all | <RUNE-NAME-FILTER...>]",
 		DisableFlagsInUseLine: true,
 		SilenceErrors:         true,
 
@@ -34,22 +34,29 @@ func newListCommand() *cobra.Command {
 	}
 
 	c.Flags().BoolVarP(&l.all, "all", "A", l.all, "List all")
-	c.Flags().StringSliceVarP(&l.cats, "categories", "C", l.cats, "Categories to limit to")
+	c.Flags().StringSliceVarP(&l.cats, "categories", "C", l.cats, "Categories to limit to (see `uni catsegories`); by default all categories")
 	c.Flags().BoolVarP(&l.count, "count", "c", l.count, "Show count of matches")
 	c.Flags().StringSliceVarP(&l.output, "output", "o", l.output, "Output columns")
+	c.Flags().StringSliceVarP(&l.scripts, "scripts", "S", l.scripts, "Scripts to limit to (see `uni scripts`); by default all scripts")
 	c.Flags().StringVarP(&l.table, "table", "t", l.table, "Unicode Table version")
 	return &c
 }
 
 type lister struct {
-	all    bool
-	cats   []string
-	count  bool
-	output []string
-	table  string
+	all     bool
+	cats    []string
+	count   bool
+	output  []string
+	scripts []string
+	table   string
 }
 
 func (l *lister) run(c *cobra.Command, args []string) error {
+	disp, err := display.New(l.output)
+	if err != nil {
+		return err
+	}
+
 	t := rangetable.Assigned(l.table)
 	if t == nil {
 		return fmt.Errorf("unicode table version %s: %w", l.table, ErrNoUnicodeTable)
@@ -78,9 +85,16 @@ func (l *lister) run(c *cobra.Command, args []string) error {
 		t = rangetable.Merge(rts...)
 	}
 
-	cols := map[string]bool{}
-	for _, o := range l.output {
-		cols[o] = true
+	scriptFilter := []*unicode.RangeTable{}
+	if len(l.scripts) > 0 {
+		for _, s := range l.scripts {
+			rt, ok := unicode.Scripts[s]
+			if !ok {
+				return fmt.Errorf("unicode script %q does not exist; see `uni scripts`", s)
+			}
+
+			scriptFilter = append(scriptFilter, rt)
+		}
 	}
 
 	count := 0
@@ -94,30 +108,18 @@ func (l *lister) run(c *cobra.Command, args []string) error {
 			}
 		}
 
+		if len(scriptFilter) > 0 {
+			for _, script := range scriptFilter {
+				if !unicode.Is(script, r) {
+					return
+				}
+			}
+		}
+
 		name := runenames.Name(r)
 		if runeMatches(norm, name) {
-			disp := []string{}
-			if cols["id"] {
-				disp = append(disp, fmt.Sprintf("%U", r))
-			}
-			if cols["rune"] {
-				v := string(r)
-				if unicode.IsControl(r) {
-					v = fmt.Sprintf("%q", string(r))
-				}
-				disp = append(disp, v)
-			}
-			if cols["hexbytes"] {
-				disp = append(disp, fmt.Sprintf("[%s]", runeToHexBytes(r)))
-			}
-			if cols["cats"] || cols["categories"] {
-				disp = append(disp, fmt.Sprintf("<%s>", runeToCategories(r)))
-			}
-			if cols["name"] {
-				disp = append(disp, name)
-			}
-			if len(disp) > 0 {
-				fmt.Println(strings.Join(disp, "\t"))
+			if cols := disp.Generate(r); len(cols) > 0 {
+				fmt.Println(strings.Join(cols, "\t"))
 			}
 			count++
 		}
@@ -150,31 +152,4 @@ func runeMatches(normalized []string, name string) bool {
 		}
 	}
 	return true
-}
-
-func runeToHexBytes(r rune) string {
-	bytes := make([]byte, utf8.UTFMax)
-	utf8.EncodeRune(bytes, r)
-
-	hexbytes := []string{}
-	for _, b := range bytes {
-		if b == 0 {
-			hexbytes = append(hexbytes, "  ")
-			continue
-		}
-		hexbytes = append(hexbytes, fmt.Sprintf("%02X", b))
-	}
-
-	return strings.Join(hexbytes, " ")
-}
-
-func runeToCategories(r rune) string {
-	cats := []string{}
-	for cat, rt := range unicode.Categories {
-		if unicode.Is(rt, r) {
-			cats = append(cats, cat)
-		}
-	}
-	sort.Strings(cats)
-	return strings.Join(cats, ",")
 }

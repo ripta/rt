@@ -3,6 +3,10 @@ package toto
 import (
 	"errors"
 	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+
 	"github.com/spf13/cobra"
 	"github.com/thediveo/enumflag/v2"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -12,9 +16,6 @@ import (
 	"google.golang.org/protobuf/reflect/protodesc"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/dynamicpb"
-	"io"
-	"os"
-	"path/filepath"
 )
 
 func newRecodeCommand(t *options) *cobra.Command {

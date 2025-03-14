@@ -2,12 +2,13 @@ package toto
 
 import (
 	"fmt"
+	"io"
+	"os"
+
 	"github.com/spf13/cobra"
 	"google.golang.org/protobuf/encoding/prototext"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/emptypb"
-	"io"
-	"os"
 )
 
 func newRawCommand(t *options) *cobra.Command {

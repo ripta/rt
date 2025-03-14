@@ -3,14 +3,16 @@ package manager
 import (
 	"errors"
 	"fmt"
-	"github.com/google/cel-go/cel"
 	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
-	"slices"
 	"sort"
+	"strings"
+
+	"github.com/google/cel-go/cel"
+	"github.com/google/cel-go/common/types"
 )
 
 var ErrUnknownFormat = errors.New("unknown format")
@@ -44,7 +46,13 @@ func (m *Manager) ProcessAll(files []string) error {
 	errs := []error{}
 	for _, file := range files {
 		if file == "-" {
-			if err := m.ProcessReader("stdin://", os.Stdin); err != nil {
+			if err := m.ProcessReader("stdin://", os.Stdin, AutoFormat); err != nil {
+				errs = append(errs, err)
+			}
+			continue
+		}
+		if after, found := strings.CutPrefix(file, "stdin://"); found {
+			if err := m.ProcessReader("stdin://", os.Stdin, after); err != nil {
 				errs = append(errs, err)
 			}
 			continue
@@ -124,8 +132,8 @@ func (m *Manager) ProcessFile(file string) error {
 	return nil
 }
 
-func (m *Manager) ProcessReader(name string, in io.Reader) error {
-	docs, err := loadFrom(in, "")
+func (m *Manager) ProcessReader(name string, in io.Reader, format string) error {
+	docs, err := loadFrom(in, format)
 	if err != nil {
 		return fmt.Errorf("loading documents from reader for %q: %w", name, err)
 	}
@@ -179,7 +187,7 @@ func processFile(file string) ([]*DocumentInfo, error) {
 func loadFrom(in io.Reader, format string) ([]*Document, error) {
 	df := GetDecoderFactory(format)
 	if df == nil {
-		if format == "" {
+		if format == AutoFormat {
 			df = AutoDecoder
 		} else {
 			return nil, fmt.Errorf("%w %q", ErrUnknownFormat, format)
@@ -195,7 +203,7 @@ func loadFrom(in io.Reader, format string) ([]*Document, error) {
 			if err == io.EOF {
 				break
 			}
-			return nil, err
+			return nil, fmt.Errorf("decoding document #%d: %w", len(docs)+1, err)
 		}
 
 		docs = append(docs, &doc)
@@ -228,6 +236,7 @@ func (m *Manager) Copy() *Manager {
 	}
 }
 
+// AllInOne merges documents from all groups into a single group.
 func (m *Manager) AllInOne() error {
 	dg := &DocumentGroup{
 		Name:      "all-in-one",
@@ -252,9 +261,14 @@ var (
 	stringType   = reflect.TypeOf("")
 )
 
+// GroupBy regroups documents based on the result of evaluating the expression.
+// The document is available as `doc` in the expression.
 func (m *Manager) GroupBy(expr string) error {
-	doc := cel.Variable("doc", cel.DynType)
-	env, err := cel.NewEnv(doc)
+	opts := []cel.EnvOption{}
+	opts = append(opts, cel.Variable("doc", cel.DynType))
+	opts = append(opts, cel.Variable("index", cel.IntType))
+
+	env, err := cel.NewEnv(opts...)
 	if err != nil {
 		return err
 	}
@@ -271,17 +285,25 @@ func (m *Manager) GroupBy(expr string) error {
 
 	groups := map[string]*DocumentGroup{}
 	var errs []error
+	var index int
 	for _, g := range m.Groups {
 		for i, di := range g.Documents {
 			val, _, err := prog.Eval(map[string]any{
-				"doc": *di.Document,
+				"doc":   *di.Document,
+				"index": index,
+				"source": map[string]any{
+					"name":  di.SrcName,
+					"index": di.SrcIndex,
+				},
 			})
 			if err != nil {
 				errs = append(errs, fmt.Errorf("evaluating expression %q for document %d in group %s: %w", expr, i, g.Name, err))
 				continue
 			}
 
-			key, err := val.ConvertToNative(stringType)
+			index++
+
+			key, err := val.ConvertToType(types.StringType).ConvertToNative(stringType)
 			if err != nil {
 				errs = append(errs, err)
 				continue
@@ -313,65 +335,19 @@ func (m *Manager) GroupBy(expr string) error {
 	return errors.Join(errs...)
 }
 
-func (m *Manager) SortByFunc(expr string) error {
-	objA := cel.Variable("a", cel.MapType(cel.StringType, cel.DynType))
-	objB := cel.Variable("b", cel.MapType(cel.StringType, cel.DynType))
-	env, err := cel.NewEnv(objA, objB)
-	if err != nil {
-		return err
+// SortByFunc sorts documents in each group based on the result of evaluating
+// the expression. The value of the document is available as `doc`. See also
+// SortBy.
+func (m *Manager) SortByFunc(expr string, reverse bool) error {
+	if reverse {
+		return m.SortBy(fmt.Sprintf(`b.%s < a.%s`, expr, expr))
 	}
-
-	ast, res := env.Compile(expr)
-	if res != nil && res.Err() != nil {
-		return res.Err()
-	}
-
-	prog, err := env.Program(ast)
-	if err != nil {
-		return err
-	}
-
-	var errs []error
-	for _, g := range m.Groups {
-		slices.SortFunc(g.Documents, func(i, j *DocumentInfo) int {
-			v1 := map[string]any{
-				"doc": *i.Document,
-				"source": map[string]any{
-					"name":  i.SrcName,
-					"index": i.SrcIndex,
-				},
-			}
-
-			v2 := map[string]any{
-				"doc": *j.Document,
-				"source": map[string]any{
-					"name":  j.SrcName,
-					"index": j.SrcIndex,
-				},
-			}
-
-			val, _, err := prog.Eval(map[string]any{
-				"a": v1,
-				"b": v2,
-			})
-			if err != nil {
-				errs = append(errs, err)
-				return 0
-			}
-
-			v, err := val.ConvertToNative(intType)
-			if err != nil {
-				errs = append(errs, err)
-				return 0
-			}
-
-			return v.(int)
-		})
-	}
-
-	return errors.Join(errs...)
+	return m.SortBy(fmt.Sprintf(`a.%s < b.%s`, expr, expr))
 }
 
+// SortBy sorts documents in each group based on the result of evaluating
+// the expression. The two documents being compared are available as `a.doc`
+// and `b.doc`. See also SortByFunc.
 func (m *Manager) SortBy(expr string) error {
 	objA := cel.Variable("a", cel.MapType(cel.StringType, cel.DynType))
 	objB := cel.Variable("b", cel.MapType(cel.StringType, cel.DynType))
@@ -447,6 +423,10 @@ func dumpTo(wcf WriteCloserFactory, format string, dg *DocumentGroup) error {
 		return err
 	}
 
+	if format == "" {
+		return fmt.Errorf("%w: no format specified", ErrUnknownFormat)
+	}
+
 	df := GetEncoderFactory(format)
 	if df == nil {
 		return fmt.Errorf("%w %q", ErrUnknownFormat, format)
@@ -462,4 +442,12 @@ func dumpTo(wcf WriteCloserFactory, format string, dg *DocumentGroup) error {
 	}
 
 	return nil
+}
+
+func (m *Manager) Len() int {
+	docs := 0
+	for _, g := range m.Groups {
+		docs += len(g.Documents)
+	}
+	return docs
 }

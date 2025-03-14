@@ -7,8 +7,9 @@ import (
 	"fmt"
 	"hash"
 	"io"
-	"lukechampine.com/blake3"
 	"os"
+
+	"lukechampine.com/blake3"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/crypto/sha3"

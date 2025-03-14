@@ -78,7 +78,7 @@ type catter struct {
 	table string
 }
 
-func (_ *catter) run(c *cobra.Command, args []string) error {
+func (_ *catter) run(_ *cobra.Command, _ []string) error {
 	cats := []string{}
 	for cat := range Categories {
 		cats = append(cats, cat)
@@ -90,15 +90,15 @@ func (_ *catter) run(c *cobra.Command, args []string) error {
 
 	fmt.Fprintf(t, "%s\t%s\t%s\n", "KEY", "NAME", "RUNE COUNT")
 	for _, cat := range cats {
-		fmt.Fprintf(t, "%s\t%s\t%d\n", cat, Categories[cat], countCharactersIn(cat))
+		fmt.Fprintf(t, "%s\t%s\t%d\n", cat, Categories[cat], countCharactersIn(unicode.Categories[cat]))
 	}
 
 	return nil
 }
 
-func countCharactersIn(cat string) int {
+func countCharactersIn(rt *unicode.RangeTable) int {
 	count := 0
-	rangetable.Visit(unicode.Categories[cat], func(_ rune) {
+	rangetable.Visit(rt, func(_ rune) {
 		count += 1
 	})
 	return count

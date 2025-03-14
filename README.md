@@ -209,7 +209,14 @@ Proof of concept tool to examine and compare a pile of structured files (e.g.,
 Kubernetes manifests) strewn across multiple directories or files, with any
 number of documents per file.
 
-Supports YAML and JSON as input.
+Supports YAML, JSON, TOML, HCLv2, GOB, and CSV as input and output.
+
+- HCLv2 output is experimental, due to the way that HCLv2 is schema-driven and
+  the lack of a way to represent the schema in structfiles.
+- CSV does not support nested maps. CSV treats each row as a separate document.
+  The first row of a CSV file is assumed to be the header.
+
+The formats YAML, JSON, and GOB support multiple documents in one stream.
 
 Resulting diff currently only in unified diff of YAML (see example).
 
@@ -218,40 +225,41 @@ go install github.com/ripta/rt/cmd/sf@latest
 ```
 
 For example, compare two directories of Kubernetes manifests containing all-in-one
-manifests (`foo_aio`) and one-resource-per-file (`foo_each`):
+manifests (`foo_aio`) and one-resource-per-file (`foo_each`), use `-k`:
 
 ```
-❯ structfiles diff ./samples/manifests/foo_aio ./samples/manifests/foo_each
---- before
-+++ after
-@@ -17,7 +17,7 @@
-         - image: nginx:latest
-           name: web
-           ports:
--            - containerPort: 80
-+            - containerPort: 8080
- ---
- apiVersion: batch/v1beta1
- kind: CronJob
-@@ -36,7 +36,7 @@
-               - date; echo "Hello, World!"
-             image: ubuntu:latest
-             name: web
--  schedule: '*/1 * * * *'
-+  schedule: '* * * * *'
- ---
- apiVersion: v1
- kind: Service
-@@ -45,7 +45,7 @@
-   namespace: foo
- spec:
-   ports:
--    - port: 80
-+    - port: 8080
--      targetPort: 80
-+      targetPort: 8080
-   selector:
-     app: bar
+❯ sf diff -k ./samples/manifests/foo_aio ./samples/manifests/foo_each
+--- ./samples/manifests/foo_aio
++++ ./samples/manifests/foo_each
+@@ -25,7 +25,7 @@
+             "name": "web",
+             "ports": [
+               {
+-                "containerPort": 80
++                "containerPort": 8080
+               }
+             ]
+           }
+@@ -60,7 +60,7 @@
+         }
+       }
+     },
+-    "schedule": "*/1 * * * *"
++    "schedule": "* * * * *"
+   }
+ }
+ {
+@@ -73,8 +73,8 @@
+   "spec": {
+     "ports": [
+       {
+-        "port": 80,
++        "port": 8080,
+-        "targetPort": 80
++        "targetPort": 8080
+       }
+     ],
+     "selector": {
 ```
 
 You can diff multiple files against one file by using the `::` delimiter. Arguments
@@ -259,7 +267,44 @@ before the delimiter are taken as one input, while arguments after are taken as
 the second input to the diff:
 
 ```
-❯ structfiles diff ./samples/manifests/foo_aio :: ./samples/manifests/foo_each/*.yaml
+❯ sf diff -k ./samples/manifests/foo_aio :: ./samples/manifests/foo_each/*.yaml
+```
+
+You can compare piles of structured files of differing formats and control the
+output format being diffed with `-f`
+
+```
+❯ sf diff -f json ./samples/configs/yaml_each ./samples/configs/toml
+--- ./samples/configs/yaml_each
++++ ./samples/configs/toml
+@@ -32,7 +32,7 @@
+       "role": "backend"
+     }
+   },
+-  "title": "YAML Example One"
++  "title": "TOML Example One"
+ }
+ {
+   "autoscaling_rules": [
+@@ -68,5 +68,5 @@
+       "role": "frontend"
+     }
+   },
+-  "title": "YAML Example Two"
++  "title": "TOML Example Two"
+ }
+```
+
+As a special case, you can also read from STDIN and optionally control the format
+parser by using `stdin://FORMAT`:
+
+```
+❯ mj foo=bar | sf eval -f yaml stdin://json
+---
+foo: bar
+
+❯ generate-gob | sf eval -f json stdin://gob
+{"vals":[1,2,3]}
 ```
 
 
@@ -342,6 +387,16 @@ Show only characters in a specific character category, e.g.:
 ❯ uni list cyrillic iotified !small
 ```
 
+Show only characters in a specific script, e.g.:
+
+```
+# All Sundanese characters, by codepoint name:
+❯ uni list sundanese
+
+# All Sundanese characters, by script name, which needs the --all flag:
+❯ uni list -S Sundanese --all
+```
+
 Don't forget to escape `!` in your shell if necessary.
 
 List all character categories, their names, and counts:
@@ -356,13 +411,24 @@ Co    Private Use             137468
 [...]
 ```
 
+List all scripts and counts:
+
+```
+❯ uni scripts
+NAME                     RUNE COUNT
+Adlam                    88
+Ahom                     65
+Anatolian_Hieroglyphs    583
+[...]
+```
+
 Describe characters:
 
 ```
 ❯ echo 𝗀𝘨| uni describe
-U+1D5C0	𝗀	MATHEMATICAL SANS-SERIF SMALL G
-U+1D628	𝘨	MATHEMATICAL SANS-SERIF ITALIC SMALL G
-U+000A	"\n"	<control>
+U+1D5C0 𝗀       [F0 9D 97 80]   <L,Ll>  MATHEMATICAL SANS-SERIF SMALL G
+U+1D628 𝘨       [F0 9D 98 A8]   <L,Ll>  MATHEMATICAL SANS-SERIF ITALIC SMALL G
+U+000A  "\n"    [0A         ]   <C,Cc>  <control>
 ```
 
 Map characters for fun:
@@ -389,22 +455,22 @@ Sometimes it may be useful to decompose runes before describing:
 
 ```
 ❯ echo 쭈꾸쭈꾸 | uni d
-U+CB48	쭈	<Hangul Syllable>
-U+AFB8	꾸	<Hangul Syllable>
-U+CB48	쭈	<Hangul Syllable>
-U+AFB8	꾸	<Hangul Syllable>
-U+000A	"\n"	<control>
+U+CB48  쭈      [EC AD 88   ]   <L,Lo>  <Hangul Syllable>
+U+AFB8  꾸      [EA BE B8   ]   <L,Lo>  <Hangul Syllable>
+U+CB48  쭈      [EC AD 88   ]   <L,Lo>  <Hangul Syllable>
+U+AFB8  꾸      [EA BE B8   ]   <L,Lo>  <Hangul Syllable>
+U+000A  "\n"    [0A         ]   <C,Cc>  <control>
 
 ❯ echo 쭈꾸쭈꾸 | uni nfd | uni describe
-U+110D	ᄍ	HANGUL CHOSEONG SSANGCIEUC
-U+116E	ᅮ	HANGUL JUNGSEONG U
-U+1101	ᄁ	HANGUL CHOSEONG SSANGKIYEOK
-U+116E	ᅮ	HANGUL JUNGSEONG U
-U+110D	ᄍ	HANGUL CHOSEONG SSANGCIEUC
-U+116E	ᅮ	HANGUL JUNGSEONG U
-U+1101	ᄁ	HANGUL CHOSEONG SSANGKIYEOK
-U+116E	ᅮ	HANGUL JUNGSEONG U
-U+000A	"\n"	<control>
+U+110D  ᄍ      [E1 84 8D   ]   <L,Lo>  HANGUL CHOSEONG SSANGCIEUC
+U+116E          [E1 85 AE   ]   <L,Lo>  HANGUL JUNGSEONG U
+U+1101  ᄁ      [E1 84 81   ]   <L,Lo>  HANGUL CHOSEONG SSANGKIYEOK
+U+116E          [E1 85 AE   ]   <L,Lo>  HANGUL JUNGSEONG U
+U+110D  ᄍ      [E1 84 8D   ]   <L,Lo>  HANGUL CHOSEONG SSANGCIEUC
+U+116E          [E1 85 AE   ]   <L,Lo>  HANGUL JUNGSEONG U
+U+1101  ᄁ      [E1 84 81   ]   <L,Lo>  HANGUL CHOSEONG SSANGKIYEOK
+U+116E          [E1 85 AE   ]   <L,Lo>  HANGUL JUNGSEONG U
+U+000A  "\n"    [0A         ]   <C,Cc>  <control>
 ```
 
 Sort input with different collation (`-l`):

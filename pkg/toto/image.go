@@ -1,13 +1,14 @@
 package toto
 
 import (
-	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/descriptorpb"
 	"io"
 	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
+
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/descriptorpb"
 )
 
 // CompileProto invokes protoc to generate a file descriptor set. The caller

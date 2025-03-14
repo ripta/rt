@@ -3,46 +3,50 @@ package uni
 import (
 	"errors"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"os"
 	"strings"
 	"unicode"
 	"unicode/utf8"
 
 	"github.com/spf13/cobra"
-	"golang.org/x/text/unicode/runenames"
+
+	"github.com/ripta/rt/pkg/uni/display"
 )
 
 func newDescribeCommand() *cobra.Command {
 	d := &describer{
-		table: unicode.Version,
+		output: display.DefaultColumns(),
+		table:  unicode.Version,
 	}
 
 	c := cobra.Command{
-		Use:                   "describe",
+		Use:                   "describe [<CHARACTERS...]",
 		DisableFlagsInUseLine: true,
 		SilenceErrors:         true,
 		Aliases:               []string{"d", "desc"},
 
-		Short: "Describe characters",
+		Short: "Describe characters, either as arguments or from STDIN",
 		Args:  d.validate,
 		RunE:  d.run,
 	}
 
+	c.Flags().StringSliceVarP(&d.output, "output", "o", d.output, "Output columns")
 	c.Flags().StringVarP(&d.table, "table", "t", d.table, "Unicode Table version")
 	return &c
 }
 
 type describer struct {
-	table string
+	output []string
+	table  string
 }
 
-func (d *describer) run(c *cobra.Command, args []string) error {
+func (d *describer) run(_ *cobra.Command, args []string) error {
 	if len(args) > 0 {
 		return d.display(strings.Join(args, ""))
 	}
 
-	in, err := ioutil.ReadAll(os.Stdin)
+	in, err := io.ReadAll(os.Stdin)
 	if err != nil {
 		return fmt.Errorf("reading from stdin: %w", err)
 	}
@@ -51,22 +55,23 @@ func (d *describer) run(c *cobra.Command, args []string) error {
 }
 
 func (d *describer) display(in string) error {
+	disp, err := display.New(d.output)
+	if err != nil {
+		return err
+	}
+
 	for _, r := range []rune(in) {
 		if r == utf8.RuneError {
 			return errors.New("not valid utf8 encoding")
 		}
-		name := runenames.Name(r)
-		if unicode.IsControl(r) {
-			fmt.Printf("%U\t%q\t%s\t%s\n", r, string(r), fmt.Sprintf("[%s]", runeToHexBytes(r)), name)
-		} else {
-			fmt.Printf("%U\t%s\t%s\t%s\n", r, string(r), fmt.Sprintf("[%s]", runeToHexBytes(r)), name)
-
+		if cols := disp.Generate(r); len(cols) > 0 {
+			fmt.Println(strings.Join(cols, "\t"))
 		}
 	}
 
 	return nil
 }
 
-func (d *describer) validate(_ *cobra.Command, args []string) error {
+func (d *describer) validate(_ *cobra.Command, _ []string) error {
 	return nil
 }
