@@ -120,6 +120,7 @@ func (r *runner) Defaulting(_ *cobra.Command, _ []string) error {
 
 func (r *runner) eval(files []string) (*bytes.Buffer, error) {
 	m := manager.New()
+
 	if err := m.ProcessAll(files); err != nil {
 		return nil, err
 	}
@@ -166,11 +167,11 @@ func (r *runner) eval(files []string) (*bytes.Buffer, error) {
 
 	buf := &bytes.Buffer{}
 	if r.Raw {
-		if err := m.EmitRaw(buf, r.Format); err != nil {
+		if err := m.EmitRaw(buf, r.Format, r.Options); err != nil {
 			return nil, fmt.Errorf("emitting raw result: %w", err)
 		}
 	} else {
-		if err := m.Emit(manager.MemoryWriter(buf), r.Format); err != nil {
+		if err := m.Emit(manager.MemoryWriter(buf), r.Format, r.Options); err != nil {
 			return nil, fmt.Errorf("emitting result: %w", err)
 		}
 	}
@@ -249,7 +250,7 @@ func newFormatsCommand() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			tw := tabwriter.NewWriter(os.Stdout, 6, 4, 3, ' ', tabwriter.RememberWidths)
 
-			fmt.Fprintln(tw, "FORMAT\tEXTENSIONS\tINPUT\tOUTPUT")
+			fmt.Fprintln(tw, "FORMAT\tEXTENSIONS\tINPUT\tOUTPUT\tOPTIONS")
 			for _, f := range manager.GetFormats() {
 				exts := strings.Join(manager.GetExtensions(f), " ")
 
@@ -259,11 +260,20 @@ func newFormatsCommand() *cobra.Command {
 				}
 
 				hasEncoder := "no"
-				if manager.GetEncoderFactory(f) != nil {
+				df, _ := manager.GetEncoderFactory(f, nil)
+				if df != nil {
 					hasEncoder = "yes"
 				}
 
-				fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", f, exts, hasDecoder, hasEncoder)
+				optionDescs := []string{}
+				for k, v := range manager.GetEncoderOptions(f) {
+					optionDescs = append(optionDescs, fmt.Sprintf("%s:%s", k, v))
+				}
+				if len(optionDescs) == 0 {
+					optionDescs = []string{"-"}
+				}
+
+				fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", f, exts, hasDecoder, hasEncoder, strings.Join(optionDescs, " "))
 			}
 
 			return tw.Flush()
