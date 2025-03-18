@@ -9,8 +9,8 @@ import (
 	"strings"
 
 	"github.com/liggitt/tabwriter"
-	"github.com/ripta/gxti/diff"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 
 	"github.com/ripta/rt/pkg/structfiles/manager"
 )
@@ -21,13 +21,30 @@ var (
 
 type runner struct {
 	Format  string
+	Raw     bool
 	Options map[string]string
 
 	Kubernetes bool
 
+	FilterIn   string
+	FilterOut  string
 	GroupBy    string
 	SortBy     string
 	SortByFunc string
+}
+
+func (r *runner) BindFlagSet(fs *pflag.FlagSet) {
+	fs.StringVarP(&r.Format, "format", "f", r.Format, "Output format, one of: json, yaml, toml, hclv2, gob")
+	fs.BoolVarP(&r.Raw, "raw", "r", r.Raw, "Output raw structure")
+	fs.StringToStringVarP(&r.Options, "option", "o", r.Options, "Options for the output format")
+
+	fs.BoolVarP(&r.Kubernetes, "kubernetes", "k", r.Kubernetes, "Process files as Kubernetes resources (see help)")
+
+	fs.StringVarP(&r.FilterIn, "filter-in", "i", r.FilterIn, "Filter documents in by the result of evaluating the expression; variables: doc, index, source.name, source.index")
+	fs.StringVarP(&r.FilterOut, "filter-out", "I", r.FilterOut, "Filter documents out by the result of evaluating the expression; variables: doc, index, source.name, source.index")
+	fs.StringVarP(&r.GroupBy, "group-by", "g", r.GroupBy, "Group documents by the result of evaluating the expression; variables: doc, index, source.name, source.index")
+	fs.StringVarP(&r.SortBy, "sort-by", "s", r.SortBy, "Sort documents by the result of evaluating the expression; variables: {a,b}.{doc,index,source}")
+	fs.StringVarP(&r.SortByFunc, "sort-by-func", "S", r.SortByFunc, "Sort documents by the result of evaluating the expression; variables: doc, index, source.name, source.index")
 }
 
 func (r *runner) RunDiff(files []string) error {
@@ -64,9 +81,12 @@ func (r *runner) RunDiff(files []string) error {
 		postName = postFiles[0]
 	}
 
-	uni := diff.Unified(preName, postName, preBuf.String(), postBuf.String())
-	fmt.Printf("%s\n", uni)
+	uni, err := generateDiff(preName, postName, preBuf, postBuf)
+	if err != nil {
+		return fmt.Errorf("generating diff: %w", err)
+	}
 
+	fmt.Printf("%s\n", uni)
 	return nil
 }
 
@@ -89,7 +109,7 @@ func (r *runner) Defaulting(_ *cobra.Command, _ []string) error {
 		r.GroupBy = `doc.apiVersion + "." + doc.kind`
 	}
 	if r.SortBy == "" && r.SortByFunc == "" {
-		r.SortBy = `a.doc.name < b.doc.name`
+		r.SortBy = `a.doc.apiVersion + "." + a.doc.kind + "/" + a.doc.metadata.name < b.doc.apiVersion + "." + b.doc.kind + "/" + b.doc.metadata.name`
 	}
 	if r.Format == "" {
 		r.Format = "yaml"
@@ -114,6 +134,18 @@ func (r *runner) eval(files []string) (*bytes.Buffer, error) {
 		return nil, errors.New("no documents found")
 	}
 
+	if filter := r.FilterIn; filter != "" {
+		if err := m.Filter(filter, true); err != nil {
+			return nil, fmt.Errorf("filtering-in documents: %w", err)
+		}
+	}
+
+	if filter := r.FilterOut; filter != "" {
+		if err := m.Filter(filter, false); err != nil {
+			return nil, fmt.Errorf("filtering-out documents: %w", err)
+		}
+	}
+
 	if group := r.GroupBy; group != "" {
 		if err := m.GroupBy(group); err != nil {
 			return nil, fmt.Errorf("grouping documents: %w", err)
@@ -133,8 +165,14 @@ func (r *runner) eval(files []string) (*bytes.Buffer, error) {
 	}
 
 	buf := &bytes.Buffer{}
-	if err := m.Emit(manager.MemoryWriter(buf), r.Format); err != nil {
-		return nil, fmt.Errorf("emitting result: %w", err)
+	if r.Raw {
+		if err := m.EmitRaw(buf, r.Format); err != nil {
+			return nil, fmt.Errorf("emitting raw result: %w", err)
+		}
+	} else {
+		if err := m.Emit(manager.MemoryWriter(buf), r.Format); err != nil {
+			return nil, fmt.Errorf("emitting result: %w", err)
+		}
 	}
 
 	return buf, nil
@@ -170,14 +208,7 @@ func newDiffCommand() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVarP(&sf.Format, "format", "f", sf.Format, "Output format, one of: json, yaml")
-
-	cmd.Flags().BoolVarP(&sf.Kubernetes, "kubernetes", "k", sf.Kubernetes, "Process files as Kubernetes resources")
-
-	cmd.Flags().StringVarP(&sf.GroupBy, "group-by", "g", sf.GroupBy, "Group documents by the result of evaluating the expression; variables: doc, index, source.name, source.index")
-	cmd.Flags().StringVarP(&sf.SortBy, "sort-by", "s", sf.SortBy, "Sort documents by the result of evaluating the expression; variables: {a,b}.{doc,index,source}")
-	cmd.Flags().StringVarP(&sf.SortByFunc, "sort-by-func", "S", sf.SortByFunc, "Sort documents by the result of evaluating the expression; variables: doc, index, source.name, source.index")
-
+	sf.BindFlagSet(cmd.Flags())
 	return cmd
 }
 
@@ -207,15 +238,7 @@ func newEvalCommand() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVarP(&sf.Format, "format", "f", sf.Format, "Output format, one of: json, yaml, toml, hclv2, gob")
-	cmd.Flags().StringToStringVarP(&sf.Options, "option", "o", sf.Options, "Options for the output format")
-
-	cmd.Flags().BoolVarP(&sf.Kubernetes, "kubernetes", "k", sf.Kubernetes, "Process files as Kubernetes resources (see help)")
-
-	cmd.Flags().StringVarP(&sf.GroupBy, "group-by", "g", sf.GroupBy, "Group documents by the result of evaluating the expression; variables: doc, index, source.name, source.index")
-	cmd.Flags().StringVarP(&sf.SortBy, "sort-by", "s", sf.SortBy, "Sort documents by the result of evaluating the expression; variables: {a,b}.{doc,index,source}")
-	cmd.Flags().StringVarP(&sf.SortByFunc, "sort-by-func", "S", sf.SortByFunc, "Sort documents by the result of evaluating the expression; variables: doc, index, source.name, source.index")
-
+	sf.BindFlagSet(cmd.Flags())
 	return cmd
 }
 
