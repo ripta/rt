@@ -3,10 +3,12 @@ package manager
 import (
 	"encoding/json"
 	"io"
+	"strings"
 )
 
 func init() {
-	RegisterFormat("json", []string{".json"}, JSONEncoder, JSONDecoder)
+	enc := &JSONEncoder{}
+	RegisterFormatWithOptions("json", []string{".json"}, enc.EncodeTo, JSONDecoder, enc)
 }
 
 func JSONDecoder(r io.Reader) Decoder {
@@ -14,8 +16,20 @@ func JSONDecoder(r io.Reader) Decoder {
 	return j
 }
 
-func JSONEncoder(w io.Writer) (Encoder, Closer) {
+type JSONEncoder struct {
+	Indent   int  `json:"indent,string"`
+	NoIndent bool `json:"no_indent,string"`
+}
+
+func (e *JSONEncoder) EncodeTo(w io.Writer) (Encoder, Closer) {
+	indent := 2
+	if e.Indent > 0 {
+		indent = e.Indent
+	}
+
 	j := json.NewEncoder(w)
-	j.SetIndent("", "  ")
+	if !e.NoIndent {
+		j.SetIndent("", strings.Repeat(" ", indent))
+	}
 	return j, func() error { return nil }
 }
