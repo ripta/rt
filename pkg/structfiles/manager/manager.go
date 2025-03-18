@@ -407,6 +407,9 @@ func (m *Manager) GroupBy(expr string) error {
 // SortByFunc sorts documents in each group based on the result of evaluating
 // the expression. The value of the document is available as `doc`. See also
 // SortBy.
+//
+// XXX(ripta): this doesn't work when expr is complex, e.g.:
+// doc.apiVersion + "." + doc.kind + "/" + doc.metadata.name
 func (m *Manager) SortByFunc(expr string, reverse bool) error {
 	if reverse {
 		return m.SortBy(fmt.Sprintf(`b.%s < a.%s`, expr, expr))
