@@ -533,7 +533,11 @@ func dumpTo(wcf WriteCloserFactory, format string, opts map[string]string, dg *D
 	}
 
 	enc, finalize := df(out)
-	defer finalize()
+	defer func() {
+		if err := finalize(); err != nil {
+			Err = errors.Join(Err, err)
+		}
+	}()
 
 	for _, di := range dg.Documents {
 		if err := enc.Encode(di.Document); err != nil {
