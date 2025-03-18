@@ -33,7 +33,7 @@ type Manager struct {
 
 func New() *Manager {
 	return &Manager{
-		Version: "v1.0",
+		Version: "v1",
 		Groups:  []*DocumentGroup{},
 	}
 }
@@ -487,6 +487,22 @@ func (m *Manager) Emit(wcf WriteCloserFactory, format string) error {
 	}
 
 	return nil
+}
+
+func (m *Manager) EmitRaw(w io.Writer, format string) error {
+	if format == "" {
+		return fmt.Errorf("%w: no format specified", ErrUnknownFormat)
+	}
+
+	df := GetEncoderFactory(format)
+	if df == nil {
+		return fmt.Errorf("%w %q", ErrUnknownFormat, format)
+	}
+
+	enc, finalize := df(w)
+	defer finalize()
+
+	return enc.Encode(m)
 }
 
 func dumpTo(wcf WriteCloserFactory, format string, dg *DocumentGroup) error {

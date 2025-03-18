@@ -20,6 +20,7 @@ var (
 
 type runner struct {
 	Format  string
+	Raw     bool
 	Options map[string]string
 
 	Kubernetes bool
@@ -149,8 +150,14 @@ func (r *runner) eval(files []string) (*bytes.Buffer, error) {
 	}
 
 	buf := &bytes.Buffer{}
-	if err := m.Emit(manager.MemoryWriter(buf), r.Format); err != nil {
-		return nil, fmt.Errorf("emitting result: %w", err)
+	if r.Raw {
+		if err := m.EmitRaw(buf, r.Format); err != nil {
+			return nil, fmt.Errorf("emitting raw result: %w", err)
+		}
+	} else {
+		if err := m.Emit(manager.MemoryWriter(buf), r.Format); err != nil {
+			return nil, fmt.Errorf("emitting result: %w", err)
+		}
 	}
 
 	return buf, nil
@@ -187,6 +194,8 @@ func newDiffCommand() *cobra.Command {
 	}
 
 	cmd.Flags().StringVarP(&sf.Format, "format", "f", sf.Format, "Output format, one of: json, yaml")
+	cmd.Flags().BoolVarP(&sf.Raw, "raw", "r", sf.Raw, "Output raw structure")
+	cmd.Flags().StringToStringVarP(&sf.Options, "option", "o", sf.Options, "Options for the output format")
 
 	cmd.Flags().BoolVarP(&sf.Kubernetes, "kubernetes", "k", sf.Kubernetes, "Process files as Kubernetes resources")
 
@@ -226,6 +235,7 @@ func newEvalCommand() *cobra.Command {
 	}
 
 	cmd.Flags().StringVarP(&sf.Format, "format", "f", sf.Format, "Output format, one of: json, yaml, toml, hclv2, gob")
+	cmd.Flags().BoolVarP(&sf.Raw, "raw", "r", sf.Raw, "Output raw structure")
 	cmd.Flags().StringToStringVarP(&sf.Options, "option", "o", sf.Options, "Options for the output format")
 
 	cmd.Flags().BoolVarP(&sf.Kubernetes, "kubernetes", "k", sf.Kubernetes, "Process files as Kubernetes resources (see help)")
