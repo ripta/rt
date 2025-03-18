@@ -228,6 +228,8 @@ func newEvalCommand() *cobra.Command {
 
 	cmd.Flags().BoolVarP(&sf.Kubernetes, "kubernetes", "k", sf.Kubernetes, "Process files as Kubernetes resources (see help)")
 
+	cmd.Flags().StringVarP(&sf.FilterIn, "filter-in", "i", sf.FilterIn, "Filter documents in by the result of evaluating the expression; variables: doc, index, source.name, source.index")
+	cmd.Flags().StringVarP(&sf.FilterOut, "filter-out", "I", sf.FilterOut, "Filter documents out by the result of evaluating the expression; variables: doc, index, source.name, source.index")
 	cmd.Flags().StringVarP(&sf.GroupBy, "group-by", "g", sf.GroupBy, "Group documents by the result of evaluating the expression; variables: doc, index, source.name, source.index")
 	cmd.Flags().StringVarP(&sf.SortBy, "sort-by", "s", sf.SortBy, "Sort documents by the result of evaluating the expression; variables: {a,b}.{doc,index,source}")
 	cmd.Flags().StringVarP(&sf.SortByFunc, "sort-by-func", "S", sf.SortByFunc, "Sort documents by the result of evaluating the expression; variables: doc, index, source.name, source.index")
