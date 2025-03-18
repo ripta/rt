@@ -23,7 +23,7 @@ func UnregisterFormat(name string) {
 }
 
 func registerFormat(name string, exts []string, enc EncoderFactory, dec DecoderFactory, override bool) {
-	if override {
+	if !override {
 		if _, dup := registry[name]; dup {
 			panic("structfiles: Register called twice for " + name)
 		}
