@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"github.com/liggitt/tabwriter"
-	"github.com/ripta/gxti/diff"
 	"github.com/spf13/cobra"
 
 	"github.com/ripta/rt/pkg/structfiles/manager"
@@ -66,9 +65,12 @@ func (r *runner) RunDiff(files []string) error {
 		postName = postFiles[0]
 	}
 
-	uni := diff.Unified(preName, postName, preBuf.String(), postBuf.String())
-	fmt.Printf("%s\n", uni)
+	uni, err := generateDiff(preName, postName, preBuf, postBuf)
+	if err != nil {
+		return fmt.Errorf("generating diff: %w", err)
+	}
 
+	fmt.Printf("%s\n", uni)
 	return nil
 }
 
