@@ -2,12 +2,14 @@ package manager
 
 import (
 	"io"
+	"strings"
 
 	"github.com/BurntSushi/toml"
 )
 
 func init() {
-	RegisterFormat("toml", []string{".toml"}, TOMLEncoder, TOMLDecoder)
+	enc := &TOMLEncoder{}
+	RegisterFormatWithOptions("toml", []string{".toml"}, enc.EncodeTo, TOMLDecoder, enc)
 }
 
 func TOMLDecoder(r io.Reader) Decoder {
@@ -22,6 +24,17 @@ func TOMLDecoder(r io.Reader) Decoder {
 	}
 }
 
-func TOMLEncoder(w io.Writer) (Encoder, Closer) {
-	return toml.NewEncoder(w), noCloser
+type TOMLEncoder struct {
+	Indent int `json:"indent,string"`
+}
+
+func (e *TOMLEncoder) EncodeTo(w io.Writer) (Encoder, Closer) {
+	indent := 2
+	if e.Indent > 0 {
+		indent = e.Indent
+	}
+
+	t := toml.NewEncoder(w)
+	t.Indent = strings.Repeat(" ", indent)
+	return t, noCloser
 }

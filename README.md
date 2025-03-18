@@ -224,8 +224,81 @@ Resulting diff currently only in unified diff of YAML (see example).
 go install github.com/ripta/rt/cmd/sf@latest
 ```
 
-For example, compare two directories of Kubernetes manifests containing all-in-one
-manifests (`foo_aio`) and one-resource-per-file (`foo_each`), use `-k`:
+For a list of supported formats and format-specific options, run `sf formats`:
+
+```
+FORMAT   EXTENSIONS   INPUT   OUTPUT   OPTIONS
+csv      .csv         yes     yes      -
+gob      .gob         yes     yes      -
+hcl2     .hcl         yes     yes      -
+json     .json        yes     yes      indent:int no_indent:bool
+toml     .toml        yes     yes      indent:int
+yaml     .yml .yaml   yes     yes      indent:int
+```
+
+The simplest subcommand is `eval`, which reads one or more files and prints
+the data back out, like a pretty-printer. The default format is JSON with
+an indentation of 2 spaces.
+
+```
+❯ cat $dangit
+{"foo":
+"bar"}
+
+❯ sf eval $dangit
+{
+  "foo": "bar"
+}
+
+❯ sf eval -f json $dangit
+{
+  "foo": "bar"
+}
+
+❯ sf eval -f json -o no_indent=true $dangit
+{"foo":"bar"}
+```
+
+Of course, you can use it to convert between formats by specifying the desired
+output format:
+
+```
+❯ cat $nabbit
+{"foo":[1,2,"bar"]}
+
+❯ sf eval -f toml $nabbit
+foo = [1.0, 2.0, "bar"]
+
+❯ rt sf eval -f hcl2 $nabbit
+foo = [1, 2, "bar"]
+```
+
+Some formats may expect different shape data though:
+
+```
+❯ rt sf eval -f csv $nabbit
+Error: interface conversion: interface {} is []interface {}, not string
+```
+
+As a special case, you can also read from STDIN by specifying `stdin://` (or `-`),
+which assumes JSON or YAML. To optionally control the format parser, use `stdin://FORMAT`.
+
+```
+❯ mj foo=bar | sf eval -f yaml -
+---
+foo: bar
+
+❯ mj foo=bar | sf eval -f yaml stdin://json
+---
+foo: bar
+
+❯ generate-gob | sf eval -f json stdin://gob
+{"vals":[1,2,3]}
+```
+
+For a more advanced example, compare two directories of Kubernetes manifests
+containing all-in-one  manifests (`foo_aio`) and one-resource-per-file
+(`foo_each`), using `-k`:
 
 ```
 ❯ sf diff -k ./samples/manifests/foo_aio ./samples/manifests/foo_each
@@ -293,18 +366,6 @@ output format being diffed with `-f`
 -  "title": "YAML Example Two"
 +  "title": "TOML Example Two"
  }
-```
-
-As a special case, you can also read from STDIN and optionally control the format
-parser by using `stdin://FORMAT`:
-
-```
-❯ mj foo=bar | sf eval -f yaml stdin://json
----
-foo: bar
-
-❯ generate-gob | sf eval -f json stdin://gob
-{"vals":[1,2,3]}
 ```
 
 

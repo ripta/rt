@@ -479,9 +479,9 @@ func (m *Manager) SortBy(expr string) error {
 	return errors.Join(errs...)
 }
 
-func (m *Manager) Emit(wcf WriteCloserFactory, format string) error {
+func (m *Manager) Emit(wcf WriteCloserFactory, format string, opts map[string]string) error {
 	for _, g := range m.Groups {
-		if err := dumpTo(wcf, format, g); err != nil {
+		if err := dumpTo(wcf, format, opts, g); err != nil {
 			return fmt.Errorf("writing group %q: %w", g.Name, err)
 		}
 	}
@@ -489,12 +489,15 @@ func (m *Manager) Emit(wcf WriteCloserFactory, format string) error {
 	return nil
 }
 
-func (m *Manager) EmitRaw(w io.Writer, format string) error {
+func (m *Manager) EmitRaw(w io.Writer, format string, opts map[string]string) error {
 	if format == "" {
 		return fmt.Errorf("%w: no format specified", ErrUnknownFormat)
 	}
 
-	df := GetEncoderFactory(format)
+	df, err := GetEncoderFactory(format, opts)
+	if err != nil {
+		return fmt.Errorf("error retrieving encoder for %q: %w", format, err)
+	}
 	if df == nil {
 		return fmt.Errorf("%w %q", ErrUnknownFormat, format)
 	}
@@ -505,7 +508,13 @@ func (m *Manager) EmitRaw(w io.Writer, format string) error {
 	return enc.Encode(m)
 }
 
-func dumpTo(wcf WriteCloserFactory, format string, dg *DocumentGroup) error {
+func dumpTo(wcf WriteCloserFactory, format string, opts map[string]string, dg *DocumentGroup) (Err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			Err = fmt.Errorf("while writing format %q: %v", format, recovered)
+		}
+	}()
+
 	out, err := wcf(dg)
 	if err != nil {
 		return err
@@ -515,13 +524,20 @@ func dumpTo(wcf WriteCloserFactory, format string, dg *DocumentGroup) error {
 		return fmt.Errorf("%w: no format specified", ErrUnknownFormat)
 	}
 
-	df := GetEncoderFactory(format)
+	df, err := GetEncoderFactory(format, opts)
+	if err != nil {
+		return fmt.Errorf("error retrieving encoder for %q: %w", format, err)
+	}
 	if df == nil {
 		return fmt.Errorf("%w %q", ErrUnknownFormat, format)
 	}
 
 	enc, finalize := df(out)
-	defer finalize()
+	defer func() {
+		if err := finalize(); err != nil {
+			Err = errors.Join(Err, err)
+		}
+	}()
 
 	for _, di := range dg.Documents {
 		if err := enc.Encode(di.Document); err != nil {

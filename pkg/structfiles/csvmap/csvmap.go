@@ -69,7 +69,12 @@ func CustomEncode(w io.Writer, hook func(*csv.Writer), d *Document) error {
 
 		row := []string{}
 		for i := range d.Header {
-			row = append(row, rec[i].(string))
+			cell, ok := rec[i].(string)
+			if !ok {
+				return fmt.Errorf("%w: expected string, got %T at value %#v", ErrInvalidRecord, rec[i], rec[i])
+			}
+
+			row = append(row, cell)
 		}
 		if err := cw.Write(row); err != nil {
 			return err
