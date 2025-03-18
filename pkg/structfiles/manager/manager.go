@@ -508,7 +508,13 @@ func (m *Manager) EmitRaw(w io.Writer, format string, opts map[string]string) er
 	return enc.Encode(m)
 }
 
-func dumpTo(wcf WriteCloserFactory, format string, opts map[string]string, dg *DocumentGroup) error {
+func dumpTo(wcf WriteCloserFactory, format string, opts map[string]string, dg *DocumentGroup) (Err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			Err = fmt.Errorf("while writing format %q: %v", format, recovered)
+		}
+	}()
+
 	out, err := wcf(dg)
 	if err != nil {
 		return err
