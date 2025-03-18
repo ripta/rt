@@ -261,6 +261,75 @@ var (
 	stringType   = reflect.TypeOf("")
 )
 
+func (m *Manager) Filter(expr string, include bool) error {
+	opts := []cel.EnvOption{}
+	opts = append(opts, cel.Variable("doc", cel.DynType))
+	opts = append(opts, cel.Variable("index", cel.IntType))
+
+	env, err := cel.NewEnv(opts...)
+	if err != nil {
+		return err
+	}
+
+	ast, res := env.Compile(expr)
+	if res != nil && res.Err() != nil {
+		return res.Err()
+	}
+
+	prog, err := env.Program(ast)
+	if err != nil {
+		return err
+	}
+
+	groups := []*DocumentGroup{}
+	var errs []error
+	var index int
+	for _, g := range m.Groups {
+		group := &DocumentGroup{
+			Name:      g.Name,
+			Documents: []*DocumentInfo{},
+		}
+
+		for i, di := range g.Documents {
+			val, _, err := prog.Eval(map[string]any{
+				"doc":   *di.Document,
+				"index": index,
+				"source": map[string]any{
+					"name":  di.SrcName,
+					"index": di.SrcIndex,
+				},
+			})
+			if err != nil {
+				errs = append(errs, fmt.Errorf("evaluating filter expression %q for document %d in group %s: %w", expr, i, g.Name, err))
+				continue
+			}
+
+			index++
+
+			pred, err := val.ConvertToType(types.BoolType).ConvertToNative(boolType)
+			if err != nil {
+				errs = append(errs, err)
+				continue
+			}
+
+			if include && !pred.(bool) {
+				continue
+			} else if !include && pred.(bool) {
+				continue
+			}
+
+			group.Documents = append(group.Documents, di)
+		}
+
+		if len(group.Documents) > 0 {
+			groups = append(groups, group)
+		}
+	}
+
+	m.Groups = groups
+	return errors.Join(errs...)
+}
+
 // GroupBy regroups documents based on the result of evaluating the expression.
 // The document is available as `doc` in the expression.
 func (m *Manager) GroupBy(expr string) error {
@@ -297,7 +366,7 @@ func (m *Manager) GroupBy(expr string) error {
 				},
 			})
 			if err != nil {
-				errs = append(errs, fmt.Errorf("evaluating expression %q for document %d in group %s: %w", expr, i, g.Name, err))
+				errs = append(errs, fmt.Errorf("evaluating grouping expression %q for document %d in group %s: %w", expr, i, g.Name, err))
 				continue
 			}
 

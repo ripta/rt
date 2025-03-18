@@ -25,6 +25,8 @@ type runner struct {
 
 	Kubernetes bool
 
+	FilterIn   string
+	FilterOut  string
 	GroupBy    string
 	SortBy     string
 	SortByFunc string
@@ -114,6 +116,18 @@ func (r *runner) eval(files []string) (*bytes.Buffer, error) {
 		return nil, errors.New("no documents found")
 	}
 
+	if filter := r.FilterIn; filter != "" {
+		if err := m.Filter(filter, true); err != nil {
+			return nil, fmt.Errorf("filtering-in documents: %w", err)
+		}
+	}
+
+	if filter := r.FilterOut; filter != "" {
+		if err := m.Filter(filter, false); err != nil {
+			return nil, fmt.Errorf("filtering-out documents: %w", err)
+		}
+	}
+
 	if group := r.GroupBy; group != "" {
 		if err := m.GroupBy(group); err != nil {
 			return nil, fmt.Errorf("grouping documents: %w", err)
@@ -174,6 +188,8 @@ func newDiffCommand() *cobra.Command {
 
 	cmd.Flags().BoolVarP(&sf.Kubernetes, "kubernetes", "k", sf.Kubernetes, "Process files as Kubernetes resources")
 
+	cmd.Flags().StringVarP(&sf.FilterIn, "filter-in", "i", sf.FilterIn, "Filter documents in by the result of evaluating the expression; variables: doc, index, source.name, source.index")
+	cmd.Flags().StringVarP(&sf.FilterOut, "filter-out", "I", sf.FilterOut, "Filter documents out by the result of evaluating the expression; variables: doc, index, source.name, source.index")
 	cmd.Flags().StringVarP(&sf.GroupBy, "group-by", "g", sf.GroupBy, "Group documents by the result of evaluating the expression; variables: doc, index, source.name, source.index")
 	cmd.Flags().StringVarP(&sf.SortBy, "sort-by", "s", sf.SortBy, "Sort documents by the result of evaluating the expression; variables: {a,b}.{doc,index,source}")
 	cmd.Flags().StringVarP(&sf.SortByFunc, "sort-by-func", "S", sf.SortByFunc, "Sort documents by the result of evaluating the expression; variables: doc, index, source.name, source.index")
