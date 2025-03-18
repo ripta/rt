@@ -89,7 +89,7 @@ func (r *runner) Defaulting(_ *cobra.Command, _ []string) error {
 		r.GroupBy = `doc.apiVersion + "." + doc.kind`
 	}
 	if r.SortBy == "" && r.SortByFunc == "" {
-		r.SortBy = `a.doc.name < b.doc.name`
+		r.SortBy = `a.doc.apiVersion + "." + a.doc.kind + "/" + a.doc.metadata.name < b.doc.apiVersion + "." + b.doc.kind + "/" + b.doc.metadata.name`
 	}
 	if r.Format == "" {
 		r.Format = "yaml"
