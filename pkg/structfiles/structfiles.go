@@ -10,6 +10,7 @@ import (
 
 	"github.com/liggitt/tabwriter"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 
 	"github.com/ripta/rt/pkg/structfiles/manager"
 )
@@ -30,6 +31,20 @@ type runner struct {
 	GroupBy    string
 	SortBy     string
 	SortByFunc string
+}
+
+func (r *runner) BindFlagSet(fs *pflag.FlagSet) {
+	fs.StringVarP(&r.Format, "format", "f", r.Format, "Output format, one of: json, yaml, toml, hclv2, gob")
+	fs.BoolVarP(&r.Raw, "raw", "r", r.Raw, "Output raw structure")
+	fs.StringToStringVarP(&r.Options, "option", "o", r.Options, "Options for the output format")
+
+	fs.BoolVarP(&r.Kubernetes, "kubernetes", "k", r.Kubernetes, "Process files as Kubernetes resources (see help)")
+
+	fs.StringVarP(&r.FilterIn, "filter-in", "i", r.FilterIn, "Filter documents in by the result of evaluating the expression; variables: doc, index, source.name, source.index")
+	fs.StringVarP(&r.FilterOut, "filter-out", "I", r.FilterOut, "Filter documents out by the result of evaluating the expression; variables: doc, index, source.name, source.index")
+	fs.StringVarP(&r.GroupBy, "group-by", "g", r.GroupBy, "Group documents by the result of evaluating the expression; variables: doc, index, source.name, source.index")
+	fs.StringVarP(&r.SortBy, "sort-by", "s", r.SortBy, "Sort documents by the result of evaluating the expression; variables: {a,b}.{doc,index,source}")
+	fs.StringVarP(&r.SortByFunc, "sort-by-func", "S", r.SortByFunc, "Sort documents by the result of evaluating the expression; variables: doc, index, source.name, source.index")
 }
 
 func (r *runner) RunDiff(files []string) error {
@@ -193,18 +208,7 @@ func newDiffCommand() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVarP(&sf.Format, "format", "f", sf.Format, "Output format, one of: json, yaml")
-	cmd.Flags().BoolVarP(&sf.Raw, "raw", "r", sf.Raw, "Output raw structure")
-	cmd.Flags().StringToStringVarP(&sf.Options, "option", "o", sf.Options, "Options for the output format")
-
-	cmd.Flags().BoolVarP(&sf.Kubernetes, "kubernetes", "k", sf.Kubernetes, "Process files as Kubernetes resources")
-
-	cmd.Flags().StringVarP(&sf.FilterIn, "filter-in", "i", sf.FilterIn, "Filter documents in by the result of evaluating the expression; variables: doc, index, source.name, source.index")
-	cmd.Flags().StringVarP(&sf.FilterOut, "filter-out", "I", sf.FilterOut, "Filter documents out by the result of evaluating the expression; variables: doc, index, source.name, source.index")
-	cmd.Flags().StringVarP(&sf.GroupBy, "group-by", "g", sf.GroupBy, "Group documents by the result of evaluating the expression; variables: doc, index, source.name, source.index")
-	cmd.Flags().StringVarP(&sf.SortBy, "sort-by", "s", sf.SortBy, "Sort documents by the result of evaluating the expression; variables: {a,b}.{doc,index,source}")
-	cmd.Flags().StringVarP(&sf.SortByFunc, "sort-by-func", "S", sf.SortByFunc, "Sort documents by the result of evaluating the expression; variables: doc, index, source.name, source.index")
-
+	sf.BindFlagSet(cmd.Flags())
 	return cmd
 }
 
@@ -234,18 +238,7 @@ func newEvalCommand() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVarP(&sf.Format, "format", "f", sf.Format, "Output format, one of: json, yaml, toml, hclv2, gob")
-	cmd.Flags().BoolVarP(&sf.Raw, "raw", "r", sf.Raw, "Output raw structure")
-	cmd.Flags().StringToStringVarP(&sf.Options, "option", "o", sf.Options, "Options for the output format")
-
-	cmd.Flags().BoolVarP(&sf.Kubernetes, "kubernetes", "k", sf.Kubernetes, "Process files as Kubernetes resources (see help)")
-
-	cmd.Flags().StringVarP(&sf.FilterIn, "filter-in", "i", sf.FilterIn, "Filter documents in by the result of evaluating the expression; variables: doc, index, source.name, source.index")
-	cmd.Flags().StringVarP(&sf.FilterOut, "filter-out", "I", sf.FilterOut, "Filter documents out by the result of evaluating the expression; variables: doc, index, source.name, source.index")
-	cmd.Flags().StringVarP(&sf.GroupBy, "group-by", "g", sf.GroupBy, "Group documents by the result of evaluating the expression; variables: doc, index, source.name, source.index")
-	cmd.Flags().StringVarP(&sf.SortBy, "sort-by", "s", sf.SortBy, "Sort documents by the result of evaluating the expression; variables: {a,b}.{doc,index,source}")
-	cmd.Flags().StringVarP(&sf.SortByFunc, "sort-by-func", "S", sf.SortByFunc, "Sort documents by the result of evaluating the expression; variables: doc, index, source.name, source.index")
-
+	sf.BindFlagSet(cmd.Flags())
 	return cmd
 }
 
