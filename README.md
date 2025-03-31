@@ -209,14 +209,13 @@ Proof of concept tool to examine and compare a pile of structured files (e.g.,
 Kubernetes manifests) strewn across multiple directories or files, with any
 number of documents per file.
 
-Supports YAML, JSON, TOML, HCLv2, GOB, and CSV as input and output.
+Supports YAML, JSON, TOML, HCLv2, GOB, CSV, and MessagePack as input and output.
 
 - HCLv2 output is experimental, due to the way that HCLv2 is schema-driven and
   the lack of a way to represent the schema in structfiles.
 - CSV does not support nested maps. CSV treats each row as a separate document.
   The first row of a CSV file is assumed to be the header.
-
-The formats YAML, JSON, and GOB support multiple documents in one stream.
+- YAML, JSON, and GOB support multiple documents in one stream.
 
 Resulting diff currently only in unified diff of YAML (see example).
 
@@ -227,13 +226,14 @@ go install github.com/ripta/rt/cmd/sf@latest
 For a list of supported formats and format-specific options, run `sf formats`:
 
 ```
-FORMAT   EXTENSIONS   INPUT   OUTPUT   OPTIONS
-csv      .csv         yes     yes      -
-gob      .gob         yes     yes      -
-hcl2     .hcl         yes     yes      -
-json     .json        yes     yes      indent:int no_indent:bool
-toml     .toml        yes     yes      indent:int
-yaml     .yml .yaml   yes     yes      indent:int
+FORMAT    EXTENSIONS      INPUT   OPTIONS      OUTPUT   OPTIONS
+csv       .csv            yes     sep:string   yes      sep:string
+gob       .gob            yes     -            yes      -
+hcl2      .hcl            yes     -            yes      -
+json      .json           yes     -            yes      no_indent:bool indent:int
+msgpack   .mpk .msgpack   yes     -            yes      -
+toml      .toml           yes     -            yes      indent:int
+yaml      .yml .yaml      yes     -            yes      indent:int
 ```
 
 The simplest subcommand is `eval`, which reads one or more files and prints
