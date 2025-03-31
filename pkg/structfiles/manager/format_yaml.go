@@ -9,7 +9,7 @@ import (
 
 func init() {
 	enc := &YAMLEncoder{}
-	RegisterFormatWithOptions("yaml", []string{".yml", ".yaml"}, enc.EncodeTo, YAMLDecoder, enc)
+	RegisterFormatWithOptions("yaml", []string{".yml", ".yaml"}, enc.EncodeTo, enc, YAMLDecoder, nil)
 }
 
 func YAMLDecoder(r io.Reader) Decoder {

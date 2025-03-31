@@ -11,7 +11,7 @@ import (
 
 func init() {
 	opts := &CSVOptions{}
-	RegisterFormatWithOptions("csv", []string{".csv"}, opts.CSVEncoder, opts.CSVDecoder, opts)
+	RegisterFormatWithOptions("csv", []string{".csv"}, opts.CSVEncoder, opts, opts.CSVDecoder, opts)
 }
 
 type CSVOptions struct {
@@ -26,7 +26,13 @@ func (opts *CSVOptions) Validate() error {
 }
 
 func (opts *CSVOptions) CSVDecoder(r io.Reader) Decoder {
-	d, err := csvmap.Decode(r)
+	h := func(cr *csv.Reader) {
+		if opts.Separator != "" {
+			cr.Comma = rune(opts.Separator[0])
+		}
+	}
+
+	d, err := csvmap.CustomDecode(r, h)
 
 	num := 0
 	return DecoderFunc(func(v any) error {
