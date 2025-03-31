@@ -102,7 +102,18 @@ func GetEncoderFactory(name string, opts map[string]string) (EncoderFactory, err
 
 	dec := json.NewDecoder(bytes.NewReader(bs))
 	dec.DisallowUnknownFields()
-	return enc, dec.Decode(registry[name].opts)
+
+	if err := dec.Decode(registry[name].opts); err != nil {
+		return nil, err
+	}
+
+	if v, ok := registry[name].opts.(Validator); ok {
+		if err := v.Validate(); err != nil {
+			return nil, err
+		}
+	}
+
+	return enc, nil
 }
 
 func GetEncoderOptions(name string) map[string]string {

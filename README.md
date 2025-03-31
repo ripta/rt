@@ -368,6 +368,9 @@ output format being diffed with `-f`
  }
 ```
 
+For tab-delimited output, use the CSV format and set the separator to
+tab: `-f csv -o sep=$'\t'`
+
 
 `toto`
 ------
