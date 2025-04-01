@@ -15,7 +15,8 @@ func TestCSV(t *testing.T) {
 		{"name": "jane", "age": "25"},
 	}
 
-	dec := CSVDecoder(strings.NewReader(csvString))
+	opts := &CSVOptions{}
+	dec := opts.CSVDecoder(strings.NewReader(csvString))
 	for {
 		var m any
 		if err := dec.Decode(&m); err != nil {
