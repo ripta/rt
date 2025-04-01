@@ -38,7 +38,7 @@ func New() *Manager {
 	}
 }
 
-func (m *Manager) ProcessAll(files []string) error {
+func (m *Manager) ProcessAll(files []string, opts map[string]string) error {
 	if len(files) == 0 {
 		return nil
 	}
@@ -46,13 +46,13 @@ func (m *Manager) ProcessAll(files []string) error {
 	errs := []error{}
 	for _, file := range files {
 		if file == "-" {
-			if err := m.ProcessReader("stdin://", os.Stdin, AutoFormat); err != nil {
+			if err := m.ProcessReader("stdin://", os.Stdin, AutoFormat, opts); err != nil {
 				errs = append(errs, err)
 			}
 			continue
 		}
 		if after, found := strings.CutPrefix(file, "stdin://"); found {
-			if err := m.ProcessReader("stdin://", os.Stdin, after); err != nil {
+			if err := m.ProcessReader("stdin://", os.Stdin, after, opts); err != nil {
 				errs = append(errs, err)
 			}
 			continue
@@ -65,13 +65,13 @@ func (m *Manager) ProcessAll(files []string) error {
 		}
 
 		if fi.IsDir() {
-			if err := m.ProcessDir(file); err != nil {
+			if err := m.ProcessDir(file, opts); err != nil {
 				errs = append(errs, err)
 			}
 			continue
 		}
 
-		if err := m.ProcessFile(file); err != nil {
+		if err := m.ProcessFile(file, opts); err != nil {
 			errs = append(errs, err)
 			continue
 		}
@@ -80,14 +80,14 @@ func (m *Manager) ProcessAll(files []string) error {
 	return errors.Join(errs...)
 }
 
-func (m *Manager) ProcessDir(dir string) error {
+func (m *Manager) ProcessDir(dir string, opts map[string]string) error {
 	fi, err := os.Stat(dir)
 	if err != nil {
 		return err
 	}
 
 	if !fi.IsDir() {
-		return m.ProcessFile(dir)
+		return m.ProcessFile(dir, opts)
 	}
 
 	errs := []error{}
@@ -102,7 +102,7 @@ func (m *Manager) ProcessDir(dir string) error {
 			return nil
 		}
 
-		dis, err := processFile(filepath.Join(dir, path))
+		dis, err := processFile(filepath.Join(dir, path), opts)
 		if err != nil {
 			errs = append(errs, err)
 			return nil
@@ -119,8 +119,8 @@ func (m *Manager) ProcessDir(dir string) error {
 	return errors.Join(errs...)
 }
 
-func (m *Manager) ProcessFile(file string) error {
-	dis, err := processFile(file)
+func (m *Manager) ProcessFile(file string, opts map[string]string) error {
+	dis, err := processFile(file, opts)
 	if err != nil {
 		return err
 	}
@@ -132,8 +132,8 @@ func (m *Manager) ProcessFile(file string) error {
 	return nil
 }
 
-func (m *Manager) ProcessReader(name string, in io.Reader, format string) error {
-	docs, err := loadFrom(in, format)
+func (m *Manager) ProcessReader(name string, in io.Reader, format string, opts map[string]string) error {
+	docs, err := loadFrom(in, format, opts)
 	if err != nil {
 		return fmt.Errorf("loading documents from reader for %q: %w", name, err)
 	}
@@ -155,13 +155,13 @@ func (m *Manager) ProcessReader(name string, in io.Reader, format string) error 
 	return nil
 }
 
-func processFile(file string) ([]*DocumentInfo, error) {
+func processFile(file string, opts map[string]string) ([]*DocumentInfo, error) {
 	in, err := os.Open(file)
 	if err != nil {
 		return nil, err
 	}
 
-	docs, err := loadFrom(in, FindByExtension(filepath.Ext(file)))
+	docs, err := loadFrom(in, FindByExtension(filepath.Ext(file)), opts)
 	if err != nil {
 		return nil, fmt.Errorf("loading documents from file %q: %w", file, err)
 	}
@@ -184,8 +184,12 @@ func processFile(file string) ([]*DocumentInfo, error) {
 //
 // The format may be any valid format as returned by GetFormats(), or the special
 // empty string, which will try every format in turn.
-func loadFrom(in io.Reader, format string) ([]*Document, error) {
-	df := GetDecoderFactory(format)
+func loadFrom(in io.Reader, format string, opts map[string]string) ([]*Document, error) {
+	df, err := GetDecoderFactory(format, opts)
+	if err != nil {
+		return nil, fmt.Errorf("retrieving decoder for %q: %w", format, err)
+	}
+
 	if df == nil {
 		if format == AutoFormat {
 			df = AutoDecoder

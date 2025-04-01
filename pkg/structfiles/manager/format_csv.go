@@ -1,6 +1,7 @@
 package manager
 
 import (
+	"encoding/csv"
 	"fmt"
 	"io"
 	"reflect"
@@ -9,11 +10,29 @@ import (
 )
 
 func init() {
-	RegisterFormat("csv", []string{".csv"}, CSVEncoder, CSVDecoder)
+	opts := &CSVOptions{}
+	RegisterFormatWithOptions("csv", []string{".csv"}, opts.CSVEncoder, opts, opts.CSVDecoder, opts)
 }
 
-func CSVDecoder(r io.Reader) Decoder {
-	d, err := csvmap.Decode(r)
+type CSVOptions struct {
+	Separator string `json:"sep"`
+}
+
+func (opts *CSVOptions) Validate() error {
+	if len(opts.Separator) > 1 {
+		return fmt.Errorf("CSV separator must be at most a single rune, got %d runes (%q)", len(opts.Separator), opts.Separator)
+	}
+	return nil
+}
+
+func (opts *CSVOptions) CSVDecoder(r io.Reader) Decoder {
+	h := func(cr *csv.Reader) {
+		if opts.Separator != "" {
+			cr.Comma = rune(opts.Separator[0])
+		}
+	}
+
+	d, err := csvmap.CustomDecode(r, h)
 
 	num := 0
 	return DecoderFunc(func(v any) error {
@@ -36,7 +55,7 @@ func CSVDecoder(r io.Reader) Decoder {
 	})
 }
 
-func CSVEncoder(w io.Writer) (Encoder, Closer) {
+func (opts *CSVOptions) CSVEncoder(w io.Writer) (Encoder, Closer) {
 	d := &csvmap.Document{}
 	e := func(v any) error {
 		rv := reflect.ValueOf(v)
@@ -60,6 +79,12 @@ func CSVEncoder(w io.Writer) (Encoder, Closer) {
 	}
 
 	return EncoderFunc(e), func() error {
-		return csvmap.Encode(w, d)
+		h := func(cw *csv.Writer) {
+			if opts.Separator != "" {
+				cw.Comma = rune(opts.Separator[0])
+			}
+		}
+
+		return csvmap.CustomEncode(w, h, d)
 	}
 }

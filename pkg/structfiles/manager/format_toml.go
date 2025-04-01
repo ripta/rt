@@ -9,7 +9,7 @@ import (
 
 func init() {
 	enc := &TOMLEncoder{}
-	RegisterFormatWithOptions("toml", []string{".toml"}, enc.EncodeTo, TOMLDecoder, enc)
+	RegisterFormatWithOptions("toml", []string{".toml"}, enc.EncodeTo, enc, TOMLDecoder, nil)
 }
 
 func TOMLDecoder(r io.Reader) Decoder {

@@ -8,7 +8,7 @@ import (
 
 func init() {
 	enc := &JSONEncoder{}
-	RegisterFormatWithOptions("json", []string{".json"}, enc.EncodeTo, JSONDecoder, enc)
+	RegisterFormatWithOptions("json", []string{".json"}, enc.EncodeTo, enc, JSONDecoder, nil)
 }
 
 func JSONDecoder(r io.Reader) Decoder {

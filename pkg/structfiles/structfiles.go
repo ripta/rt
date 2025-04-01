@@ -20,9 +20,11 @@ var (
 )
 
 type runner struct {
-	Format  string
-	Raw     bool
-	Options map[string]string
+	Format string
+	Raw    bool
+
+	DecoderOptions map[string]string
+	EncoderOptions map[string]string
 
 	Kubernetes bool
 
@@ -36,7 +38,8 @@ type runner struct {
 func (r *runner) BindFlagSet(fs *pflag.FlagSet) {
 	fs.StringVarP(&r.Format, "format", "f", r.Format, "Output format, one of: json, yaml, toml, hclv2, gob")
 	fs.BoolVarP(&r.Raw, "raw", "r", r.Raw, "Output raw structure")
-	fs.StringToStringVarP(&r.Options, "option", "o", r.Options, "Options for the output format")
+	fs.StringToStringVarP(&r.DecoderOptions, "decoder-option", "d", r.DecoderOptions, "Options for the input (decoding) format")
+	fs.StringToStringVarP(&r.EncoderOptions, "encoder-option", "o", r.EncoderOptions, "Options for the output (encoding) format")
 
 	fs.BoolVarP(&r.Kubernetes, "kubernetes", "k", r.Kubernetes, "Process files as Kubernetes resources (see help)")
 
@@ -121,7 +124,7 @@ func (r *runner) Defaulting(_ *cobra.Command, _ []string) error {
 func (r *runner) eval(files []string) (*bytes.Buffer, error) {
 	m := manager.New()
 
-	if err := m.ProcessAll(files); err != nil {
+	if err := m.ProcessAll(files, r.DecoderOptions); err != nil {
 		return nil, err
 	}
 
@@ -167,11 +170,11 @@ func (r *runner) eval(files []string) (*bytes.Buffer, error) {
 
 	buf := &bytes.Buffer{}
 	if r.Raw {
-		if err := m.EmitRaw(buf, r.Format, r.Options); err != nil {
+		if err := m.EmitRaw(buf, r.Format, r.EncoderOptions); err != nil {
 			return nil, fmt.Errorf("emitting raw result: %w", err)
 		}
 	} else {
-		if err := m.Emit(manager.MemoryWriter(buf), r.Format, r.Options); err != nil {
+		if err := m.Emit(manager.MemoryWriter(buf), r.Format, r.EncoderOptions); err != nil {
 			return nil, fmt.Errorf("emitting result: %w", err)
 		}
 	}
@@ -250,30 +253,37 @@ func newFormatsCommand() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			tw := tabwriter.NewWriter(os.Stdout, 6, 4, 3, ' ', tabwriter.RememberWidths)
 
-			fmt.Fprintln(tw, "FORMAT\tEXTENSIONS\tINPUT\tOUTPUT\tOPTIONS")
+			fmt.Fprintln(tw, "FORMAT\tEXTENSIONS\tINPUT\tOPTIONS\tOUTPUT\tOPTIONS")
 			for _, f := range manager.GetFormats() {
 				exts := strings.Join(manager.GetExtensions(f), " ")
 
 				hasDecoder := "no"
-				if manager.GetDecoderFactory(f) != nil {
+				if df, _ := manager.GetDecoderFactory(f, nil); df != nil {
 					hasDecoder = "yes"
 				}
 
+				decOpts := []string{}
+				for k, v := range manager.GetDecoderOptions(f) {
+					decOpts = append(decOpts, fmt.Sprintf("%s:%s", k, v))
+				}
+				if len(decOpts) == 0 {
+					decOpts = []string{"-"}
+				}
+
 				hasEncoder := "no"
-				df, _ := manager.GetEncoderFactory(f, nil)
-				if df != nil {
+				if ef, _ := manager.GetEncoderFactory(f, nil); ef != nil {
 					hasEncoder = "yes"
 				}
 
-				optionDescs := []string{}
+				encOpts := []string{}
 				for k, v := range manager.GetEncoderOptions(f) {
-					optionDescs = append(optionDescs, fmt.Sprintf("%s:%s", k, v))
+					encOpts = append(encOpts, fmt.Sprintf("%s:%s", k, v))
 				}
-				if len(optionDescs) == 0 {
-					optionDescs = []string{"-"}
+				if len(encOpts) == 0 {
+					encOpts = []string{"-"}
 				}
 
-				fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", f, exts, hasDecoder, hasEncoder, strings.Join(optionDescs, " "))
+				fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", f, exts, hasDecoder, strings.Join(decOpts, " "), hasEncoder, strings.Join(encOpts, " "))
 			}
 
 			return tw.Flush()
