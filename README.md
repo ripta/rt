@@ -217,6 +217,8 @@ Supports YAML, JSON, TOML, HCLv2, GOB, CSV, and MessagePack as input and output.
   The first row of a CSV file is assumed to be the header.
 - YAML, JSON, and GOB support multiple documents in one stream.
 
+EDN only supports output for now, due to EDN accepting `any` as the key to maps.
+
 Resulting diff currently only in unified diff of YAML (see example).
 
 ```
@@ -228,9 +230,10 @@ For a list of supported formats and format-specific options, run `sf formats`:
 ```
 FORMAT    EXTENSIONS      INPUT   OPTIONS      OUTPUT   OPTIONS
 csv       .csv            yes     sep:string   yes      sep:string
+edn       .edn            no      -            yes      prefix:string indent:int
 gob       .gob            yes     -            yes      -
 hcl2      .hcl            yes     -            yes      -
-json      .json           yes     -            yes      no_indent:bool indent:int
+json      .json           yes     -            yes      indent:int no_indent:bool
 msgpack   .mpk .msgpack   yes     -            yes      -
 toml      .toml           yes     -            yes      indent:int
 yaml      .yml .yaml      yes     -            yes      indent:int
