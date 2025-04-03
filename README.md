@@ -231,7 +231,7 @@ For a list of supported formats and format-specific options, run `sf formats`:
 ```
 FORMAT    EXTENSIONS      INPUT   OPTIONS      OUTPUT   OPTIONS
 csv       .csv            yes     sep:string   yes      sep:string
-edn       .edn            yes     -            yes      prefix:string indent:int
+edn       .edn            yes     -            yes      indent:int prefix:string
 gob       .gob            yes     -            yes      -
 hcl2      .hcl            yes     -            yes      -
 json      .json           yes     -            yes      indent:int no_indent:bool

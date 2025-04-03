@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"slices"
+	"sort"
 	"strings"
 
 	"github.com/liggitt/tabwriter"
@@ -269,6 +270,7 @@ func newFormatsCommand() *cobra.Command {
 				if len(decOpts) == 0 {
 					decOpts = []string{"-"}
 				}
+				sort.Strings(decOpts)
 
 				hasEncoder := "no"
 				if ef, _ := manager.GetEncoderFactory(f, nil); ef != nil {
@@ -282,6 +284,7 @@ func newFormatsCommand() *cobra.Command {
 				if len(encOpts) == 0 {
 					encOpts = []string{"-"}
 				}
+				sort.Strings(encOpts)
 
 				fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", f, exts, hasDecoder, strings.Join(decOpts, " "), hasEncoder, strings.Join(encOpts, " "))
 			}
