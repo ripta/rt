@@ -26,7 +26,7 @@ or pick-and-choose each tool to individually install:
 * [hs](#hs) to hash STDIN
 * [place](#place) for macOS Location Services
 * [streamdiff](#streamdiff) to help you pick out field changes off a stream of JSON
-* [structfiles](#structfiles) to examine and compare a pile of structured files
+* [structfiles](#structfiles-sf) to examine and compare a pile of structured files
 * [toto](#toto) to inspect some protobuf messages
 * [uni](#uni) for unicode utils
 * [yfmt](#yfmt) to reindent YAML while preserving comments
