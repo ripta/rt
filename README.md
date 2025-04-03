@@ -209,15 +209,16 @@ Proof of concept tool to examine and compare a pile of structured files (e.g.,
 Kubernetes manifests) strewn across multiple directories or files, with any
 number of documents per file.
 
-Supports YAML, JSON, TOML, HCLv2, GOB, CSV, and MessagePack as input and output.
+Supports YAML, JSON, TOML, HCLv2, GOB, CSV, MessagePack, and EDN as input and
+output, with some caveats:
 
 - HCLv2 output is experimental, due to the way that HCLv2 is schema-driven and
   the lack of a way to represent the schema in structfiles.
 - CSV does not support nested maps. CSV treats each row as a separate document.
   The first row of a CSV file is assumed to be the header.
 - YAML, JSON, and GOB support multiple documents in one stream.
-
-EDN only supports output for now, due to EDN accepting `any` as the key to maps.
+- EDN decoding forces stringification of map keys, and does not yet support the
+  entire EDN spec, e.g., `{:foo #{a 2}}` still trips up the converter.
 
 Resulting diff currently only in unified diff of YAML (see example).
 
@@ -230,7 +231,7 @@ For a list of supported formats and format-specific options, run `sf formats`:
 ```
 FORMAT    EXTENSIONS      INPUT   OPTIONS      OUTPUT   OPTIONS
 csv       .csv            yes     sep:string   yes      sep:string
-edn       .edn            no      -            yes      prefix:string indent:int
+edn       .edn            yes     -            yes      prefix:string indent:int
 gob       .gob            yes     -            yes      -
 hcl2      .hcl            yes     -            yes      -
 json      .json           yes     -            yes      indent:int no_indent:bool
