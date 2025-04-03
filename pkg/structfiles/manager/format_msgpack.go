@@ -1,8 +1,9 @@
 package manager
 
 import (
-	"github.com/vmihailenco/msgpack/v5"
 	"io"
+
+	"github.com/vmihailenco/msgpack/v5"
 )
 
 func init() {
