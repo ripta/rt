@@ -40,6 +40,13 @@ var displayFuncs = map[string]displayFunc{
 	},
 }
 
+var displayGroups = map[string][]string{
+	"all":     {"id", "rune", "hexbytes", "cats", "script", "name"},
+	"bytes":   {"id", "rune", "hexbytes"},
+	"default": {"id", "rune", "hexbytes", "cats", "name"},
+	"short":   {"id", "rune", "hexbytes", "name"},
+}
+
 type Config struct {
 	columns []string
 }
@@ -54,15 +61,30 @@ func New(cols []string) (*Config, error) {
 		return nil, ErrNoColumnsSpecified
 	}
 
+	cleanCols := []string{}
 	for _, col := range cols {
+		if group, ok := displayGroups[col]; ok {
+			for _, gcol := range group {
+				if _, ok := displayFuncs[gcol]; !ok {
+					names := slices.Sorted(maps.Keys(displayFuncs))
+					return nil, fmt.Errorf("%w: %q, expecting one of %v", ErrInvalidColumn, gcol, names)
+				}
+
+				cleanCols = append(cleanCols, gcol)
+			}
+			continue
+		}
+
 		if _, ok := displayFuncs[col]; !ok {
 			names := slices.Sorted(maps.Keys(displayFuncs))
 			return nil, fmt.Errorf("%w: %q, expecting one of %v", ErrInvalidColumn, col, names)
 		}
+
+		cleanCols = append(cleanCols, col)
 	}
 
 	return &Config{
-		columns: cols,
+		columns: cleanCols,
 	}, nil
 }
 
