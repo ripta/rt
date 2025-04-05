@@ -1,8 +1,6 @@
 module github.com/ripta/rt
 
-go 1.23.0
-
-toolchain go1.23.4
+go 1.23.4
 
 require (
 	github.com/BurntSushi/toml v1.5.0
@@ -14,6 +12,7 @@ require (
 	github.com/mr-tron/base58 v1.2.0
 	github.com/r3labs/diff/v3 v3.0.1
 	github.com/ripta/hypercmd v0.3.0
+	github.com/ripta/unihan v0.0.0-20250404091138-c307c698a880
 	github.com/spf13/cobra v1.9.1
 	github.com/spf13/pflag v1.0.6
 	github.com/stretchr/testify v1.10.0

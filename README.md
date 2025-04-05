@@ -407,7 +407,19 @@ files directly in go (or at least, I wasn't able to).
 Unicode-related stuff.
 
 ```
+# For a smaller installation, excluding the Unicode Han Database:
 go install github.com/ripta/rt/cmd/uni@latest
+
+# To include Unicode Han Database, which adds about 25MB to the binary:
+go install -tags unihan github.com/ripta/rt/cmd/uni@latest
+```
+
+Size comparison:
+
+```
+❯ stat -f '%z %N' uni unihan
+ 6572386 uni
+34410114 unihan
 ```
 
 List characters:
