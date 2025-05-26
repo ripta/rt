@@ -4,7 +4,7 @@ go 1.23.4
 
 require (
 	github.com/BurntSushi/toml v1.5.0
-	github.com/containerd/console v1.0.4
+	github.com/containerd/console v1.0.5
 	github.com/google/cel-go v0.25.0
 	github.com/gosuri/uilive v0.0.4
 	github.com/hashicorp/hcl/v2 v2.23.0
