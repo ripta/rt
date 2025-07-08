@@ -7,7 +7,7 @@ require (
 	github.com/containerd/console v1.0.5
 	github.com/google/cel-go v0.25.0
 	github.com/gosuri/uilive v0.0.4
-	github.com/hashicorp/hcl/v2 v2.23.0
+	github.com/hashicorp/hcl/v2 v2.24.0
 	github.com/liggitt/tabwriter v0.0.0-20181228230101-89fcab3d43de
 	github.com/mr-tron/base58 v1.2.0
 	github.com/r3labs/diff/v3 v3.0.1
