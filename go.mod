@@ -5,7 +5,7 @@ go 1.23.4
 require (
 	github.com/BurntSushi/toml v1.5.0
 	github.com/containerd/console v1.0.5
-	github.com/google/cel-go v0.25.0
+	github.com/google/cel-go v0.26.0
 	github.com/gosuri/uilive v0.0.4
 	github.com/hashicorp/hcl/v2 v2.24.0
 	github.com/liggitt/tabwriter v0.0.0-20181228230101-89fcab3d43de
@@ -14,7 +14,7 @@ require (
 	github.com/ripta/hypercmd v0.3.0
 	github.com/ripta/unihan v0.0.0-20250404091138-c307c698a880
 	github.com/spf13/cobra v1.9.1
-	github.com/spf13/pflag v1.0.6
+	github.com/spf13/pflag v1.0.7
 	github.com/stretchr/testify v1.10.0
 	github.com/thediveo/enumflag/v2 v2.0.7
 	github.com/vmihailenco/msgpack/v5 v5.4.1
@@ -28,7 +28,7 @@ require (
 )
 
 require (
-	cel.dev/expr v0.23.1 // indirect
+	cel.dev/expr v0.24.0 // indirect
 	github.com/agext/levenshtein v1.2.3 // indirect
 	github.com/antlr4-go/antlr/v4 v4.13.1 // indirect
 	github.com/apparentlymart/go-textseg/v15 v15.0.0 // indirect
