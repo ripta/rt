@@ -1,6 +1,6 @@
 module github.com/ripta/rt
 
-go 1.23.4
+go 1.23.5
 
 require (
 	github.com/BurntSushi/toml v1.5.0
@@ -10,7 +10,7 @@ require (
 	github.com/hashicorp/hcl/v2 v2.24.0
 	github.com/liggitt/tabwriter v0.0.0-20181228230101-89fcab3d43de
 	github.com/mr-tron/base58 v1.2.0
-	github.com/r3labs/diff/v3 v3.0.1
+	github.com/r3labs/diff/v3 v3.0.2
 	github.com/ripta/hypercmd v0.3.0
 	github.com/ripta/unihan v0.0.0-20250404091138-c307c698a880
 	github.com/spf13/cobra v1.9.1
@@ -19,9 +19,9 @@ require (
 	github.com/thediveo/enumflag/v2 v2.0.7
 	github.com/vmihailenco/msgpack/v5 v5.4.1
 	github.com/zclconf/go-cty v1.16.3
-	golang.org/x/crypto v0.40.0
-	golang.org/x/text v0.27.0
-	google.golang.org/protobuf v1.36.6
+	golang.org/x/crypto v0.41.0
+	golang.org/x/text v0.28.0
+	google.golang.org/protobuf v1.36.7
 	gopkg.in/yaml.v3 v3.0.1
 	lukechampine.com/blake3 v1.4.1
 	olympos.io/encoding/edn v0.0.0-20201019073823-d3554ca0b0a3
@@ -42,10 +42,10 @@ require (
 	github.com/stoewer/go-strcase v1.3.0 // indirect
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
 	golang.org/x/exp v0.0.0-20250305212735-054e65f0b394 // indirect
-	golang.org/x/mod v0.25.0 // indirect
+	golang.org/x/mod v0.26.0 // indirect
 	golang.org/x/sync v0.16.0 // indirect
-	golang.org/x/sys v0.34.0 // indirect
-	golang.org/x/tools v0.34.0 // indirect
+	golang.org/x/sys v0.35.0 // indirect
+	golang.org/x/tools v0.35.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20250324211829-b45e905df463 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20250324211829-b45e905df463 // indirect
 )
