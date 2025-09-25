@@ -14,14 +14,12 @@ func lexIdent(l *L) lexingState {
 
 func lexNumber(l *L) lexingState {
 	if !l.AcceptWhile(IsNumeric) {
-		l.Errorf("invalid number: %s", l.Current())
-		return nil
+		return l.Errorf("invalid number: %s", l.Current())
 	}
 
 	num := l.Current()
 	if dec := strings.Count(num, "."); dec > 1 {
-		l.Errorf("too many decimal points (%d) in number; expected 0 or 1", dec)
-		return nil
+		return l.Errorf("too many decimal points (%d) in number; expected 0 or 1", dec)
 	} else if dec == 1 {
 		l.Emit(tokens.LIT_FLOAT)
 	} else {

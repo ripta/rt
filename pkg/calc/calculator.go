@@ -9,14 +9,19 @@ import (
 	"github.com/ripta/rt/pkg/num"
 )
 
-type Calculator struct{}
+type Calculator struct {
+	ExpressionCount int
+}
 
 func (c *Calculator) Evaluate(expr string) (*num.Num, error) {
 	return Evaluate(expr)
 }
 
 func (c *Calculator) Execute(expr string) {
-	defer fmt.Println()
+	defer func() {
+		c.ExpressionCount++
+		fmt.Println()
+	}()
 
 	res, err := c.Evaluate(expr)
 	if err != nil {
@@ -28,7 +33,7 @@ func (c *Calculator) Execute(expr string) {
 }
 
 func (c *Calculator) DisplayError(err error) {
-	fmt.Fprintf(os.Stderr, "Error: %s\n", err)
+	fmt.Fprintf(os.Stderr, "calc:%03d/ Error: %s\n", c.ExpressionCount, err)
 }
 
 func (c *Calculator) DisplayResult(res *num.Num) {
@@ -38,8 +43,9 @@ func (c *Calculator) DisplayResult(res *num.Num) {
 func (c *Calculator) REPL() {
 	p := prompt.New(
 		c.Execute,
-		prompt.WithPrefix("calc> "),
-		// prompt.WithInitialText("ident = 2"),
+		prompt.WithPrefixCallback(func() string {
+			return fmt.Sprintf("calc:%03d> ", c.ExpressionCount)
+		}),
 		prompt.WithExitChecker(func(in string, breakline bool) bool {
 			return breakline && (in == "exit" || in == "quit")
 		}),

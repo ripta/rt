@@ -1,17 +1,37 @@
 package calc
 
-import "github.com/spf13/cobra"
+import (
+	"errors"
+	"fmt"
+	"os"
 
+	"github.com/spf13/cobra"
+	"golang.org/x/term"
+)
+
+var ErrNotTTY = errors.New("STDIN is not a TTY")
+
+// NewCommand creates a new calculator command.
+//
+// Expressions can be passed as one or more arguments. If no arguments are
+// provided and STDIN is a TTY, it will start a REPL. Otherwise, the command
+// will return ErrNotTTY.
 func NewCommand() *cobra.Command {
 	c := &Calculator{}
 	cmd := &cobra.Command{
-		Use:   "calc",
-		Short: "Calculate expressions",
-		Long:  "Calculate expressions",
+		Use:           "calc",
+		Short:         "Calculate expressions",
+		Long:          "Calculate expressions",
+		SilenceErrors: true,
+		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 0 {
-				c.REPL()
-				return nil
+				if term.IsTerminal(int(os.Stdin.Fd())) {
+					c.REPL()
+					return nil
+				}
+
+				return fmt.Errorf("%w: must specify expression as arguments", ErrNotTTY)
 			}
 
 			for _, arg := range args {

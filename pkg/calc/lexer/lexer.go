@@ -73,7 +73,7 @@ func (l *L) Current() string {
 
 func (l *L) Emit(t tokens.TokenType) {
 	if l.start == l.pos {
-		l.Errorf("trying to emit empty %s token at %d:%d", t, l.line, l.start)
+		_ = l.Errorf("trying to emit empty %s token at %d:%d", t, l.line, l.start)
 		return
 	}
 
@@ -89,7 +89,7 @@ func (l *L) Emit(t tokens.TokenType) {
 	l.start = l.pos
 }
 
-func (l *L) Errorf(format string, args ...any) {
+func (l *L) Errorf(format string, args ...any) lexingState {
 	err := fmt.Errorf(format, args...)
 	pos := tokens.Position{
 		File:   l.name,
@@ -106,6 +106,7 @@ func (l *L) Errorf(format string, args ...any) {
 	}
 
 	l.eof = true
+	return nil
 }
 
 func (l *L) Err() error {
@@ -167,4 +168,10 @@ func (l *L) Skip() {
 // reaches the end of the source.
 func (l *L) Tokens() <-chan tokens.Token {
 	return l.tokens
+}
+
+// NextToken returns the next token from the lexer. It blocks until a token is
+// available.
+func (l *L) NextToken() tokens.Token {
+	return <-l.tokens
 }

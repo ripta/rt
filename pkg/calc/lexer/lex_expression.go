@@ -41,7 +41,6 @@ func lexExpression(l *L) lexingState {
 		return lexIdent
 
 	default:
-		l.Errorf("unexpected token %s", string(r))
-		return nil
+		return l.Errorf("unexpected token %q", string(r))
 	}
 }

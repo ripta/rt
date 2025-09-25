@@ -12,8 +12,7 @@ func lexQuotedString(l *L) lexingState {
 			fallthrough
 
 		case EOF, '\n':
-			l.Errorf("unterminated quoted string")
-			return nil
+			return l.Errorf("unterminated quoted string")
 
 		case '"':
 			done = true
@@ -29,8 +28,7 @@ func lexRawString(l *L) lexingState {
 	for done := false; !done; {
 		switch l.Next() {
 		case EOF, '\n':
-			l.Errorf("unterminated raw string")
-			return nil
+			return l.Errorf("unterminated raw string")
 
 		case '`':
 			done = true
