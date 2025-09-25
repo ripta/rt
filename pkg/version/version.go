@@ -72,7 +72,7 @@ func (v *versioner) run(cmd *cobra.Command, args []string) error {
 			return err
 		}
 
-		fmt.Printf(string(bs) + "\n")
+		fmt.Println(string(bs))
 		return nil
 	}
 
