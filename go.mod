@@ -23,7 +23,7 @@ require (
 	github.com/zclconf/go-cty v1.17.0
 	golang.org/x/crypto v0.42.0
 	golang.org/x/text v0.29.0
-	google.golang.org/protobuf v1.36.9
+	google.golang.org/protobuf v1.36.10
 	gopkg.in/yaml.v3 v3.0.1
 	lukechampine.com/blake3 v1.4.1
 	olympos.io/encoding/edn v0.0.0-20201019073823-d3554ca0b0a3
