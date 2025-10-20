@@ -251,6 +251,7 @@ func newFormatsCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:     "formats",
 		Aliases: []string{"format", "fmt"},
+		Short:   "List supported structured file formats",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			tw := tabwriter.NewWriter(os.Stdout, 6, 4, 3, ' ', tabwriter.RememberWidths)
 
