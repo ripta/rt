@@ -219,6 +219,8 @@ output, with some caveats:
 - YAML, JSON, and GOB support multiple documents in one stream.
 - EDN decoding forces stringification of map keys, and does not yet support the
   entire EDN spec, e.g., `{:foo #{a 2}}` still trips up the converter.
+- Logfmt does not support nested maps. Each log line is treated as a separate 
+  document.
 
 Resulting diff currently only in unified diff of YAML (see example).
 
@@ -235,6 +237,7 @@ edn       .edn            yes     -            yes      indent:int prefix:string
 gob       .gob            yes     -            yes      -
 hcl2      .hcl            yes     -            yes      -
 json      .json           yes     -            yes      indent:int no_indent:bool
+logfmt    .logfmt         yes     -            yes      -
 msgpack   .mpk .msgpack   yes     -            yes      -
 toml      .toml           yes     -            yes      indent:int
 yaml      .yml .yaml      yes     -            yes      indent:int

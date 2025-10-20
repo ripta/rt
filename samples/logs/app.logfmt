@@ -1,0 +1,3 @@
+ts="2025-10-19 00:00:01" at=debug id=1 dur=1.001s
+ts="2025-10-19 00:00:01" at=error id=2 path=/path/to/file err="file not found"
+ts="2025-10-19 00:00:02" at=info method=GET path=/ host=mutelight.org fwd="124.133.52.161" dyno=web.2 connect=4ms service=8ms status=200 bytes=1653
