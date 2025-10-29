@@ -53,8 +53,8 @@ github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZb
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 github.com/r3labs/diff/v3 v3.0.2 h1:yVuxAY1V6MeM4+HNur92xkS39kB/N+cFi2hMkY06BbA=
 github.com/r3labs/diff/v3 v3.0.2/go.mod h1:Cy542hv0BAEmhDYWtGxXRQ4kqRsVIcEjG9gChUlTmkw=
-github.com/ripta/hypercmd v0.3.0 h1:RMeubU+wzJee+2RAGG3R5Q+fX5tp/EVd8FJCq57rxO4=
-github.com/ripta/hypercmd v0.3.0/go.mod h1:7+EulQyZhSiDTafVjBBetmP6dliwcaqvxYv2uvMm2Kc=
+github.com/ripta/hypercmd v0.4.0 h1:Y0HFUuFEYoCuk3BsG/7ES/sA4dMPCH3epOzyVw/e23w=
+github.com/ripta/hypercmd v0.4.0/go.mod h1:zaZL8G7Sdj8nJNACQluylaBHk2vCLT/Sf36t2FgE9FY=
 github.com/ripta/unihan v0.0.0-20250404091138-c307c698a880 h1:ZzDUYlZP/LHJmkh+PtgRZHEKa+eNVefq6YR8BnUCQ2I=
 github.com/ripta/unihan v0.0.0-20250404091138-c307c698a880/go.mod h1:ZLBfCas48lym/27GOsyFjRo7OGejoGHzOTdUdoRtDqU=
 github.com/russross/blackfriday/v2 v2.1.0/go.mod h1:+Rmxgy9KzJVeS9/2gXHxylqXiyQDYRxCVz55jmeOWTM=
