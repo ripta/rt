@@ -35,6 +35,7 @@ func NewCommand() *cobra.Command {
 
 	c.AddCommand(newAscii85Command(e))
 	c.AddCommand(newBase32Command(e))
+	c.AddCommand(newBase32CrockfordCommand(e))
 	c.AddCommand(newBase58Command(e))
 	c.AddCommand(newBase64Command(e))
 	c.AddCommand(newHexCommand(e))

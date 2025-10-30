@@ -45,11 +45,13 @@ go install github.com/ripta/rt/cmd/enc@latest
 Encode and decode strings using various encodings:
 
 * `a85` for ascii85;
-* `b32` for base32;
+* `b32` for base32 (RFC 4848 standard encoding, `ABCDEFGHIJKLMNOPQRSTUVWXYZ234567`);
+* `b32c` for base32 with Crockford's alphabet (`0123456789ABCDEFGHJKMNPQRSTVWXYZ`);
 * `b58` for base58;
-* `b64` for base64;
-* `hex` for hexadecimal; and
-* `url` for URL escape/unescape.
+* `b64` for base64 (RFC 4648 standard encoding, `ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/`);
+* `hex` for lowercase hexadecimal;
+* `url` for URL escape/unescape; and
+* `varsel` for encoding raw bytes into Unicode variation selectors (VS-1 to VS-256).
 
 
 `hs`
