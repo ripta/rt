@@ -22,8 +22,8 @@ require (
 	github.com/thediveo/enumflag/v2 v2.0.7
 	github.com/vmihailenco/msgpack/v5 v5.4.1
 	github.com/zclconf/go-cty v1.17.0
-	golang.org/x/crypto v0.43.0
-	golang.org/x/text v0.30.0
+	golang.org/x/crypto v0.44.0
+	golang.org/x/text v0.31.0
 	google.golang.org/protobuf v1.36.10
 	gopkg.in/yaml.v3 v3.0.1
 	lukechampine.com/blake3 v1.4.1
@@ -45,10 +45,10 @@ require (
 	github.com/stoewer/go-strcase v1.3.1 // indirect
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
 	golang.org/x/exp v0.0.0-20250911091902-df9299821621 // indirect
-	golang.org/x/mod v0.28.0 // indirect
-	golang.org/x/sync v0.17.0 // indirect
-	golang.org/x/sys v0.37.0 // indirect
-	golang.org/x/tools v0.37.0 // indirect
+	golang.org/x/mod v0.29.0 // indirect
+	golang.org/x/sync v0.18.0 // indirect
+	golang.org/x/sys v0.38.0 // indirect
+	golang.org/x/tools v0.38.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20250922171735-9219d122eba9 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20250922171735-9219d122eba9 // indirect
 )
