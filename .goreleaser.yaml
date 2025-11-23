@@ -33,6 +33,7 @@ builds:
 
 archives:
   - formats: [tar.gz]
+    wrap_in_directory: true
     name_template: >-
       {{ .ProjectName }}_
       {{- title .Os }}_
