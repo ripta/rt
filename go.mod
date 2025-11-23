@@ -14,7 +14,7 @@ require (
 	github.com/liggitt/tabwriter v0.0.0-20181228230101-89fcab3d43de
 	github.com/mr-tron/base58 v1.2.0
 	github.com/r3labs/diff/v3 v3.0.2
-	github.com/ripta/hypercmd v0.4.0
+	github.com/ripta/hypercmd v0.5.0
 	github.com/ripta/unihan v0.0.0-20250404091138-c307c698a880
 	github.com/spf13/cobra v1.10.1
 	github.com/spf13/pflag v1.0.10
