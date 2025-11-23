@@ -7,7 +7,7 @@ Expectations:
   to you, because it prints file hashes in binary output instead of hex (but
   `enc hex` converts it to hex strings).
 
-You can install the all-in-one hyperbinary:
+You can install the all-in-one hyperbinary, which excludes any tools with CGO dependencies:
 
 ```
 go install github.com/ripta/rt/hypercmd/rt@latest
@@ -24,12 +24,19 @@ or pick-and-choose each tool to individually install:
 * [enc](#enc) to encode and decode STDIN
 * [grpcto](#grpcto) to frame and unframe gRPC messages
 * [hs](#hs) to hash STDIN
-* [place](#place) for macOS Location Services
+* [place](#place) for macOS Location Services (requires macOS and CGO)
 * [streamdiff](#streamdiff) to help you pick out field changes off a stream of JSON
 * [structfiles](#structfiles-sf) to examine and compare a pile of structured files
 * [toto](#toto) to inspect some protobuf messages
 * [uni](#uni) for unicode utils
 * [yfmt](#yfmt) to reindent YAML while preserving comments
+
+or, last but not least, install a lighter version of the hyperbinary, which excludes
+tools with CGO, terminal, or filesystem requirements, but compiles to WASM:
+
+```
+GOOS=wasip1 GOARCH=wasm CGO_ENABLED=0 go build -o rt_lite.wasm -v ./hypercmd/rt_lite
+```
 
 Pull requests welcome, though you should probably check first before sinking any time.
 
