@@ -12,7 +12,8 @@ before:
     - go generate ./...
 
 builds:
-  - main: ./hypercmd/rt
+  - id: rt
+    main: ./hypercmd/rt
     env:
       - CGO_ENABLED=0
     goos:
@@ -21,6 +22,14 @@ builds:
     goarch:
       - amd64
       - arm64
+  - id: rt_lite
+    main: ./hypercmd/rt_lite
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - wasip1
+    goarch:
+      - wasm
 
 archives:
   - formats: [tar.gz]
