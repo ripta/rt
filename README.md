@@ -24,6 +24,7 @@ or pick-and-choose each tool to individually install:
 * [enc](#enc) to encode and decode STDIN
 * [grpcto](#grpcto) to frame and unframe gRPC messages
 * [hs](#hs) to hash STDIN
+* [lipsum](#lipsum) to generate placeholder text
 * [place](#place) for macOS Location Services (requires macOS and CGO)
 * [streamdiff](#streamdiff) to help you pick out field changes off a stream of JSON
 * [structfiles](#structfiles-sf) to examine and compare a pile of structured files
@@ -128,6 +129,16 @@ and the `response.raw` can be unframed and decoded using `protoc`:
 cat response.raw \
     | grpcto unframe \
     | protoc --decode_raw
+```
+
+`lipsum`
+--------
+
+Generate some placeholder text, beyond just `lorem ipsum`. It also does some
+optional rate-limiting, printing one word at a time.
+
+```
+go install github.com/ripta/rt/cmd/lipsum@latest
 ```
 
 `place`
