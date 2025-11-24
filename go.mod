@@ -24,6 +24,7 @@ require (
 	github.com/zclconf/go-cty v1.17.0
 	golang.org/x/crypto v0.45.0
 	golang.org/x/text v0.31.0
+	golang.org/x/time v0.14.0
 	google.golang.org/protobuf v1.36.10
 	gopkg.in/yaml.v3 v3.0.1
 	lukechampine.com/blake3 v1.4.1
