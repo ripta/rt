@@ -14,7 +14,8 @@ import (
 )
 
 func main() {
-	root := hypercmd.New("rt")
+	root := hypercmd.New("rt_lite")
+	root.Root().Aliases = []string{"rt_lite.wasm"}
 	root.Root().SilenceErrors = true
 	root.Root().SilenceUsage = true
 

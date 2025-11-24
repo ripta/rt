@@ -14,6 +14,7 @@ before:
 builds:
   - id: rt
     main: ./hypercmd/rt
+    binary: rt
     env:
       - CGO_ENABLED=0
     goos:
@@ -24,6 +25,7 @@ builds:
       - arm64
   - id: rt_lite
     main: ./hypercmd/rt_lite
+    binary: rt_lite
     env:
       - CGO_ENABLED=0
     goos:
@@ -33,6 +35,7 @@ builds:
 
 archives:
   - formats: [tar.gz]
+    wrap_in_directory: true
     name_template: >-
       {{ .ProjectName }}_
       {{- title .Os }}_
