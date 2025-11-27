@@ -7,6 +7,7 @@ toolchain go1.24.1
 require (
 	github.com/BurntSushi/toml v1.5.0
 	github.com/containerd/console v1.0.5
+	github.com/elk-language/go-prompt v1.3.1
 	github.com/go-logfmt/logfmt v0.6.1
 	github.com/google/cel-go v0.26.1
 	github.com/gosuri/uilive v0.0.4
@@ -23,6 +24,7 @@ require (
 	github.com/vmihailenco/msgpack/v5 v5.4.1
 	github.com/zclconf/go-cty v1.17.0
 	golang.org/x/crypto v0.45.0
+	golang.org/x/term v0.37.0
 	golang.org/x/text v0.31.0
 	golang.org/x/time v0.14.0
 	google.golang.org/protobuf v1.36.10
@@ -40,9 +42,14 @@ require (
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/klauspost/cpuid/v2 v2.3.0 // indirect
+	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
+	github.com/mattn/go-runewidth v0.0.16 // indirect
+	github.com/mattn/go-tty v0.0.7 // indirect
 	github.com/mitchellh/go-wordwrap v1.0.1 // indirect
+	github.com/pkg/term v1.2.0-beta.2 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
+	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/stoewer/go-strcase v1.3.1 // indirect
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
 	golang.org/x/exp v0.0.0-20250911091902-df9299821621 // indirect
