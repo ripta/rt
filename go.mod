@@ -16,6 +16,7 @@ require (
 	github.com/mr-tron/base58 v1.2.0
 	github.com/r3labs/diff/v3 v3.0.2
 	github.com/ripta/hypercmd v0.5.0
+	github.com/ripta/reals v0.0.0-20251129121815-4fa2f223ded2
 	github.com/ripta/unihan v0.0.0-20250404091138-c307c698a880
 	github.com/spf13/cobra v1.10.1
 	github.com/spf13/pflag v1.0.10
