@@ -46,6 +46,9 @@ const (
 	OP_SLASH   // Infix division (/)
 	OP_PERCENT // Infix modulo (%)
 	OP_ROOT    // Root operator (√)
+
+	LPAREN // (
+	RPAREN // )
 )
 
 var tokenNames = map[TokenType]string{
@@ -67,6 +70,9 @@ var tokenNames = map[TokenType]string{
 	OP_SLASH:   "OP_SLASH",
 	OP_PERCENT: "OP_PERCENT",
 	OP_ROOT:    "OP_ROOT",
+
+	LPAREN: "LPAREN",
+	RPAREN: "RPAREN",
 }
 
 func (t TokenType) String() string {
