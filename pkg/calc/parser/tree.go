@@ -12,23 +12,58 @@ type Node interface {
 	Eval(*Env) (*unified.Real, error)
 }
 
+type binding struct {
+	value   *unified.Real
+	mutable bool
+}
+
 type Env struct {
-	vars map[string]*unified.Real
+	vars map[string]*binding
 }
 
 func NewEnv() *Env {
 	return &Env{
-		vars: map[string]*unified.Real{},
+		vars: seedConstants(),
 	}
 }
 
-func (e *Env) Get(name string) (*unified.Real, bool) {
-	val, ok := e.vars[name]
-	return val, ok
+var transcendentalConstants = map[string]func() *unified.Real{
+	"E":     unified.E,
+	"PI":    unified.Pi,
+	"PHI":   unified.Phi,
+	"SQRT2": unified.Sqrt2,
+	"LN2":   unified.Ln2,
 }
 
-func (e *Env) Set(name string, val *unified.Real) {
-	e.vars[name] = val
+func seedConstants() map[string]*binding {
+	vars := map[string]*binding{}
+	for name, supplier := range transcendentalConstants {
+		vars[name] = &binding{
+			value:   supplier(),
+			mutable: false,
+		}
+	}
+
+	return vars
+}
+
+func (e *Env) Get(name string) (*unified.Real, bool) {
+	if binding, ok := e.vars[name]; ok {
+		return binding.value, true
+	}
+	return nil, false
+}
+
+func (e *Env) Set(name string, val *unified.Real) error {
+	if binding, ok := e.vars[name]; ok && !binding.mutable {
+		return fmt.Errorf("cannot assign to constant %q", name)
+	}
+
+	e.vars[name] = &binding{
+		value:   val,
+		mutable: true,
+	}
+	return nil
 }
 
 type NumberNode struct {
@@ -128,6 +163,8 @@ func (n *AssignNode) Eval(env *Env) (*unified.Real, error) {
 		return nil, err
 	}
 
-	env.Set(n.Name.Value, val)
+	if err := env.Set(n.Name.Value, val); err != nil {
+		return nil, fmt.Errorf("%s: %w", n.Name.Pos, err)
+	}
 	return val, nil
 }

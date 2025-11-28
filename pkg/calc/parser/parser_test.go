@@ -124,6 +124,59 @@ func TestEvalUndefinedIdentifier(t *testing.T) {
 	}
 }
 
+func TestParserTranscendentalConstants(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		expr string
+		want float64
+	}{
+		{name: "PI", expr: "PI", want: math.Pi},
+		{name: "E", expr: "E", want: math.E},
+		{name: "LN2", expr: "LN2", want: math.Ln2},
+		{name: "PHI", expr: "PHI", want: math.Phi},
+		{name: "SQRT2 squared", expr: "SQRT2 * SQRT2", want: 2},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			env := NewEnv()
+			val, err := parseAndEval(t, tt.expr, env)
+			if err != nil {
+				t.Fatalf("parse/eval %q: %v", tt.expr, err)
+			}
+			got := realToFloat(t, val)
+			if diff := math.Abs(got - tt.want); diff > 1e-9 {
+				t.Fatalf("result mismatch: got %v, want %v (diff=%v)", got, tt.want, diff)
+			}
+		})
+	}
+}
+
+func TestParserTranscendentalConstantsImmutable(t *testing.T) {
+	t.Parallel()
+
+	env := NewEnv()
+	if _, err := parseAndEval(t, "PI = 3", env); err == nil {
+		t.Fatalf("expected error when assigning to PI")
+	} else if !strings.Contains(err.Error(), "constant") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	val, err := parseAndEval(t, "PI", env)
+	if err != nil {
+		t.Fatalf("PI lookup failed after assignment error: %v", err)
+	}
+
+	got := realToFloat(t, val)
+	if diff := math.Abs(got - math.Pi); diff > 1e-9 {
+		t.Fatalf("PI changed after failed assignment: got %v diff %v", got, diff)
+	}
+}
+
 func parseAndEval(t *testing.T, expr string, env *Env) (*unified.Real, error) {
 	t.Helper()
 	p := New("test", expr)
