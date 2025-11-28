@@ -40,6 +40,22 @@ func lexExpression(l *L) lexingState {
 		l.Emit(tokens.OP_MINUS)
 		return lexExpression
 
+	case r == '*':
+		l.Emit(tokens.OP_STAR)
+		return lexExpression
+
+	case r == '/':
+		l.Emit(tokens.OP_SLASH)
+		return lexExpression
+
+	case r == '(':
+		l.Emit(tokens.LPAREN)
+		return lexExpression
+
+	case r == ')':
+		l.Emit(tokens.RPAREN)
+		return lexExpression
+
 	case IsAlnum(r):
 		l.Rewind()
 		return lexIdent
