@@ -2,6 +2,7 @@ package parser
 
 import (
 	"fmt"
+	"math/big"
 
 	"github.com/ripta/reals/pkg/constructive"
 	"github.com/ripta/reals/pkg/rational"
@@ -9,6 +10,8 @@ import (
 
 	"github.com/ripta/rt/pkg/calc/tokens"
 )
+
+const precision = -100
 
 type Node interface {
 	Eval(*Env) (*unified.Real, error)
@@ -109,6 +112,12 @@ func (n *BinaryNode) Eval(env *Env) (*unified.Real, error) {
 		}
 		return l.Divide(r), nil
 
+	case tokens.OP_PERCENT:
+		if r.IsZero() {
+			return nil, fmt.Errorf("modulo by zero")
+		}
+		return modulo(l, r)
+
 	default:
 		return nil, fmt.Errorf("unknown operator")
 	}
@@ -173,4 +182,35 @@ func (n *AssignNode) Eval(env *Env) (*unified.Real, error) {
 		return nil, fmt.Errorf("%s: %w", n.Name.Pos, err)
 	}
 	return val, nil
+}
+
+// modulo computes a % b = a - b * floor(a/b) for real numbers
+func modulo(a, b *unified.Real) (*unified.Real, error) {
+	scale := new(big.Int).Exp(big.NewInt(2), big.NewInt(-precision), nil)
+
+	aApproxInt := constructive.Approximate(a.Constructive(), precision)
+	if aApproxInt == nil {
+		return nil, fmt.Errorf("failed to approximate dividend for modulo")
+	}
+	aApproxRat := new(big.Rat).SetFrac(aApproxInt, scale)
+
+	bApproxInt := constructive.Approximate(b.Constructive(), precision)
+	if bApproxInt == nil {
+		return nil, fmt.Errorf("failed to approximate divisor for modulo")
+	}
+	bApproxRat := new(big.Rat).SetFrac(bApproxInt, scale)
+
+	quotientRat := new(big.Rat).Quo(aApproxRat, bApproxRat)
+
+	floor := new(big.Int).Quo(quotientRat.Num(), quotientRat.Denom())
+
+	remainder := new(big.Int).Rem(quotientRat.Num(), quotientRat.Denom())
+	if quotientRat.Sign() < 0 && remainder.Sign() != 0 {
+		floor.Sub(floor, big.NewInt(1))
+	}
+
+	floorRat := new(big.Rat).SetInt(floor)
+	floorReal := unified.New(constructive.One(), rational.FromRational(floorRat))
+
+	return a.Subtract(b.Multiply(floorReal)), nil
 }

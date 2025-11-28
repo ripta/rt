@@ -151,7 +151,7 @@ func (p *P) parseMultiplicative() (Node, error) {
 		if p.err != nil {
 			return nil, p.err
 		}
-		if tok.Type != tokens.OP_STAR && tok.Type != tokens.OP_SLASH {
+		if tok.Type != tokens.OP_STAR && tok.Type != tokens.OP_SLASH && tok.Type != tokens.OP_PERCENT {
 			break
 		}
 		p.next()

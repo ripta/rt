@@ -63,6 +63,61 @@ func TestParserExpressions(t *testing.T) {
 			exprs: []string{"a = 2.8", "b = 4.5", "c = √(a*a + b*b)", "c"},
 			want:  5.3,
 		},
+		{name: "PI", exprs: []string{"PI"}, want: math.Pi},
+		{name: "E", exprs: []string{"E"}, want: math.E},
+		{name: "LN2", exprs: []string{"LN2"}, want: math.Ln2},
+		{name: "PHI", exprs: []string{"PHI"}, want: math.Phi},
+		{name: "SQRT2 squared", exprs: []string{"SQRT2 * SQRT2"}, want: 2},
+		{
+			name:  "basic modulo",
+			exprs: []string{"10 % 3"},
+			want:  1,
+		},
+		{
+			name:  "another basic modulo",
+			exprs: []string{"17 % 5"},
+			want:  2,
+		},
+		{
+			name:  "exact division",
+			exprs: []string{"15 % 5"},
+			want:  0,
+		},
+		{
+			name:  "float modulo",
+			exprs: []string{"7.5 % 2"},
+			want:  1.5,
+		},
+		{
+			name:  "negative dividend, floor division",
+			exprs: []string{"-10 % 3"},
+			want:  2,
+		},
+		{
+			name:  "negative divisor, floor division",
+			exprs: []string{"10 % -3"},
+			want:  -2,
+		},
+		{
+			name:  "both negative, floor division",
+			exprs: []string{"-10 % -3"},
+			want:  -1,
+		},
+		{
+			name:  "larger modulo",
+			exprs: []string{"100 % 7"},
+			want:  2,
+		},
+		{
+			name:  "modulo with precedence",
+			exprs: []string{"20 % 6 + 2"},
+			want:  4,
+		},
+		{
+			name:  "modulo with multiplication",
+			exprs: []string{"5 * 3 % 7"},
+			want:  1, // (5 * 3) % 7 = 15 % 7 = 1
+		},
 	}
 
 	for _, tt := range tests {
@@ -144,38 +199,6 @@ func TestEvalUndefinedIdentifier(t *testing.T) {
 	}
 }
 
-func TestParserTranscendentalConstants(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name string
-		expr string
-		want float64
-	}{
-		{name: "PI", expr: "PI", want: math.Pi},
-		{name: "E", expr: "E", want: math.E},
-		{name: "LN2", expr: "LN2", want: math.Ln2},
-		{name: "PHI", expr: "PHI", want: math.Phi},
-		{name: "SQRT2 squared", expr: "SQRT2 * SQRT2", want: 2},
-	}
-
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			env := NewEnv()
-			val, err := parseAndEval(t, tt.expr, env)
-			if err != nil {
-				t.Fatalf("parse/eval %q: %v", tt.expr, err)
-			}
-			got := realToFloat(t, val)
-			if diff := math.Abs(got - tt.want); diff > 1e-9 {
-				t.Fatalf("result mismatch: got %v, want %v (diff=%v)", got, tt.want, diff)
-			}
-		})
-	}
-}
-
 func TestParserTranscendentalConstantsImmutable(t *testing.T) {
 	t.Parallel()
 
@@ -194,6 +217,19 @@ func TestParserTranscendentalConstantsImmutable(t *testing.T) {
 	got := realToFloat(t, val)
 	if diff := math.Abs(got - math.Pi); diff > 1e-9 {
 		t.Fatalf("PI changed after failed assignment: got %v diff %v", got, diff)
+	}
+}
+
+func TestModuloByZero(t *testing.T) {
+	t.Parallel()
+
+	env := NewEnv()
+	_, err := parseAndEval(t, "10 % 0", env)
+	if err == nil {
+		t.Fatalf("expected modulo by zero error")
+	}
+	if !strings.Contains(err.Error(), "modulo by zero") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
