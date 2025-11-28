@@ -500,6 +500,26 @@ Show only characters in a specific script, e.g.:
 ❯ uni list -S Sundanese --all
 ```
 
+Show only certain codepoints by character or codepoint:
+
+```
+# All lowercase ASCII characters:
+❯ uni list -r a-z
+
+# Uppercase A-G and lowercase a-g ASCII characters:
+❯ uni list -r A-G,a-g
+
+# Special characters from colon (codepoint 3A) to at sign (codepoint 40):
+❯ uni list -r u+3a-40
+
+# Emojis between 🤤 and 🤗 (order does not matter):
+❯ uni list -r 🤤-🤗
+❯ uni list -r 🤗-🤤
+
+# Combine filters: emojis between 🤤 and 🤗 whose name includes "hand":
+❯ uni list -r 🤤-🤗 hand
+```
+
 Don't forget to escape `!` in your shell if necessary.
 
 List all character categories, their names, and counts:

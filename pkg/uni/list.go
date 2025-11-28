@@ -3,6 +3,7 @@ package uni
 import (
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -14,7 +15,8 @@ import (
 )
 
 var (
-	ErrNoUnicodeTable = errors.New("unicode table does not exist")
+	ErrNoUnicodeTable     = errors.New("unicode table does not exist")
+	ErrInvalidRangeFormat = errors.New("invalid range format; expected format: character range (a-z) or codepoint range (U+0000-U+007F)")
 )
 
 func newListCommand() *cobra.Command {
@@ -24,7 +26,7 @@ func newListCommand() *cobra.Command {
 	}
 
 	c := cobra.Command{
-		Use:                   "list [--categories <CATEGORIES>] [--scripts <SCRIPTS>] [--all | <RUNE-NAME-FILTER...>]",
+		Use:                   "list [--categories <CATEGORIES>] [--range <START>-<END>] [--scripts <SCRIPTS>] [--all | <RUNE-NAME-FILTER...>]",
 		DisableFlagsInUseLine: true,
 		SilenceErrors:         true,
 
@@ -37,6 +39,7 @@ func newListCommand() *cobra.Command {
 	c.Flags().StringSliceVarP(&l.cats, "categories", "C", l.cats, "Categories to limit to (see `uni catsegories`); by default all categories")
 	c.Flags().BoolVarP(&l.count, "count", "c", l.count, "Show count of matches")
 	c.Flags().StringSliceVarP(&l.output, "output", "o", l.output, "Output columns")
+	c.Flags().StringSliceVarP(&l.ranges, "range", "r", l.ranges, "Range of runes to limit to (e.g. a-z, U+0000-U+007F); by default all runes")
 	c.Flags().StringSliceVarP(&l.scripts, "scripts", "S", l.scripts, "Scripts to limit to (see `uni scripts`); by default all scripts")
 	c.Flags().StringVarP(&l.table, "table", "t", l.table, "Unicode Table version")
 	return &c
@@ -47,6 +50,7 @@ type lister struct {
 	cats    []string
 	count   bool
 	output  []string
+	ranges  []string
 	scripts []string
 	table   string
 }
@@ -80,6 +84,26 @@ func (l *lister) run(c *cobra.Command, args []string) error {
 			}
 
 			rts = append(rts, rt)
+		}
+
+		t = rangetable.Merge(rts...)
+	}
+
+	if len(l.ranges) > 0 {
+		rts := []*unicode.RangeTable{}
+		for _, r := range l.ranges {
+			rsr, rer, err := parseRange(r)
+			if err != nil {
+				return fmt.Errorf("parsing rune range %q: %w", r, err)
+			}
+
+			runes := []rune{}
+			for r := rsr; r <= rer; r++ {
+				runes = append(runes, r)
+			}
+
+			rts = append(rts, rangetable.New(runes...))
+
 		}
 
 		t = rangetable.Merge(rts...)
@@ -132,8 +156,8 @@ func (l *lister) run(c *cobra.Command, args []string) error {
 }
 
 func (l *lister) validate(_ *cobra.Command, args []string) error {
-	if len(args) < 1 && !l.all && len(l.cats) == 0 {
-		return errors.New("at least one argument, or an explicit --all flag, or one or more --categories is required")
+	if len(args) < 1 && !l.all && len(l.cats) == 0 && len(l.ranges) == 0 {
+		return errors.New("at least one argument, or an explicit --all flag, or one or more --categories, or one or more --range is required")
 	}
 	return nil
 }
@@ -152,4 +176,39 @@ func runeMatches(normalized []string, name string) bool {
 		}
 	}
 	return true
+}
+
+func parseRange(r string) (rune, rune, error) {
+	rs, re, ok := strings.Cut(r, "-")
+	if !ok {
+		return 0, 0, fmt.Errorf("%w: %q", ErrInvalidRangeFormat, r)
+	}
+
+	if rsRunes, reRunes := []rune(rs), []rune(re); len(rsRunes) == 1 && len(reRunes) == 1 {
+		rsr := rsRunes[0]
+		rer := reRunes[0]
+		if rsr > rer {
+			rsr, rer = rer, rsr
+		}
+
+		return rsr, rer, nil
+	}
+
+	rs = strings.ToUpper(rs)
+	re = strings.ToUpper(re)
+	if strings.HasPrefix(rs, "U+") || strings.HasPrefix(re, "U+") {
+		rsr, err := strconv.ParseUint(strings.TrimPrefix(rs, "U+"), 16, 32)
+		if err != nil {
+			return 0, 0, fmt.Errorf("parsing %q: %w", r, err)
+		}
+
+		rer, err := strconv.ParseUint(strings.TrimPrefix(re, "U+"), 16, 32)
+		if err != nil {
+			return 0, 0, fmt.Errorf("parsing %q: %w", r, err)
+		}
+
+		return rune(rsr), rune(rer), nil
+	}
+
+	return 0, 0, fmt.Errorf("%w: unknown %q", ErrInvalidRangeFormat, r)
 }
