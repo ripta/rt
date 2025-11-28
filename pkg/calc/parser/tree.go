@@ -33,14 +33,14 @@ func (n *BinaryNode) Eval() (float64, error) {
 	if err != nil {
 		return 0, err
 	}
-	switch n.Op {
+	switch n.Op.Type {
 	case tokens.OP_PLUS:
 		return l + r, nil
-	case tokens.MINUS:
+	case tokens.OP_MINUS:
 		return l - r, nil
-	case tokens.MUL:
+	case tokens.OP_STAR:
 		return l * r, nil
-	case tokens.DIV:
+	case tokens.OP_SLASH:
 		if r == 0 {
 			return 0, fmt.Errorf("division by zero")
 		}
@@ -60,8 +60,8 @@ func (n *UnaryNode) Eval() (float64, error) {
 	if err != nil {
 		return 0, err
 	}
-	switch n.Op {
-	case tokens.MINUS:
+	switch n.Op.Type {
+	case tokens.OP_MINUS:
 		return -val, nil
 	default:
 		return 0, fmt.Errorf("unknown unary operator")
