@@ -3,37 +3,39 @@ package parser
 import (
 	"fmt"
 
+	"github.com/ripta/reals/pkg/unified"
+
 	"github.com/ripta/rt/pkg/calc/tokens"
 )
 
 type Node interface {
-	Eval(*Env) (float64, error)
+	Eval(*Env) (*unified.Real, error)
 }
 
 type Env struct {
-	vars map[string]float64
+	vars map[string]*unified.Real
 }
 
 func NewEnv() *Env {
 	return &Env{
-		vars: map[string]float64{},
+		vars: map[string]*unified.Real{},
 	}
 }
 
-func (e *Env) Get(name string) (float64, bool) {
+func (e *Env) Get(name string) (*unified.Real, bool) {
 	val, ok := e.vars[name]
 	return val, ok
 }
 
-func (e *Env) Set(name string, val float64) {
+func (e *Env) Set(name string, val *unified.Real) {
 	e.vars[name] = val
 }
 
 type NumberNode struct {
-	Value float64
+	Value *unified.Real
 }
 
-func (n *NumberNode) Eval(_ *Env) (float64, error) {
+func (n *NumberNode) Eval(_ *Env) (*unified.Real, error) {
 	return n.Value, nil
 }
 
@@ -43,35 +45,35 @@ type BinaryNode struct {
 	Right Node
 }
 
-func (n *BinaryNode) Eval(env *Env) (float64, error) {
+func (n *BinaryNode) Eval(env *Env) (*unified.Real, error) {
 	l, err := n.Left.Eval(env)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 
 	r, err := n.Right.Eval(env)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 
 	switch n.Op.Type {
 	case tokens.OP_PLUS:
-		return l + r, nil
+		return l.Add(r), nil
 
 	case tokens.OP_MINUS:
-		return l - r, nil
+		return l.Subtract(r), nil
 
 	case tokens.OP_STAR:
-		return l * r, nil
+		return l.Multiply(r), nil
 
 	case tokens.OP_SLASH:
-		if r == 0 {
-			return 0, fmt.Errorf("division by zero")
+		if r.IsZero() {
+			return nil, fmt.Errorf("division by zero")
 		}
-		return l / r, nil
+		return l.Divide(r), nil
 
 	default:
-		return 0, fmt.Errorf("unknown operator")
+		return nil, fmt.Errorf("unknown operator")
 	}
 }
 
@@ -80,18 +82,18 @@ type UnaryNode struct {
 	Expr Node
 }
 
-func (n *UnaryNode) Eval(env *Env) (float64, error) {
+func (n *UnaryNode) Eval(env *Env) (*unified.Real, error) {
 	val, err := n.Expr.Eval(env)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 
 	switch n.Op.Type {
 	case tokens.OP_MINUS:
-		return -val, nil
+		return val.Negate(), nil
 
 	default:
-		return 0, fmt.Errorf("unknown unary operator")
+		return nil, fmt.Errorf("unknown unary operator")
 	}
 }
 
@@ -99,16 +101,16 @@ type IdentNode struct {
 	Name tokens.Token
 }
 
-func (n *IdentNode) Eval(env *Env) (float64, error) {
+func (n *IdentNode) Eval(env *Env) (*unified.Real, error) {
 	if env == nil {
-		return 0, fmt.Errorf("%s: undefined identifier %q", n.Name.Pos, n.Name.Value)
+		return nil, fmt.Errorf("%s: undefined identifier %q", n.Name.Pos, n.Name.Value)
 	}
 
 	if val, ok := env.Get(n.Name.Value); ok {
 		return val, nil
 	}
 
-	return 0, fmt.Errorf("%s: undefined identifier %q", n.Name.Pos, n.Name.Value)
+	return nil, fmt.Errorf("%s: undefined identifier %q", n.Name.Pos, n.Name.Value)
 }
 
 type AssignNode struct {
@@ -116,14 +118,14 @@ type AssignNode struct {
 	Value Node
 }
 
-func (n *AssignNode) Eval(env *Env) (float64, error) {
+func (n *AssignNode) Eval(env *Env) (*unified.Real, error) {
 	if env == nil {
 		env = NewEnv()
 	}
 
 	val, err := n.Value.Eval(env)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 
 	env.Set(n.Name.Value, val)

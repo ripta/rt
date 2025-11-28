@@ -2,8 +2,12 @@ package parser
 
 import (
 	"math"
+	"math/big"
 	"strings"
 	"testing"
+
+	"github.com/ripta/reals/pkg/constructive"
+	"github.com/ripta/reals/pkg/unified"
 )
 
 func TestParserExpressions(t *testing.T) {
@@ -46,15 +50,16 @@ func TestParserExpressions(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			env := NewEnv()
-			var got float64
+			var result *unified.Real
 			var err error
 			for _, expr := range tt.exprs {
-				got, err = parseAndEval(t, expr, env)
+				result, err = parseAndEval(t, expr, env)
 				if err != nil {
 					t.Fatalf("parse/eval %q: %v", expr, err)
 				}
 			}
 
+			got := realToFloat(t, result)
 			if diff := math.Abs(got - tt.want); diff > 1e-9 {
 				t.Fatalf("result mismatch: got %v, want %v (diff=%v)", got, tt.want, diff)
 			}
@@ -119,12 +124,39 @@ func TestEvalUndefinedIdentifier(t *testing.T) {
 	}
 }
 
-func parseAndEval(t *testing.T, expr string, env *Env) (float64, error) {
+func parseAndEval(t *testing.T, expr string, env *Env) (*unified.Real, error) {
 	t.Helper()
 	p := New("test", expr)
 	node, err := p.Parse()
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 	return node.Eval(env)
+}
+
+const testPrecision = -100
+
+func realToFloat(t *testing.T, r *unified.Real) float64 {
+	t.Helper()
+	rat := approximateRealForTest(t, r, testPrecision)
+	f, _ := rat.Float64()
+	return f
+}
+
+func approximateRealForTest(t *testing.T, r *unified.Real, precision int) *big.Rat {
+	t.Helper()
+	if r == nil {
+		t.Fatalf("nil real result")
+	}
+	if !constructive.IsPrecisionValid(precision) {
+		t.Fatalf("invalid precision %d", precision)
+	}
+	approx := constructive.Approximate(r.Constructive(), precision)
+	if approx == nil {
+		t.Fatalf("approximation failed for precision %d", precision)
+	}
+
+	exp := int64(-precision)
+	denom := new(big.Int).Exp(big.NewInt(2), big.NewInt(exp), nil)
+	return new(big.Rat).SetFrac(approx, denom)
 }

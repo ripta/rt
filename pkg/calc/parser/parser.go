@@ -2,8 +2,12 @@ package parser
 
 import (
 	"fmt"
-	"strconv"
+	"math/big"
 	"strings"
+
+	"github.com/ripta/reals/pkg/constructive"
+	"github.com/ripta/reals/pkg/rational"
+	"github.com/ripta/reals/pkg/unified"
 
 	"github.com/ripta/rt/pkg/calc/lexer"
 	"github.com/ripta/rt/pkg/calc/tokens"
@@ -229,13 +233,14 @@ func (p *P) parsePrimary() (Node, error) {
 	}
 }
 
-func (p *P) parseNumber(tok tokens.Token) (float64, error) {
+func (p *P) parseNumber(tok tokens.Token) (*unified.Real, error) {
 	cleaned := strings.ReplaceAll(tok.Value, "_", "")
-	val, err := strconv.ParseFloat(cleaned, 64)
-	if err != nil {
-		return 0, fmt.Errorf("%s: invalid number %q: %w", tok.Pos, tok.Value, err)
+	rat := new(big.Rat)
+	if _, ok := rat.SetString(cleaned); !ok {
+		return nil, fmt.Errorf("%s: invalid number %q", tok.Pos, tok.Value)
 	}
-	return val, nil
+
+	return unified.New(constructive.One(), rational.FromRational(rat)), nil
 }
 
 func (p *P) next() tokens.Token {
