@@ -6,15 +6,20 @@ import (
 
 	"github.com/elk-language/go-prompt"
 
+	"github.com/ripta/rt/pkg/calc/parser"
 	"github.com/ripta/rt/pkg/num"
 )
 
 type Calculator struct {
 	ExpressionCount int
+	env             *parser.Env
 }
 
 func (c *Calculator) Evaluate(expr string) (*num.Num, error) {
-	return Evaluate(expr)
+	if c.env == nil {
+		c.env = parser.NewEnv()
+	}
+	return evaluate(expr, c.env)
 }
 
 func (c *Calculator) Execute(expr string) {

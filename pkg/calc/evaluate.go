@@ -1,26 +1,35 @@
 package calc
 
 import (
-	"fmt"
 	"strings"
 
-	"github.com/ripta/rt/pkg/calc/lexer"
+	"github.com/ripta/rt/pkg/calc/parser"
 	"github.com/ripta/rt/pkg/num"
 )
 
 func Evaluate(expr string) (*num.Num, error) {
-	return evaluate(strings.TrimSpace(expr))
+	return evaluate(expr, parser.NewEnv())
 }
 
-func evaluate(expr string) (*num.Num, error) {
-	l := lexer.New("(eval)", expr)
-	for tok := range l.Tokens() {
-		fmt.Printf("%+v\n", tok)
+func evaluate(expr string, env *parser.Env) (*num.Num, error) {
+	expr = strings.TrimSpace(expr)
+	if env == nil {
+		env = parser.NewEnv()
+	}
+	if expr == "" {
+		return num.Zero(), nil
 	}
 
-	if l.Err() != nil {
-		return nil, l.Err()
+	p := parser.New("(eval)", expr)
+	node, err := p.Parse()
+	if err != nil {
+		return nil, err
 	}
 
-	return num.Zero(), nil
+	val, err := node.Eval(env)
+	if err != nil {
+		return nil, err
+	}
+
+	return num.FromFloat64(val), nil
 }
