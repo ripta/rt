@@ -3,6 +3,8 @@ package parser
 import (
 	"fmt"
 
+	"github.com/ripta/reals/pkg/constructive"
+	"github.com/ripta/reals/pkg/rational"
 	"github.com/ripta/reals/pkg/unified"
 
 	"github.com/ripta/rt/pkg/calc/tokens"
@@ -126,6 +128,10 @@ func (n *UnaryNode) Eval(env *Env) (*unified.Real, error) {
 	switch n.Op.Type {
 	case tokens.OP_MINUS:
 		return val.Negate(), nil
+
+	case tokens.OP_ROOT:
+		cr := constructive.Sqrt(val.Constructive())
+		return unified.New(cr, rational.One()), nil
 
 	default:
 		return nil, fmt.Errorf("unknown unary operator")

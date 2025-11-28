@@ -43,6 +43,26 @@ func TestParserExpressions(t *testing.T) {
 			exprs: []string{"a = b = 3", "a + b"},
 			want:  6,
 		},
+		{
+			name:  "square root",
+			exprs: []string{"√4"},
+			want:  2,
+		},
+		{
+			name:  "square root of 2",
+			exprs: []string{"√2"},
+			want:  math.Sqrt2,
+		},
+		{
+			name:  "nested square root",
+			exprs: []string{"√√16"},
+			want:  2,
+		},
+		{
+			name:  "complex expression",
+			exprs: []string{"a = 2.8", "b = 4.5", "c = √(a*a + b*b)", "c"},
+			want:  5.3,
+		},
 	}
 
 	for _, tt := range tests {

@@ -48,6 +48,10 @@ func lexExpression(l *L) lexingState {
 		l.Emit(tokens.OP_SLASH)
 		return lexExpression
 
+	case r == '√':
+		l.Emit(tokens.OP_ROOT)
+		return lexExpression
+
 	case r == '(':
 		l.Emit(tokens.LPAREN)
 		return lexExpression

@@ -179,7 +179,7 @@ func (p *P) parseUnary() (Node, error) {
 		return nil, p.err
 	}
 
-	if tok.Type == tokens.OP_MINUS {
+	if tok.Type == tokens.OP_MINUS || tok.Type == tokens.OP_ROOT {
 		p.next()
 		expr, err := p.parseUnary()
 		if err != nil {
