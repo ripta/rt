@@ -16,7 +16,6 @@ func lexQuotedString(l *L) lexingState {
 
 		case '"':
 			done = true
-			break
 		}
 	}
 
@@ -32,7 +31,6 @@ func lexRawString(l *L) lexingState {
 
 		case '`':
 			done = true
-			break
 		}
 	}
 

@@ -32,6 +32,10 @@ func lexExpression(l *L) lexingState {
 		l.Rewind()
 		return lexNumber
 
+	case r == '+':
+		l.Emit(tokens.OP_PLUS)
+		return lexExpression
+
 	case r == '-':
 		l.Emit(tokens.OP_MINUS)
 		return lexExpression
