@@ -5,9 +5,9 @@ import (
 	"os"
 
 	"github.com/elk-language/go-prompt"
+	"github.com/ripta/reals/pkg/unified"
 
 	"github.com/ripta/rt/pkg/calc/parser"
-	"github.com/ripta/rt/pkg/num"
 )
 
 type Calculator struct {
@@ -15,7 +15,7 @@ type Calculator struct {
 	env             *parser.Env
 }
 
-func (c *Calculator) Evaluate(expr string) (*num.Num, error) {
+func (c *Calculator) Evaluate(expr string) (*unified.Real, error) {
 	if c.env == nil {
 		c.env = parser.NewEnv()
 	}
@@ -41,8 +41,8 @@ func (c *Calculator) DisplayError(err error) {
 	fmt.Fprintf(os.Stderr, "calc:%03d/ Error: %s\n", c.ExpressionCount, err)
 }
 
-func (c *Calculator) DisplayResult(res *num.Num) {
-	fmt.Printf("%s\n", res)
+func (c *Calculator) DisplayResult(res *unified.Real) {
+	fmt.Printf("%s\n", formatReal(res))
 }
 
 func (c *Calculator) REPL() {

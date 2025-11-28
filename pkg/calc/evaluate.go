@@ -3,21 +3,22 @@ package calc
 import (
 	"strings"
 
+	"github.com/ripta/reals/pkg/unified"
+
 	"github.com/ripta/rt/pkg/calc/parser"
-	"github.com/ripta/rt/pkg/num"
 )
 
-func Evaluate(expr string) (*num.Num, error) {
+func Evaluate(expr string) (*unified.Real, error) {
 	return evaluate(expr, parser.NewEnv())
 }
 
-func evaluate(expr string, env *parser.Env) (*num.Num, error) {
+func evaluate(expr string, env *parser.Env) (*unified.Real, error) {
 	expr = strings.TrimSpace(expr)
 	if env == nil {
 		env = parser.NewEnv()
 	}
 	if expr == "" {
-		return num.Zero(), nil
+		return unified.Zero(), nil
 	}
 
 	p := parser.New("(eval)", expr)
@@ -31,5 +32,5 @@ func evaluate(expr string, env *parser.Env) (*num.Num, error) {
 		return nil, err
 	}
 
-	return num.FromFloat64(val), nil
+	return val, nil
 }
