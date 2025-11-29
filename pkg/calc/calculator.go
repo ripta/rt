@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/elk-language/go-prompt"
+	"github.com/ripta/reals/pkg/constructive"
 	"github.com/ripta/reals/pkg/unified"
 
 	"github.com/ripta/rt/pkg/calc/parser"
@@ -42,7 +43,7 @@ func (c *Calculator) DisplayError(err error) {
 }
 
 func (c *Calculator) DisplayResult(res *unified.Real) {
-	fmt.Printf("%s\n", formatReal(res))
+	fmt.Printf("%s\n", constructive.Text(res.Constructive(), 300, 10))
 }
 
 func (c *Calculator) REPL() {
