@@ -111,6 +111,66 @@ var tokenTests = []tokenTest{
 			{Type: tokens.LIT_STRING, Value: "`/tmp/foo`", Col: 6},
 		},
 	},
+	{
+		name:  "left shift operator",
+		input: "4<<2",
+		want: []tokenExpectation{
+			{Type: tokens.LIT_INT, Value: "4", Col: 1},
+			{Type: tokens.OP_SHL, Value: "<<", Col: 2},
+			{Type: tokens.LIT_INT, Value: "2", Col: 4},
+		},
+	},
+	{
+		name:  "right shift operator",
+		input: "16>>3",
+		want: []tokenExpectation{
+			{Type: tokens.LIT_INT, Value: "16", Col: 1},
+			{Type: tokens.OP_SHR, Value: ">>", Col: 3},
+			{Type: tokens.LIT_INT, Value: "3", Col: 5},
+		},
+	},
+	{
+		name:  "shift operators with whitespace",
+		input: "8 << 1",
+		want: []tokenExpectation{
+			{Type: tokens.LIT_INT, Value: "8", Col: 1},
+			{Type: tokens.WHITESPACE, Value: " ", Col: 2},
+			{Type: tokens.OP_SHL, Value: "<<", Col: 3},
+			{Type: tokens.WHITESPACE, Value: " ", Col: 5},
+			{Type: tokens.LIT_INT, Value: "1", Col: 6},
+		},
+	},
+	{
+		name:  "mixed shift operators",
+		input: "32>>2<<1",
+		want: []tokenExpectation{
+			{Type: tokens.LIT_INT, Value: "32", Col: 1},
+			{Type: tokens.OP_SHR, Value: ">>", Col: 3},
+			{Type: tokens.LIT_INT, Value: "2", Col: 5},
+			{Type: tokens.OP_SHL, Value: "<<", Col: 6},
+			{Type: tokens.LIT_INT, Value: "1", Col: 8},
+		},
+	},
+	{
+		name:  "single less-than is illegal",
+		input: "4 < 2",
+		want: []tokenExpectation{
+			{Type: tokens.LIT_INT, Value: "4", Col: 1},
+			{Type: tokens.WHITESPACE, Value: " ", Col: 2},
+			{Type: tokens.ILLEGAL, Value: "<", Col: 3},
+		},
+		wantErr: "unexpected token",
+	},
+	{
+		name:  "single greater-than is illegal",
+		input: "8 > 2",
+		want: []tokenExpectation{
+			{Type: tokens.LIT_INT, Value: "8", Col: 1},
+			{Type: tokens.WHITESPACE, Value: " ", Col: 2},
+			{Type: tokens.ILLEGAL, Value: ">", Col: 3},
+		},
+		wantErr: "unexpected token",
+	},
 }
 
 func TestLexerTokens(t *testing.T) {

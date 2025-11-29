@@ -46,6 +46,8 @@ const (
 	OP_SLASH   // Infix division (/)
 	OP_PERCENT // Infix modulo (%)
 	OP_ROOT    // Root operator (√)
+	OP_SHL     // Left shift (<<)
+	OP_SHR     // Right shift (>>)
 
 	LPAREN // (
 	RPAREN // )
@@ -70,6 +72,8 @@ var tokenNames = map[TokenType]string{
 	OP_SLASH:   "OP_SLASH",
 	OP_PERCENT: "OP_PERCENT",
 	OP_ROOT:    "OP_ROOT",
+	OP_SHL:     "OP_SHL",
+	OP_SHR:     "OP_SHR",
 
 	LPAREN: "LPAREN",
 	RPAREN: "RPAREN",

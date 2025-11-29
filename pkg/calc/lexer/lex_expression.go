@@ -52,6 +52,22 @@ func lexExpression(l *L) lexingState {
 		l.Emit(tokens.OP_PERCENT)
 		return lexExpression
 
+	case r == '<':
+		if l.Peek() == '<' {
+			l.Next()
+			l.Emit(tokens.OP_SHL)
+			return lexExpression
+		}
+		return l.Errorf("unexpected token %q", string(r))
+
+	case r == '>':
+		if l.Peek() == '>' {
+			l.Next()
+			l.Emit(tokens.OP_SHR)
+			return lexExpression
+		}
+		return l.Errorf("unexpected token %q", string(r))
+
 	case r == '√':
 		l.Emit(tokens.OP_ROOT)
 		return lexExpression

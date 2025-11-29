@@ -118,6 +118,20 @@ func (n *BinaryNode) Eval(env *Env) (*unified.Real, error) {
 		}
 		return modulo(l, r)
 
+	case tokens.OP_SHL:
+		shiftCount, err := extractInteger(r, n.Op)
+		if err != nil {
+			return nil, err
+		}
+		return l.ShiftLeft(shiftCount), nil
+
+	case tokens.OP_SHR:
+		shiftCount, err := extractInteger(r, n.Op)
+		if err != nil {
+			return nil, err
+		}
+		return l.ShiftRight(shiftCount), nil
+
 	default:
 		return nil, fmt.Errorf("unknown operator")
 	}
@@ -213,4 +227,33 @@ func modulo(a, b *unified.Real) (*unified.Real, error) {
 	floorReal := unified.New(constructive.One(), rational.FromRational(floorRat))
 
 	return a.Subtract(b.Multiply(floorReal)), nil
+}
+
+// extractInteger validates that a Real number is an integer and extracts it as an int.
+// Returns an error if the number is not an integer or is out of range.
+func extractInteger(r *unified.Real, op tokens.Token) (int, error) {
+	scale := new(big.Int).Exp(big.NewInt(2), big.NewInt(-precision), nil)
+
+	approxInt := constructive.Approximate(r.Constructive(), precision)
+	if approxInt == nil {
+		return 0, fmt.Errorf("%s: failed to approximate shift count", op.Pos)
+	}
+
+	approxRat := new(big.Rat).SetFrac(approxInt, scale)
+
+	if approxRat.Denom().Cmp(big.NewInt(1)) != 0 {
+		return 0, fmt.Errorf("%s: shift count must be an integer, got non-integer value", op.Pos)
+	}
+
+	num := approxRat.Num()
+	if !num.IsInt64() {
+		return 0, fmt.Errorf("%s: shift count out of range", op.Pos)
+	}
+
+	i64 := num.Int64()
+	if i64 > int64(int(^uint(0)>>1)) || i64 < int64(-int(^uint(0)>>1)-1) {
+		return 0, fmt.Errorf("%s: shift count out of range", op.Pos)
+	}
+
+	return int(i64), nil
 }

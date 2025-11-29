@@ -116,7 +116,97 @@ func TestParserExpressions(t *testing.T) {
 		{
 			name:  "modulo with multiplication",
 			exprs: []string{"5 * 3 % 7"},
-			want:  1, // (5 * 3) % 7 = 15 % 7 = 1
+			want:  1,
+		},
+		{
+			name:  "basic left shift",
+			exprs: []string{"4 << 2"},
+			want:  16,
+		},
+		{
+			name:  "basic right shift",
+			exprs: []string{"16 >> 2"},
+			want:  4,
+		},
+		{
+			name:  "left shift by zero",
+			exprs: []string{"7 << 0"},
+			want:  7,
+		},
+		{
+			name:  "right shift by zero",
+			exprs: []string{"7 >> 0"},
+			want:  7,
+		},
+		{
+			name:  "shift with precedence same as multiplication",
+			exprs: []string{"2 + 4 << 1"},
+			want:  10,
+		},
+		{
+			name:  "shift left associativity",
+			exprs: []string{"64 >> 2 >> 1"},
+			want:  8,
+		},
+		{
+			name:  "mixed shift and multiplication",
+			exprs: []string{"2 * 3 << 2"},
+			want:  24,
+		},
+		{
+			name:  "mixed shift and division",
+			exprs: []string{"32 >> 1 / 2"},
+			want:  8,
+		},
+		{
+			name:  "shift with parentheses",
+			exprs: []string{"(1 + 1) << 3"},
+			want:  16,
+		},
+		{
+			name:  "large left shift",
+			exprs: []string{"1 << 20"},
+			want:  1048576,
+		},
+		{
+			name:  "large right shift",
+			exprs: []string{"1048576 >> 18"},
+			want:  4,
+		},
+		{
+			name:  "non-integer first operand left shift",
+			exprs: []string{"3.5 << 2"},
+			want:  14,
+		},
+		{
+			name:  "non-integer first operand right shift",
+			exprs: []string{"20 >> 4.0"},
+			want:  1.25,
+		},
+		{
+			name:  "left shift non-integer left operand (sqrt)",
+			exprs: []string{"√2 << 1"},
+			want:  math.Sqrt2 * 2,
+		},
+		{
+			name:  "left shift non-integer left operand (transcendental)",
+			exprs: []string{"PI << 3"},
+			want:  math.Pi * 8,
+		},
+		{
+			name:  "shift with assignment",
+			exprs: []string{"a = 8", "a << 2"},
+			want:  32,
+		},
+		{
+			name:  "shift both directions",
+			exprs: []string{"5 << 4 >> 2"},
+			want:  20,
+		},
+		{
+			name:  "shift with modulo",
+			exprs: []string{"100 >> 2 % 7"},
+			want:  4,
 		},
 	}
 
@@ -230,6 +320,52 @@ func TestModuloByZero(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "modulo by zero") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestShiftErrors(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		expr    string
+		wantErr string
+	}{
+		{
+			name:    "shift by non-integer (decimal)",
+			expr:    "8 << 2.5",
+			wantErr: "shift count must be an integer",
+		},
+		{
+			name:    "shift by non-integer (sqrt)",
+			expr:    "16 >> √2",
+			wantErr: "shift count must be an integer",
+		},
+		{
+			name:    "shift by transcendental constant",
+			expr:    "4 << PI",
+			wantErr: "shift count must be an integer",
+		},
+		{
+			name:    "shift by expression result that is non-integer",
+			expr:    "8 << (5 / 2)",
+			wantErr: "shift count must be an integer",
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			env := NewEnv()
+			_, err := parseAndEval(t, tt.expr, env)
+			if err == nil {
+				t.Fatalf("expected error containing %q", tt.wantErr)
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("error mismatch: got %v want substring %q", err, tt.wantErr)
+			}
+		})
 	}
 }
 
