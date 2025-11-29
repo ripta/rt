@@ -12,8 +12,11 @@ import (
 )
 
 type Calculator struct {
-	ExpressionCount int
-	env             *parser.Env
+	DecimalPlaces int
+	Verbose       bool
+
+	count int
+	env   *parser.Env
 }
 
 func (c *Calculator) Evaluate(expr string) (*unified.Real, error) {
@@ -25,7 +28,7 @@ func (c *Calculator) Evaluate(expr string) (*unified.Real, error) {
 
 func (c *Calculator) Execute(expr string) {
 	defer func() {
-		c.ExpressionCount++
+		c.count++
 		fmt.Println()
 	}()
 
@@ -39,18 +42,23 @@ func (c *Calculator) Execute(expr string) {
 }
 
 func (c *Calculator) DisplayError(err error) {
-	fmt.Fprintf(os.Stderr, "calc:%03d/ Error: %s\n", c.ExpressionCount, err)
+	fmt.Fprintf(os.Stderr, "calc:%03d/ Error: %s\n", c.count, err)
 }
 
 func (c *Calculator) DisplayResult(res *unified.Real) {
-	fmt.Printf("%s\n", constructive.Text(res.Constructive(), 300, 10))
+	cons := res.Constructive()
+
+	if c.Verbose {
+		fmt.Printf("calc:%03d/ Construction: %s\n", c.count, constructive.AsConstruction(cons))
+	}
+	fmt.Printf("%s\n", constructive.Text(cons, c.DecimalPlaces, 10))
 }
 
 func (c *Calculator) REPL() {
 	p := prompt.New(
 		c.Execute,
 		prompt.WithPrefixCallback(func() string {
-			return fmt.Sprintf("calc:%03d> ", c.ExpressionCount)
+			return fmt.Sprintf("calc:%03d> ", c.count)
 		}),
 		prompt.WithExitChecker(func(in string, breakline bool) bool {
 			return breakline && (in == "exit" || in == "quit")

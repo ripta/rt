@@ -17,7 +17,10 @@ var ErrNotTTY = errors.New("STDIN is not a TTY")
 // provided and STDIN is a TTY, it will start a REPL. Otherwise, the command
 // will return ErrNotTTY.
 func NewCommand() *cobra.Command {
-	c := &Calculator{}
+	c := &Calculator{
+		DecimalPlaces: 30,
+		Verbose:       false,
+	}
 	cmd := &cobra.Command{
 		Use:           "calc",
 		Short:         "Calculate expressions",
@@ -46,6 +49,9 @@ func NewCommand() *cobra.Command {
 			return nil
 		},
 	}
+
+	cmd.Flags().IntVarP(&c.DecimalPlaces, "decimal-places", "d", c.DecimalPlaces, "Number of decimal places to display")
+	cmd.Flags().BoolVarP(&c.Verbose, "verbose", "v", c.Verbose, "Verbose output")
 
 	return cmd
 }
