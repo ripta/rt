@@ -1,6 +1,7 @@
 package calc
 
 import (
+	"errors"
 	"strings"
 
 	"github.com/ripta/reals/pkg/unified"
@@ -8,17 +9,17 @@ import (
 	"github.com/ripta/rt/pkg/calc/parser"
 )
 
-func Evaluate(expr string) (*unified.Real, error) {
-	return evaluate(expr, parser.NewEnv())
-}
+var ErrEnvironmentMissing = errors.New("environment missing")
 
-func evaluate(expr string, env *parser.Env) (*unified.Real, error) {
+// Evaluate parses expr and evaluates it in the given environment.
+func Evaluate(expr string, env *parser.Env) (*unified.Real, error) {
 	expr = strings.TrimSpace(expr)
-	if env == nil {
-		env = parser.NewEnv()
-	}
 	if expr == "" {
 		return unified.Zero(), nil
+	}
+
+	if env == nil {
+		return nil, ErrEnvironmentMissing
 	}
 
 	p := parser.New("(eval)", expr)

@@ -24,9 +24,9 @@ type Calculator struct {
 
 func (c *Calculator) Evaluate(expr string) (*unified.Real, error) {
 	if c.env == nil {
-		c.env = parser.NewEnv()
+		c.env = parser.NewEnvWithDecimalPlaces(c.DecimalPlaces)
 	}
-	return evaluate(expr, c.env)
+	return Evaluate(expr, c.env)
 }
 
 func (c *Calculator) Execute(expr string) {

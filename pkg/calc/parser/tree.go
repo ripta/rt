@@ -11,8 +11,6 @@ import (
 	"github.com/ripta/rt/pkg/calc/tokens"
 )
 
-const precision = -100
-
 type Node interface {
 	Eval(*Env) (*unified.Real, error)
 }
@@ -23,12 +21,41 @@ type binding struct {
 }
 
 type Env struct {
-	vars map[string]*binding
+	precision int
+	vars      map[string]*binding
 }
 
+// NewEnv creates a new environment with default precision (-100).
 func NewEnv() *Env {
 	return &Env{
-		vars: seedConstants(),
+		precision: -100,
+		vars:      seedConstants(),
+	}
+}
+
+// convertDecimalPlacesToPrecision computes the binary precision needed to
+// represent the specified number of decimal places.
+func convertDecimalPlacesToPrecision(decimalPlaces int) int {
+	if decimalPlaces <= 0 {
+		return 0
+	}
+
+	// log2(10) ~ 3.32193
+	return -(decimalPlaces*332193 + 99999) / 100000
+}
+
+// NewEnvWithDecimalPlaces creates a new environment with the specified number
+// of decimal places of precision.
+func NewEnvWithDecimalPlaces(decimalPlaces int) *Env {
+	return NewEnvWithPrecision(convertDecimalPlacesToPrecision(decimalPlaces))
+}
+
+// NewEnvWithPrecision creates a new environment with the specified binary
+// precision.
+func NewEnvWithPrecision(precision int) *Env {
+	return &Env{
+		precision: precision,
+		vars:      seedConstants(),
 	}
 }
 
@@ -113,23 +140,23 @@ func (n *BinaryNode) Eval(env *Env) (*unified.Real, error) {
 		return l.Divide(r), nil
 
 	case tokens.OP_POW:
-		return power(l, r)
+		return power(l, r, env.precision)
 
 	case tokens.OP_PERCENT:
 		if r.IsZero() {
 			return nil, fmt.Errorf("modulo by zero")
 		}
-		return modulo(l, r)
+		return modulo(l, r, env.precision)
 
 	case tokens.OP_SHL:
-		shiftCount, err := extractInteger(r, n.Op)
+		shiftCount, err := extractInteger(r, n.Op, env.precision)
 		if err != nil {
 			return nil, err
 		}
 		return l.ShiftLeft(shiftCount), nil
 
 	case tokens.OP_SHR:
-		shiftCount, err := extractInteger(r, n.Op)
+		shiftCount, err := extractInteger(r, n.Op, env.precision)
 		if err != nil {
 			return nil, err
 		}
@@ -202,9 +229,9 @@ func (n *AssignNode) Eval(env *Env) (*unified.Real, error) {
 }
 
 // modulo computes a % b = a - b * floor(a/b) for real numbers
-func modulo(a, b *unified.Real) (*unified.Real, error) {
+func modulo(a, b *unified.Real, precision int) (*unified.Real, error) {
 	// scale = 2^(-precision)
-	scale := new(big.Int).Exp(big.NewInt(2), big.NewInt(-precision), nil)
+	scale := new(big.Int).Exp(big.NewInt(2), big.NewInt(int64(-precision)), nil)
 
 	// Approximate a
 	aApproxInt := constructive.Approximate(a.Constructive(), precision)
@@ -242,9 +269,9 @@ func modulo(a, b *unified.Real) (*unified.Real, error) {
 
 // extractInteger validates that a Real number is an integer and extracts it as an int.
 // Returns an error if the number is not an integer or is out of range.
-func extractInteger(r *unified.Real, op tokens.Token) (int, error) {
+func extractInteger(r *unified.Real, op tokens.Token, precision int) (int, error) {
 	// scale = 2^(-precision)
-	scale := new(big.Int).Exp(big.NewInt(2), big.NewInt(-precision), nil)
+	scale := new(big.Int).Exp(big.NewInt(2), big.NewInt(int64(-precision)), nil)
 
 	// Approximate r
 	approxInt := constructive.Approximate(r.Constructive(), precision)
@@ -267,9 +294,9 @@ func extractInteger(r *unified.Real, op tokens.Token) (int, error) {
 	return int(num.Int64()), nil
 }
 
-func power(l, r *unified.Real) (*unified.Real, error) {
+func power(l, r *unified.Real, precision int) (*unified.Real, error) {
 	// Approximate both operands to check for special cases
-	scale := new(big.Int).Exp(big.NewInt(2), big.NewInt(-precision), nil)
+	scale := new(big.Int).Exp(big.NewInt(2), big.NewInt(int64(-precision)), nil)
 
 	// Approximate left (base
 	lApprox := constructive.Approximate(l.Constructive(), precision)
