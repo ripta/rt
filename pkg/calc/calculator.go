@@ -3,6 +3,7 @@ package calc
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/elk-language/go-prompt"
 	"github.com/ripta/reals/pkg/constructive"
@@ -12,8 +13,10 @@ import (
 )
 
 type Calculator struct {
-	DecimalPlaces int
-	Verbose       bool
+	DecimalPlaces     int
+	KeepTrailingZeros bool
+	UnderscoreZeros   bool
+	Verbose           bool
 
 	count int
 	env   *parser.Env
@@ -51,7 +54,21 @@ func (c *Calculator) DisplayResult(res *unified.Real) {
 	if c.Verbose {
 		fmt.Printf("calc:%03d/ Construction: %s\n", c.count, constructive.AsConstruction(cons))
 	}
-	fmt.Printf("%s\n", constructive.Text(cons, c.DecimalPlaces, 10))
+
+	// Format the output to the specified number of decimal places. Insert an
+	// underscore after all zeroes for readability.
+	t := constructive.Text(cons, c.DecimalPlaces, 10)
+	if strings.Contains(t, ".") {
+		if t2 := strings.TrimRight(t, "0"); len(t2) < len(t) {
+			if c.UnderscoreZeros {
+				t = t2 + "_" + strings.Repeat("0", len(t)-len(t2))
+			} else if !c.KeepTrailingZeros {
+				t = strings.TrimRight(t2, ".")
+			}
+		}
+	}
+
+	fmt.Printf("%s\n", t)
 }
 
 func (c *Calculator) REPL() {

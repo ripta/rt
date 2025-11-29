@@ -51,6 +51,8 @@ func NewCommand() *cobra.Command {
 	}
 
 	cmd.Flags().IntVarP(&c.DecimalPlaces, "decimal-places", "d", c.DecimalPlaces, "Number of decimal places to display")
+	cmd.Flags().BoolVarP(&c.KeepTrailingZeros, "keep-trailing-zeros", "k", c.KeepTrailingZeros, "Keep trailing zeros in decimal output")
+	cmd.Flags().BoolVarP(&c.UnderscoreZeros, "underscore-zeros", "u", c.UnderscoreZeros, "Insert underscore before trailing zeros, implies --keep-trailing-zeros")
 	cmd.Flags().BoolVarP(&c.Verbose, "verbose", "v", c.Verbose, "Verbose output")
 
 	return cmd
