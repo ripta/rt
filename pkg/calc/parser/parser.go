@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"errors"
 	"fmt"
 	"math/big"
 	"strings"
@@ -12,6 +13,8 @@ import (
 	"github.com/ripta/rt/pkg/calc/lexer"
 	"github.com/ripta/rt/pkg/calc/tokens"
 )
+
+var ErrUnexpectedToken = errors.New("unexpected token")
 
 type P struct {
 	lex *lexer.L
@@ -51,19 +54,23 @@ func parseExpr(p *P) parsingState {
 	if p.err != nil {
 		return nil
 	}
+
 	node, err := p.parseAssignment()
 	if err != nil {
 		p.err = err
 		return nil
 	}
+
 	tok := p.next()
 	if p.err != nil {
 		return nil
 	}
+
 	if tok.Type != tokens.EOF {
-		p.err = p.errorf(tok, "unexpected token %s", tok.Type)
+		p.err = p.errorf(tok, "%w %s, expecting EOF", ErrUnexpectedToken, tok.Type)
 		return nil
 	}
+
 	p.root = node
 	return nil
 }
@@ -76,6 +83,7 @@ func (p *P) parseAssignment() (Node, error) {
 	if p.err != nil {
 		return nil, p.err
 	}
+
 	left, err := p.parseAdditive()
 	if err != nil {
 		return nil, err

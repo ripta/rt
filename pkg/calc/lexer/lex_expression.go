@@ -1,10 +1,13 @@
 package lexer
 
 import (
+	"errors"
 	"unicode"
 
 	"github.com/ripta/rt/pkg/calc/tokens"
 )
+
+var ErrUnexpectedToken = errors.New("unexpected token")
 
 func lexExpression(l *L) lexingState {
 	switch r := l.Next(); {
@@ -63,7 +66,7 @@ func lexExpression(l *L) lexingState {
 			l.Emit(tokens.OP_SHL)
 			return lexExpression
 		}
-		return l.Errorf("unexpected token %q", string(r))
+		return l.Errorf("%w %q in expression, expecting another '<'", ErrUnexpectedToken, string(r))
 
 	case r == '>':
 		if l.Peek() == '>' {
@@ -71,7 +74,7 @@ func lexExpression(l *L) lexingState {
 			l.Emit(tokens.OP_SHR)
 			return lexExpression
 		}
-		return l.Errorf("unexpected token %q", string(r))
+		return l.Errorf("%w %q in expression, expecting another '>'", ErrUnexpectedToken, string(r))
 
 	case r == '√':
 		l.Emit(tokens.OP_ROOT)
@@ -90,6 +93,6 @@ func lexExpression(l *L) lexingState {
 		return lexIdent
 
 	default:
-		return l.Errorf("unexpected token %q", string(r))
+		return l.Errorf("%w %q in expression", ErrUnexpectedToken, string(r))
 	}
 }
