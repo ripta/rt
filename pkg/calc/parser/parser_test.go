@@ -239,6 +239,21 @@ func TestParserExpressions(t *testing.T) {
 			want:  2,
 		},
 		{
+			name:  "fractional",
+			exprs: []string{"1/2"},
+			want:  0.5,
+		},
+		{
+			name:  "fractional additions",
+			exprs: []string{"1/3 + 1/6"},
+			want:  0.5,
+		},
+		{
+			name:  "fractional multiplication",
+			exprs: []string{"2/3 * 3/4"},
+			want:  0.5,
+		},
+		{
 			name:  "right associativity",
 			exprs: []string{"2 ** 3 ** 2"},
 			want:  512,

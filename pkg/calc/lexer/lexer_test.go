@@ -202,6 +202,43 @@ var tokenTests = []tokenTest{
 			{Type: tokens.LIT_INT, Value: "4", Col: 6},
 		},
 	},
+	{
+		name:  "fraction",
+		input: "1/2",
+		want: []tokenExpectation{
+			{Type: tokens.LIT_INT, Value: "1", Col: 1},
+			{Type: tokens.OP_SLASH, Value: "/", Col: 2},
+			{Type: tokens.LIT_INT, Value: "2", Col: 3},
+		},
+	},
+	{
+		name:  "fraction additions",
+		input: "1/2 + 3/4",
+		want: []tokenExpectation{
+			{Type: tokens.LIT_INT, Value: "1", Col: 1},
+			{Type: tokens.OP_SLASH, Value: "/", Col: 2},
+			{Type: tokens.LIT_INT, Value: "2", Col: 3},
+			{Type: tokens.WHITESPACE, Value: " ", Col: 4},
+			{Type: tokens.OP_PLUS, Value: "+", Col: 5},
+			{Type: tokens.WHITESPACE, Value: " ", Col: 6},
+			{Type: tokens.LIT_INT, Value: "3", Col: 7},
+			{Type: tokens.OP_SLASH, Value: "/", Col: 8},
+			{Type: tokens.LIT_INT, Value: "4", Col: 9},
+		},
+	},
+	{
+		name:  "fraction additions with integer",
+		input: "1/2 + 3",
+		want: []tokenExpectation{
+			{Type: tokens.LIT_INT, Value: "1", Col: 1},
+			{Type: tokens.OP_SLASH, Value: "/", Col: 2},
+			{Type: tokens.LIT_INT, Value: "2", Col: 3},
+			{Type: tokens.WHITESPACE, Value: " ", Col: 4},
+			{Type: tokens.OP_PLUS, Value: "+", Col: 5},
+			{Type: tokens.WHITESPACE, Value: " ", Col: 6},
+			{Type: tokens.LIT_INT, Value: "3", Col: 7},
+		},
+	},
 }
 
 func TestLexerTokens(t *testing.T) {
