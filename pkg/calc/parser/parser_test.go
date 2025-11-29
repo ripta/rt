@@ -328,6 +328,36 @@ func TestParserExpressions(t *testing.T) {
 			exprs: []string{"-2 ** -2"},
 			want:  0.25,
 		},
+		{
+			name:  "leading comment",
+			exprs: []string{`"note" 3 + 4`},
+			want:  7,
+		},
+		{
+			name:  "inline comments",
+			exprs: []string{`3 "first" + 4 "second" * 5 "third"`},
+			want:  23,
+		},
+		{
+			name:  "raw string comment",
+			exprs: []string{"3 `note` + 4"},
+			want:  7,
+		},
+		{
+			name:  "multiple leading comments",
+			exprs: []string{`"note1" "note2" 5`},
+			want:  5,
+		},
+		{
+			name:  "comment in parentheses",
+			exprs: []string{`("note" 2 + 3) * 4`},
+			want:  20,
+		},
+		{
+			name:  "comment in assignment",
+			exprs: []string{`a "assign" = 5`, `a * 2`},
+			want:  10,
+		},
 	}
 
 	for _, tt := range tests {

@@ -2,7 +2,9 @@ package parser
 
 import (
 	"fmt"
+	"io"
 	"math/big"
+	"os"
 
 	"github.com/ripta/reals/pkg/constructive"
 	"github.com/ripta/reals/pkg/rational"
@@ -23,6 +25,8 @@ type binding struct {
 type Env struct {
 	precision int
 	vars      map[string]*binding
+	trace     bool
+	traceOut  io.Writer
 }
 
 // NewEnv creates a new environment with default precision (-100).
@@ -30,6 +34,7 @@ func NewEnv() *Env {
 	return &Env{
 		precision: -100,
 		vars:      seedConstants(),
+		traceOut:  os.Stdout,
 	}
 }
 
@@ -42,21 +47,6 @@ func convertDecimalPlacesToPrecision(decimalPlaces int) int {
 
 	// log2(10) ~ 3.32193
 	return -(decimalPlaces*332193 + 99999) / 100000
-}
-
-// NewEnvWithDecimalPlaces creates a new environment with the specified number
-// of decimal places of precision.
-func NewEnvWithDecimalPlaces(decimalPlaces int) *Env {
-	return NewEnvWithPrecision(convertDecimalPlacesToPrecision(decimalPlaces))
-}
-
-// NewEnvWithPrecision creates a new environment with the specified binary
-// precision.
-func NewEnvWithPrecision(precision int) *Env {
-	return &Env{
-		precision: precision,
-		vars:      seedConstants(),
-	}
 }
 
 var transcendentalConstants = map[string]func() *unified.Real{
@@ -96,6 +86,34 @@ func (e *Env) Set(name string, val *unified.Real) error {
 		mutable: true,
 	}
 	return nil
+}
+
+func (e *Env) SetDecimalPlaces(decimalPlaces int) {
+	e.precision = convertDecimalPlacesToPrecision(decimalPlaces)
+}
+
+func (e *Env) SetPrecision(precision int) {
+	e.precision = precision
+}
+
+func (e *Env) SetTrace(enabled bool) {
+	e.trace = enabled
+}
+
+func (e *Env) SetTraceOutput(w io.Writer) {
+	e.traceOut = w
+}
+
+func extractCommentText(tok tokens.Token) string {
+	val := tok.Value
+	if len(val) >= 2 {
+		// Remove surrounding quotes: "text" → text, `text` → text
+		if (val[0] == '"' && val[len(val)-1] == '"') ||
+			(val[0] == '`' && val[len(val)-1] == '`') {
+			return val[1 : len(val)-1]
+		}
+	}
+	return val
 }
 
 type NumberNode struct {
@@ -226,6 +244,19 @@ func (n *AssignNode) Eval(env *Env) (*unified.Real, error) {
 		return nil, fmt.Errorf("%s: %w", n.Name.Pos, err)
 	}
 	return val, nil
+}
+
+type CommentNode struct {
+	Text string
+	Tok  tokens.Token
+	Expr Node
+}
+
+func (n *CommentNode) Eval(env *Env) (*unified.Real, error) {
+	if env.trace && env.traceOut != nil {
+		fmt.Fprintf(env.traceOut, "# %s\n", n.Text)
+	}
+	return n.Expr.Eval(env)
 }
 
 // modulo computes a % b = a - b * floor(a/b) for real numbers

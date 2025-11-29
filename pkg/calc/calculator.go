@@ -17,6 +17,7 @@ type Calculator struct {
 	KeepTrailingZeros bool
 	UnderscoreZeros   bool
 	Verbose           bool
+	Trace             bool
 
 	count int
 	env   *parser.Env
@@ -24,8 +25,11 @@ type Calculator struct {
 
 func (c *Calculator) Evaluate(expr string) (*unified.Real, error) {
 	if c.env == nil {
-		c.env = parser.NewEnvWithDecimalPlaces(c.DecimalPlaces)
+		c.env = parser.NewEnv()
 	}
+
+	c.env.SetDecimalPlaces(c.DecimalPlaces)
+	c.env.SetTrace(c.Trace)
 	return Evaluate(expr, c.env)
 }
 

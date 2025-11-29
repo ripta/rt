@@ -67,7 +67,7 @@ func parseExpr(p *P) parsingState {
 	}
 
 	if tok.Type != tokens.EOF {
-		p.err = p.errorf(tok, "%w %s, expecting EOF", ErrUnexpectedToken, tok.Type)
+		p.err = p.errorf(tok, "%s %s, expecting EOF", ErrUnexpectedToken, tok.Type)
 		return nil
 	}
 
@@ -89,7 +89,22 @@ func (p *P) parseAssignment() (Node, error) {
 		return nil, err
 	}
 
-	ident, ok := left.(*IdentNode)
+	// Check if left is an identifier (possibly wrapped in comments)
+	var ident *IdentNode
+	var comments []*CommentNode
+	node := left
+
+	// Unwrap any comment layers
+	for {
+		if comment, ok := node.(*CommentNode); ok {
+			comments = append(comments, comment)
+			node = comment.Expr
+		} else {
+			break
+		}
+	}
+
+	ident, ok := node.(*IdentNode)
 	if !ok {
 		return left, nil
 	}
@@ -104,13 +119,40 @@ func (p *P) parseAssignment() (Node, error) {
 		if err != nil {
 			return nil, err
 		}
-		return &AssignNode{
+		assignNode := &AssignNode{
 			Name:  ident.Name,
 			Value: right,
-		}, nil
+		}
+
+		// Re-wrap with comments in reverse order
+		var result Node = assignNode
+		for i := len(comments) - 1; i >= 0; i-- {
+			result = &CommentNode{
+				Text: comments[i].Text,
+				Tok:  comments[i].Tok,
+				Expr: result,
+			}
+		}
+		return result, nil
 	}
 
 	return left, nil
+}
+
+func (p *P) parseComment() (Node, error) {
+	commentTok := p.next() // Consume LIT_STRING
+
+	// Parse the expression this comment wraps
+	expr, err := p.parsePrimary()
+	if err != nil {
+		return nil, err
+	}
+
+	return &CommentNode{
+		Text: extractCommentText(commentTok),
+		Tok:  commentTok,
+		Expr: expr,
+	}, nil
 }
 
 func (p *P) parseAdditive() (Node, error) {
@@ -237,31 +279,37 @@ func (p *P) parsePrimary() (Node, error) {
 		return nil, p.err
 	}
 
+	// Check for leading comment first
+	if p.peek().Type == tokens.LIT_STRING {
+		return p.parseComment()
+	}
+
 	tok := p.next()
 	if p.err != nil {
 		return nil, p.err
 	}
 
+	var node Node
 	switch tok.Type {
 	case tokens.LIT_INT, tokens.LIT_FLOAT:
 		val, err := p.parseNumber(tok)
 		if err != nil {
 			return nil, err
 		}
-		return &NumberNode{Value: val}, nil
+		node = &NumberNode{Value: val}
 
 	case tokens.IDENT:
-		return &IdentNode{Name: tok}, nil
+		node = &IdentNode{Name: tok}
 
 	case tokens.LPAREN:
-		node, err := p.parseAssignment()
+		var err error
+		node, err = p.parseAssignment()
 		if err != nil {
 			return nil, err
 		}
 		if _, err := p.expect(tokens.RPAREN); err != nil {
 			return nil, err
 		}
-		return node, nil
 
 	case tokens.EOF:
 		return nil, p.errorf(tok, "unexpected EOF")
@@ -269,6 +317,18 @@ func (p *P) parsePrimary() (Node, error) {
 	default:
 		return nil, p.errorf(tok, "unexpected token %s", tok.Type)
 	}
+
+	// Check for trailing comment
+	if p.peek().Type == tokens.LIT_STRING {
+		commentTok := p.next()
+		node = &CommentNode{
+			Text: extractCommentText(commentTok),
+			Tok:  commentTok,
+			Expr: node,
+		}
+	}
+
+	return node, nil
 }
 
 func (p *P) parseNumber(tok tokens.Token) (*unified.Real, error) {
