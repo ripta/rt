@@ -200,60 +200,66 @@ func (n *AssignNode) Eval(env *Env) (*unified.Real, error) {
 
 // modulo computes a % b = a - b * floor(a/b) for real numbers
 func modulo(a, b *unified.Real) (*unified.Real, error) {
+	// scale = 2^(-precision)
 	scale := new(big.Int).Exp(big.NewInt(2), big.NewInt(-precision), nil)
 
+	// Approximate a
 	aApproxInt := constructive.Approximate(a.Constructive(), precision)
 	if aApproxInt == nil {
 		return nil, fmt.Errorf("failed to approximate dividend for modulo")
 	}
 	aApproxRat := new(big.Rat).SetFrac(aApproxInt, scale)
 
+	// Approximate b
 	bApproxInt := constructive.Approximate(b.Constructive(), precision)
 	if bApproxInt == nil {
 		return nil, fmt.Errorf("failed to approximate divisor for modulo")
 	}
 	bApproxRat := new(big.Rat).SetFrac(bApproxInt, scale)
 
+	// Compute rational quotient a/b
 	quotientRat := new(big.Rat).Quo(aApproxRat, bApproxRat)
 
+	// Floor the quotient, i.e. (num / denom) with truncation
 	floor := new(big.Int).Quo(quotientRat.Num(), quotientRat.Denom())
 
+	// For negative quotients with a remainder, subtract 1 to get floor
 	remainder := new(big.Int).Rem(quotientRat.Num(), quotientRat.Denom())
 	if quotientRat.Sign() < 0 && remainder.Sign() != 0 {
 		floor.Sub(floor, big.NewInt(1))
 	}
 
+	// Convert floor back to unified.Real
 	floorRat := new(big.Rat).SetInt(floor)
 	floorReal := unified.New(constructive.One(), rational.FromRational(floorRat))
 
+	// Compute actual modulo: a - b * floor
 	return a.Subtract(b.Multiply(floorReal)), nil
 }
 
 // extractInteger validates that a Real number is an integer and extracts it as an int.
 // Returns an error if the number is not an integer or is out of range.
 func extractInteger(r *unified.Real, op tokens.Token) (int, error) {
+	// scale = 2^(-precision)
 	scale := new(big.Int).Exp(big.NewInt(2), big.NewInt(-precision), nil)
 
+	// Approximate r
 	approxInt := constructive.Approximate(r.Constructive(), precision)
 	if approxInt == nil {
 		return 0, fmt.Errorf("%s: failed to approximate shift count", op.Pos)
 	}
 
+	// Check if denominator is 1 (i.e., it's an integer)
 	approxRat := new(big.Rat).SetFrac(approxInt, scale)
-
 	if approxRat.Denom().Cmp(big.NewInt(1)) != 0 {
 		return 0, fmt.Errorf("%s: shift count must be an integer, got non-integer value", op.Pos)
 	}
 
+	// Convert to int, checking for overflow
 	num := approxRat.Num()
 	if !num.IsInt64() {
 		return 0, fmt.Errorf("%s: shift count out of range", op.Pos)
 	}
 
-	i64 := num.Int64()
-	if i64 > int64(int(^uint(0)>>1)) || i64 < int64(-int(^uint(0)>>1)-1) {
-		return 0, fmt.Errorf("%s: shift count out of range", op.Pos)
-	}
-
-	return int(i64), nil
+	return int(num.Int64()), nil
 }
