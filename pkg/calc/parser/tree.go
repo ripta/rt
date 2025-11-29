@@ -112,6 +112,9 @@ func (n *BinaryNode) Eval(env *Env) (*unified.Real, error) {
 		}
 		return l.Divide(r), nil
 
+	case tokens.OP_POW:
+		return power(l, r)
+
 	case tokens.OP_PERCENT:
 		if r.IsZero() {
 			return nil, fmt.Errorf("modulo by zero")
@@ -262,4 +265,84 @@ func extractInteger(r *unified.Real, op tokens.Token) (int, error) {
 	}
 
 	return int(num.Int64()), nil
+}
+
+func power(l, r *unified.Real) (*unified.Real, error) {
+	// Approximate both operands to check for special cases
+	scale := new(big.Int).Exp(big.NewInt(2), big.NewInt(-precision), nil)
+
+	// Approximate left (base
+	lApprox := constructive.Approximate(l.Constructive(), precision)
+	if lApprox == nil {
+		return nil, fmt.Errorf("failed to approximate base")
+	}
+	lRat := new(big.Rat).SetFrac(lApprox, scale)
+
+	// Approximate right (exponent)
+	rApprox := constructive.Approximate(r.Constructive(), precision)
+	if rApprox == nil {
+		return nil, fmt.Errorf("failed to approximate exponent")
+	}
+	rRat := new(big.Rat).SetFrac(rApprox, scale)
+
+	// Case 1: 0^exponent
+	// When exponent is negative, the result is undefined.
+	// When exponent is zero or positive, the result is zero.
+	if l.IsZero() {
+		if rRat.Sign() < 0 {
+			return nil, fmt.Errorf("zero to negative power is undefined")
+		}
+		return unified.Zero(), nil
+	}
+
+	// Case 2: negative^non-integer = complex (non-real)
+	// constructive.Pow uses logarithms internally, so it can't handle negative bases at all
+	// We must handle negative bases specially
+	if lRat.Sign() < 0 {
+		// Base is negative, check if exponent is an integer
+		if rRat.Denom().Cmp(big.NewInt(1)) != 0 {
+			return nil, fmt.Errorf("negative base to non-integer power is non-real")
+		}
+
+		// For integer exponents, compute using big.Rat since we know n is an integer
+		result := new(big.Rat).SetInt64(1)
+		base := new(big.Rat).Set(lRat)
+		exp := rRat.Num() // We know denom is 1
+
+		// Handle negative exponents
+		if exp.Sign() < 0 {
+			base.Inv(base)
+			exp = new(big.Int).Neg(exp)
+		}
+
+		// Compute base^exp using repeated multiplication
+		for i := new(big.Int).Set(exp); i.Sign() > 0; i.Sub(i, big.NewInt(1)) {
+			result.Mul(result, base)
+		}
+
+		return unified.New(constructive.One(), rational.FromRational(result)), nil
+	}
+
+	// Positive base: check if we can compute exactly using rationals
+	// If both base and exponent are rational and exponent is a positive integer, use rational arithmetic
+	if rRat.Denom().Cmp(big.NewInt(1)) == 0 && rRat.Sign() >= 0 {
+		// Exponent is a non-negative integer
+		// Check if base is also rational (or can be approximated as such)
+		// For now, let's compute using big.Rat for integer exponents
+		result := new(big.Rat).SetInt64(1)
+		base := new(big.Rat).Set(lRat)
+		exp := rRat.Num()
+
+		// Compute base^exp using repeated multiplication
+		for i := new(big.Int).Set(exp); i.Sign() > 0; i.Sub(i, big.NewInt(1)) {
+			result.Mul(result, base)
+		}
+
+		return unified.New(constructive.One(), rational.FromRational(result)), nil
+	}
+
+	// Exponent is negative integer or non-integer: use constructive.Pow
+	// This handles fractional powers, irrational powers, and negative powers
+	cr := constructive.Pow(l.Constructive(), r.Constructive())
+	return unified.New(cr, rational.One()), nil
 }

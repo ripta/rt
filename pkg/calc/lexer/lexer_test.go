@@ -171,6 +171,37 @@ var tokenTests = []tokenTest{
 		},
 		wantErr: "unexpected token",
 	},
+	{
+		name:  "exponentiation operator",
+		input: "2**3",
+		want: []tokenExpectation{
+			{Type: tokens.LIT_INT, Value: "2", Col: 1},
+			{Type: tokens.OP_POW, Value: "**", Col: 2},
+			{Type: tokens.LIT_INT, Value: "3", Col: 4},
+		},
+	},
+	{
+		name:  "exponentiation with whitespace",
+		input: "5 ** 2",
+		want: []tokenExpectation{
+			{Type: tokens.LIT_INT, Value: "5", Col: 1},
+			{Type: tokens.WHITESPACE, Value: " ", Col: 2},
+			{Type: tokens.OP_POW, Value: "**", Col: 3},
+			{Type: tokens.WHITESPACE, Value: " ", Col: 5},
+			{Type: tokens.LIT_INT, Value: "2", Col: 6},
+		},
+	},
+	{
+		name:  "multiplication vs exponentiation",
+		input: "2*3**4",
+		want: []tokenExpectation{
+			{Type: tokens.LIT_INT, Value: "2", Col: 1},
+			{Type: tokens.OP_STAR, Value: "*", Col: 2},
+			{Type: tokens.LIT_INT, Value: "3", Col: 3},
+			{Type: tokens.OP_POW, Value: "**", Col: 4},
+			{Type: tokens.LIT_INT, Value: "4", Col: 6},
+		},
+	},
 }
 
 func TestLexerTokens(t *testing.T) {

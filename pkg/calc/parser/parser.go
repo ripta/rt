@@ -141,7 +141,7 @@ func (p *P) parseMultiplicative() (Node, error) {
 	if p.err != nil {
 		return nil, p.err
 	}
-	node, err := p.parseUnary()
+	node, err := p.parseExponential()
 	if err != nil {
 		return nil, err
 	}
@@ -155,7 +155,7 @@ func (p *P) parseMultiplicative() (Node, error) {
 			break
 		}
 		p.next()
-		right, err := p.parseUnary()
+		right, err := p.parseExponential()
 		if err != nil {
 			return nil, err
 		}
@@ -164,6 +164,36 @@ func (p *P) parseMultiplicative() (Node, error) {
 			Left:  node,
 			Right: right,
 		}
+	}
+
+	return node, nil
+}
+
+func (p *P) parseExponential() (Node, error) {
+	if p.err != nil {
+		return nil, p.err
+	}
+	node, err := p.parseUnary()
+	if err != nil {
+		return nil, err
+	}
+
+	tok := p.peek()
+	if p.err != nil {
+		return nil, p.err
+	}
+	if tok.Type == tokens.OP_POW {
+		p.next()
+		// Right-associative: parse the right side recursively
+		right, err := p.parseExponential()
+		if err != nil {
+			return nil, err
+		}
+		return &BinaryNode{
+			Op:    tok,
+			Left:  node,
+			Right: right,
+		}, nil
 	}
 
 	return node, nil

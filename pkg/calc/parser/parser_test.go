@@ -208,6 +208,111 @@ func TestParserExpressions(t *testing.T) {
 			exprs: []string{"100 >> 2 % 7"},
 			want:  4,
 		},
+		{
+			name:  "basic exponentiation",
+			exprs: []string{"2 ** 3"},
+			want:  8,
+		},
+		{
+			name:  "exponentiation to zero",
+			exprs: []string{"5 ** 0"},
+			want:  1,
+		},
+		{
+			name:  "exponentiation to one",
+			exprs: []string{"7 ** 1"},
+			want:  7,
+		},
+		{
+			name:  "negative exponent",
+			exprs: []string{"2 ** -1"},
+			want:  0.5,
+		},
+		{
+			name:  "fractional exponent (square root)",
+			exprs: []string{"4 ** 0.5"},
+			want:  2,
+		},
+		{
+			name:  "fractional exponent (cube root)",
+			exprs: []string{"8 ** (1/3)"},
+			want:  2,
+		},
+		{
+			name:  "right associativity",
+			exprs: []string{"2 ** 3 ** 2"},
+			want:  512,
+		},
+		{
+			name:  "precedence with addition",
+			exprs: []string{"2 + 3 ** 2"},
+			want:  11,
+		},
+		{
+			name:  "precedence with multiplication",
+			exprs: []string{"2 * 3 ** 2"},
+			want:  18,
+		},
+		{
+			name:  "precedence with division",
+			exprs: []string{"18 / 3 ** 2"},
+			want:  2,
+		},
+		{
+			name:  "exponentiation with parentheses",
+			exprs: []string{"(2 + 3) ** 2"},
+			want:  25,
+		},
+		{
+			name:  "exponentiation with unary minus in exponent",
+			exprs: []string{"4 ** -2"},
+			want:  0.0625,
+		},
+		{
+			name:  "complex exponentiation expression",
+			exprs: []string{"a = 3", "b = 2", "a ** b + 1"},
+			want:  10,
+		},
+		{
+			name:  "exponentiation with square root",
+			exprs: []string{"√4 ** 2"},
+			want:  4,
+		},
+		{
+			name:  "large exponent",
+			exprs: []string{"2 ** 10"},
+			want:  1024,
+		},
+		{
+			name:  "zero to positive power",
+			exprs: []string{"0 ** 5"},
+			want:  0,
+		},
+		{
+			name:  "one to any power",
+			exprs: []string{"1 ** 100"},
+			want:  1,
+		},
+		{
+			name:  "negative base to even integer power",
+			exprs: []string{"-2 ** 2"},
+			want:  4,
+		},
+		{
+			name:  "negative base to odd integer power",
+			exprs: []string{"-2 ** 3"},
+			want:  -8,
+		},
+		{
+			name:  "negative base to zero power",
+			exprs: []string{"-5 ** 0"},
+			want:  1,
+		},
+		{
+			name:  "negative base to negative integer power",
+			exprs: []string{"-2 ** -2"},
+			want:  0.25,
+		},
 	}
 
 	for _, tt := range tests {
@@ -350,6 +455,67 @@ func TestShiftErrors(t *testing.T) {
 			name:    "shift by expression result that is non-integer",
 			expr:    "8 << (5 / 2)",
 			wantErr: "shift count must be an integer",
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			env := NewEnv()
+			_, err := parseAndEval(t, tt.expr, env)
+			if err == nil {
+				t.Fatalf("expected error containing %q", tt.wantErr)
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("error mismatch: got %v want substring %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestExponentiationErrors(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		expr    string
+		wantErr string
+	}{
+		{
+			name:    "zero to negative power",
+			expr:    "0 ** -5",
+			wantErr: "zero to negative power is undefined",
+		},
+		{
+			name:    "zero to negative fractional power",
+			expr:    "0 ** -0.5",
+			wantErr: "zero to negative power is undefined",
+		},
+		{
+			name:    "negative base to fractional power",
+			expr:    "-4 ** 0.5",
+			wantErr: "negative base to non-integer power is non-real",
+		},
+		{
+			name:    "negative base to decimal power",
+			expr:    "-2 ** 2.5",
+			wantErr: "negative base to non-integer power is non-real",
+		},
+		{
+			name:    "negative base to irrational power",
+			expr:    "-3 ** √2",
+			wantErr: "negative base to non-integer power is non-real",
+		},
+		{
+			name:    "negative base to transcendental power",
+			expr:    "-2 ** PI",
+			wantErr: "negative base to non-integer power is non-real",
+		},
+		{
+			name:    "negative base via unary minus to fractional power",
+			expr:    "-2 ** 0.5",
+			wantErr: "negative base to non-integer power is non-real",
 		},
 	}
 

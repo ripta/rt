@@ -48,6 +48,7 @@ const (
 	OP_ROOT    // Root operator (√)
 	OP_SHL     // Left shift (<<)
 	OP_SHR     // Right shift (>>)
+	OP_POW     // Exponentiation (**)
 
 	LPAREN // (
 	RPAREN // )
@@ -74,6 +75,7 @@ var tokenNames = map[TokenType]string{
 	OP_ROOT:    "OP_ROOT",
 	OP_SHL:     "OP_SHL",
 	OP_SHR:     "OP_SHR",
+	OP_POW:     "OP_POW",
 
 	LPAREN: "LPAREN",
 	RPAREN: "RPAREN",

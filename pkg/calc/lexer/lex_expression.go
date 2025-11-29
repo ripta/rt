@@ -41,6 +41,11 @@ func lexExpression(l *L) lexingState {
 		return lexExpression
 
 	case r == '*':
+		if l.Peek() == '*' {
+			l.Next()
+			l.Emit(tokens.OP_POW)
+			return lexExpression
+		}
 		l.Emit(tokens.OP_STAR)
 		return lexExpression
 
