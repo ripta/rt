@@ -209,26 +209,6 @@ func init() {
 	}
 }
 
-// findMetaCommand finds a meta-command by prefix matching. Returns the command
-// function if exactly one match is found. Returns error if no matches or
-// multiple (ambiguous) matches.
-func findMetaCommand(prefix string) (metaCommandFunc, error) {
-	var matches []string
-	for cmd := range metaCommands {
-		if strings.HasPrefix(cmd, prefix) {
-			matches = append(matches, cmd)
-		}
-	}
-
-	if len(matches) == 0 {
-		return nil, fmt.Errorf("%w: %s", ErrInvalidMetaCommand, prefix)
-	} else if len(matches) > 1 {
-		return nil, fmt.Errorf("ambiguous command %q, could be one of: %s", prefix, strings.Join(matches, ", "))
-	}
-
-	return metaCommands[matches[0]], nil
-}
-
 // handleMetaCommand routes meta-commands to handlers
 func (c *Calculator) handleMetaCommand(cmd string) error {
 	parts := strings.Fields(cmd)
@@ -236,7 +216,7 @@ func (c *Calculator) handleMetaCommand(cmd string) error {
 		return fmt.Errorf("empty command")
 	}
 
-	meta, err := findMetaCommand(parts[0])
+	meta, err := findByPrefix(parts[0], metaCommands)
 	if err != nil {
 		return err
 	}
@@ -250,22 +230,24 @@ func (c *Calculator) handleSet(args []string) error {
 		return fmt.Errorf("usage: .set <setting> <value>")
 	}
 
-	setting, err := findSetting(args[0])
+	setting, err := findByPrefix(args[0], settingsRegistry)
 	if err != nil {
 		return err
 	}
 
 	value := args[1]
 
+	settingName := args[0]
+
 	switch setting.Type {
 	case SettingTypeBool:
 		v, err := parseBool(value)
 		if err != nil {
 			return fmt.Errorf("invalid value for %s: %s (use on/off, true/false, yes/no)",
-				setting.Name, value)
+				settingName, value)
 		}
 		setting.SetBool(c, v)
-		fmt.Printf("%s %s\n", setting.Name, formatBool(v))
+		fmt.Printf("%s %s\n", settingName, formatBool(v))
 
 	case SettingTypeInt:
 		v, err := strconv.Atoi(value)
@@ -278,7 +260,7 @@ func (c *Calculator) handleSet(args []string) error {
 			}
 		}
 		setting.SetInt(c, v)
-		fmt.Printf("%s set to %d\n", setting.Name, v)
+		fmt.Printf("%s set to %d\n", settingName, v)
 	}
 
 	return nil
@@ -290,19 +272,20 @@ func (c *Calculator) handleToggle(args []string) error {
 		return fmt.Errorf("usage: .toggle <setting>")
 	}
 
-	setting, err := findSetting(args[0])
+	settingName := args[0]
+	setting, err := findByPrefix(settingName, settingsRegistry)
 	if err != nil {
 		return err
 	}
 
 	if setting.Type != SettingTypeBool {
-		return fmt.Errorf("cannot toggle %s: not a boolean setting", setting.Name)
+		return fmt.Errorf("cannot toggle %s: not a boolean setting", settingName)
 	}
 
 	currentValue := setting.GetBool(c)
 	newValue := !currentValue
 	setting.SetBool(c, newValue)
-	fmt.Printf("calc:/ %s set to %s\n", setting.Name, formatBool(newValue))
+	fmt.Printf("calc:/ %s set to %s\n", settingName, formatBool(newValue))
 
 	return nil
 }
@@ -369,14 +352,14 @@ func (c *Calculator) handleSave(args []string) error {
 	fmt.Fprintf(w, "# Saved: %s\n\n", time.Now().Format("2006-01-02 15:04:05"))
 
 	// Write settings as .set commands
-	for _, setting := range settingsRegistry {
+	for name, setting := range settingsRegistry {
 		switch setting.Type {
 		case SettingTypeBool:
 			value := setting.GetBool(c)
-			fmt.Fprintf(w, ".set %s %s\n", setting.Name, formatBool(value))
+			fmt.Fprintf(w, ".set %s %s\n", name, formatBool(value))
 		case SettingTypeInt:
 			value := setting.GetInt(c)
-			fmt.Fprintf(w, ".set %s %d\n", setting.Name, value)
+			fmt.Fprintf(w, ".set %s %d\n", name, value)
 		}
 	}
 
@@ -440,12 +423,12 @@ func (c *Calculator) handleLoad(args []string) error {
 // handleShow displays current settings
 func (c *Calculator) handleShow() {
 	fmt.Println("settings:")
-	for _, setting := range settingsRegistry {
+	for name, setting := range settingsRegistry {
 		switch setting.Type {
 		case SettingTypeBool:
-			fmt.Printf("  %s: %s\n", setting.Name, formatBool(setting.GetBool(c)))
+			fmt.Printf("  %s: %s\n", name, formatBool(setting.GetBool(c)))
 		case SettingTypeInt:
-			fmt.Printf("  %s: %d\n", setting.Name, setting.GetInt(c))
+			fmt.Printf("  %s: %d\n", name, setting.GetInt(c))
 		}
 	}
 }
@@ -463,8 +446,8 @@ func (c *Calculator) handleHelp() {
 	fmt.Println("Commands accept any unambiguous prefix, e.g., .se for .set, .sh for .show)")
 	fmt.Println()
 	fmt.Println("Available settings:")
-	for _, setting := range settingsRegistry {
-		fmt.Printf("  %-20s - %s\n", setting.Name, setting.Description)
+	for name, setting := range settingsRegistry {
+		fmt.Printf("  %-20s - %s\n", name, setting.Description)
 	}
 }
 
