@@ -6,6 +6,7 @@ import (
 
 	"github.com/ripta/hypercmd/pkg/hypercmd"
 
+	"github.com/ripta/rt/pkg/calc"
 	"github.com/ripta/rt/pkg/enc"
 	"github.com/ripta/rt/pkg/grpcto"
 	"github.com/ripta/rt/pkg/hashsum"
@@ -35,6 +36,8 @@ func main() {
 	root.AddCommand(yfmt.NewCommand())
 
 	root.AddCommand(streamdiff.NewCommand())
+
+	root.AddCommand(calc.NewCommand())
 
 	v := version.NewCommand()
 	root.Root().AddCommand(v)
