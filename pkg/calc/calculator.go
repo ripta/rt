@@ -23,6 +23,18 @@ var (
 	ErrInvalidMetaValue   = errors.New("invalid value")
 )
 
+// ExecutionMode represents the context in which an expression is being evaluated
+type ExecutionMode int
+
+const (
+	// ModeREPL represents interactive REPL mode. Results are displayed and errors reported normally.
+	ModeREPL ExecutionMode = iota
+	// ModeSTDIN represents non-interactive mode reading from STDIN. Results are displayed and errors reported normally.
+	ModeSTDIN
+	// ModeLoad represents loading a saved session. Results are not displayed; errors are reported as warnings.
+	ModeLoad
+)
+
 type Calculator struct {
 	DecimalPlaces     int
 	KeepTrailingZeros bool
@@ -45,29 +57,68 @@ func (c *Calculator) Evaluate(expr string) (*unified.Real, error) {
 	return Evaluate(expr, c.env)
 }
 
-func (c *Calculator) Execute(expr string) {
+// processLine processes a single line of input (expression or meta-command).
+// Returns error if processing fails.
+//
+// mode determines error reporting style and whether results are displayed.
+// lineNum is used for error messages in ModeLoad (ignored otherwise).
+func (c *Calculator) processLine(expr string, mode ExecutionMode, lineNum int) error {
 	defer func() {
 		c.count++
-		fmt.Println()
 	}()
 
 	expr = strings.TrimSpace(expr)
-	if strings.HasPrefix(expr, ".") {
-		if err := c.handleMetaCommand(expr); err != nil {
-			c.DisplayError(err)
-		}
-		return
+	if expr == "" {
+		return nil
 	}
 
-	c.history = append(c.history, expr)
+	// Handle meta-commands
+	if strings.HasPrefix(expr, ".") {
+		err := c.handleMetaCommand(expr)
+		if err != nil {
+			c.reportError(err, mode, lineNum)
+		}
+
+		return err
+	}
+
+	// ModeREPL and ModeSTDIN adds to history before evaluation
+	if mode == ModeREPL || mode == ModeSTDIN {
+		c.history = append(c.history, expr)
+	}
 
 	res, err := c.Evaluate(expr)
 	if err != nil {
-		c.DisplayError(err)
-		return
+		c.reportError(err, mode, lineNum)
+		return err
 	}
 
-	c.DisplayResult(res)
+	// ModeLoad adds to history after successful evaluation
+	if mode == ModeLoad {
+		c.history = append(c.history, expr)
+	}
+
+	// Display results (except in Load mode)
+	if mode != ModeLoad {
+		c.DisplayResult(res)
+	}
+
+	return nil
+}
+
+// reportError reports an error using the appropriate method for the execution mode
+func (c *Calculator) reportError(err error, mode ExecutionMode, lineNum int) {
+	switch mode {
+	case ModeLoad:
+		fmt.Fprintf(os.Stderr, "Warning: line %d: %v\n", lineNum, err)
+	default:
+		c.DisplayError(err)
+	}
+}
+
+func (c *Calculator) Execute(expr string) {
+	defer fmt.Println()
+	c.processLine(expr, ModeREPL, 0)
 }
 
 func (c *Calculator) DisplayError(err error) {
@@ -121,30 +172,8 @@ func (c *Calculator) REPL() error {
 func (c *Calculator) ProcessSTDIN() error {
 	scanner := bufio.NewScanner(os.Stdin)
 	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			continue
-		}
-
-		if strings.HasPrefix(line, ".") {
-			if err := c.handleMetaCommand(line); err != nil {
-				c.DisplayError(err)
-			}
-			c.count++
-			continue
-		}
-
-		c.history = append(c.history, line)
-
-		res, err := c.Evaluate(line)
-		if err != nil {
-			c.DisplayError(err)
-			c.count++
-			continue
-		}
-
-		c.DisplayResult(res)
-		c.count++
+		line := scanner.Text()
+		c.processLine(line, ModeSTDIN, 0)
 	}
 
 	return scanner.Err()
@@ -236,7 +265,7 @@ func (c *Calculator) handleSet(args []string) error {
 				setting.Name, value)
 		}
 		setting.SetBool(c, v)
-		fmt.Printf("%s %s\n", formatSettingName(setting.Name), formatBool(v))
+		fmt.Printf("%s %s\n", setting.Name, formatBool(v))
 
 	case SettingTypeInt:
 		v, err := strconv.Atoi(value)
@@ -249,7 +278,7 @@ func (c *Calculator) handleSet(args []string) error {
 			}
 		}
 		setting.SetInt(c, v)
-		fmt.Printf("%s set to %d\n", formatSettingName(setting.Name), v)
+		fmt.Printf("%s set to %d\n", setting.Name, v)
 	}
 
 	return nil
@@ -273,7 +302,7 @@ func (c *Calculator) handleToggle(args []string) error {
 	currentValue := setting.GetBool(c)
 	newValue := !currentValue
 	setting.SetBool(c, newValue)
-	fmt.Printf("%s %s\n", formatSettingName(setting.Name), formatBool(newValue))
+	fmt.Printf("calc:/ %s set to %s\n", setting.Name, formatBool(newValue))
 
 	return nil
 }
@@ -282,6 +311,7 @@ const defaultFilename = "session.txt"
 
 // getSessionPath resolves the session file path based on user input.
 // Default: ~/.local/state/rt/calc/session.txt
+//
 // If arg is a directory, use default filename in that directory
 // If arg is a file path, use it as-is
 func getSessionPath(arg string) (string, error) {
@@ -335,7 +365,6 @@ func (c *Calculator) handleSave(args []string) error {
 	w := bufio.NewWriter(f)
 	defer w.Flush()
 
-	// Write header
 	fmt.Fprintf(w, "# Calculator Session\n")
 	fmt.Fprintf(w, "# Saved: %s\n\n", time.Now().Format("2006-01-02 15:04:05"))
 
@@ -351,7 +380,6 @@ func (c *Calculator) handleSave(args []string) error {
 		}
 	}
 
-	// Write blank line separator
 	if len(c.history) > 0 {
 		fmt.Fprintln(w)
 	}
@@ -365,9 +393,9 @@ func (c *Calculator) handleSave(args []string) error {
 	return nil
 }
 
-// handleLoad loads a session from a file
+// handleLoad loads a session from a file after first clearing current state.
 func (c *Calculator) handleLoad(args []string) error {
-	var argPath string
+	argPath := ""
 	if len(args) > 0 {
 		argPath = args[0]
 	}
@@ -383,47 +411,29 @@ func (c *Calculator) handleLoad(args []string) error {
 	}
 	defer f.Close()
 
-	// Clear current state
 	c.history = nil
 	c.env = parser.NewEnv()
-	// Note: settings are not reset, they'll be overwritten by .set commands
 
 	scanner := bufio.NewScanner(f)
 	lineNum := 0
 	for scanner.Scan() {
 		lineNum++
-		line := strings.TrimSpace(scanner.Text())
 
-		if line == "" || strings.HasPrefix(line, "#") {
+		line := scanner.Text()
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
 			continue
 		}
 
-		if strings.HasPrefix(line, ".") {
-			if err := c.handleMetaCommand(line); err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: line %d: %v\n", lineNum, err)
-			}
-			continue
-		}
-
-		res, err := c.Evaluate(line)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: line %d: %v\n", lineNum, err)
-			continue
-		}
-
-		// Add to history manually (since we're not calling Execute)
-		c.history = append(c.history, line)
-
-		// Optionally display result (might be too verbose)
-		// c.DisplayResult(res)
-		_ = res
+		// Errors are reported as warnings but don't stop loading
+		c.processLine(line, ModeLoad, lineNum)
 	}
 
 	if err := scanner.Err(); err != nil {
 		return fmt.Errorf("error reading file: %w", err)
 	}
 
-	fmt.Printf("Session loaded from %s (%d expressions)\n", filename, len(c.history))
+	fmt.Printf("Loaded from %s\n", filename)
 	return nil
 }
 

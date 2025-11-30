@@ -92,15 +92,3 @@ func findSetting(name string) (*SettingDescriptor, error) {
 	}
 	return setting, nil
 }
-
-// formatSettingName converts snake_case to Title Case for display
-// Example: "keep_trailing_zeros" -> "Keep trailing zeros"
-func formatSettingName(name string) string {
-	parts := strings.Split(name, "_")
-	for i, part := range parts {
-		if len(part) > 0 {
-			parts[i] = strings.ToUpper(part[:1]) + part[1:]
-		}
-	}
-	return strings.Join(parts, " ")
-}
