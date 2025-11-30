@@ -88,6 +88,4 @@ func traverse(s any, key string) (any, error) {
 			return nil, fmt.Errorf("%w %T %s", ErrInvalidStruct, s, u)
 		}
 	}
-
-	panic("unreachable")
 }
