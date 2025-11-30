@@ -109,6 +109,43 @@ func (c *Calculator) REPL() {
 	fmt.Println("calc: goodbye")
 }
 
+type metaCommandFunc func(*Calculator, []string) error
+
+// metaCommands is the list of available meta-commands
+var metaCommands = map[string]metaCommandFunc{
+	".help": func(c *Calculator, args []string) error {
+		c.handleHelp()
+		return nil
+	},
+	".set": func(c *Calculator, args []string) error {
+		return c.handleSet(args)
+	},
+	".show": func(c *Calculator, args []string) error {
+		c.handleShow()
+		return nil
+	},
+}
+
+// findMetaCommand finds a meta-command by prefix matching. Returns the command
+// function if exactly one match is found. Returns error if no matches or
+// multiple (ambiguous) matches.
+func findMetaCommand(prefix string) (metaCommandFunc, error) {
+	var matches []string
+	for cmd := range metaCommands {
+		if strings.HasPrefix(cmd, prefix) {
+			matches = append(matches, cmd)
+		}
+	}
+
+	if len(matches) == 0 {
+		return nil, fmt.Errorf("%w: %s", ErrInvalidMetaCommand, prefix)
+	} else if len(matches) > 1 {
+		return nil, fmt.Errorf("ambiguous command %q, could be one of: %s", prefix, strings.Join(matches, ", "))
+	}
+
+	return metaCommands[matches[0]], nil
+}
+
 // handleMetaCommand routes meta-commands to handlers
 func (c *Calculator) handleMetaCommand(cmd string) error {
 	parts := strings.Fields(cmd)
@@ -116,19 +153,12 @@ func (c *Calculator) handleMetaCommand(cmd string) error {
 		return fmt.Errorf("empty command")
 	}
 
-	switch parts[0] {
-	case ".set":
-		return c.handleSet(parts[1:])
-	case ".show":
-		c.handleShow()
-		return nil
-	case ".help":
-		c.handleHelp()
-		return nil
-	default:
+	meta, err := findMetaCommand(parts[0])
+	if err != nil {
+		return err
 	}
 
-	return fmt.Errorf("%w: %s", ErrInvalidMetaCommand, parts[0])
+	return meta(c, parts[1:])
 }
 
 // handleSet changes a setting value
@@ -190,6 +220,8 @@ func (c *Calculator) handleHelp() {
 	fmt.Println("  .set <setting> <value>  - Change a setting")
 	fmt.Println("  .show                   - Show current settings")
 	fmt.Println("  .help                   - Show this help message")
+	fmt.Println()
+	fmt.Println("Commands accept any unambiguous prefix (e.g., .se for .set, .sh for .show, .h for .help)")
 	fmt.Println()
 	fmt.Println("Available settings:")
 	for _, setting := range settingsRegistry {

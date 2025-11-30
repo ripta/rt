@@ -41,6 +41,26 @@ var handleMetaCommandTests = []handleMetaCommandTest{
 		cmd:     ".se",
 		wantErr: true, // will error because no setting args provided
 	},
+	{
+		name:    ".h alias for .help",
+		cmd:     ".h",
+		wantErr: false,
+	},
+	{
+		name:    ".he alias for .help",
+		cmd:     ".he",
+		wantErr: false,
+	},
+	{
+		name:    ".sh alias for .show",
+		cmd:     ".sh",
+		wantErr: false,
+	},
+	{
+		name:    ".sho alias for .show",
+		cmd:     ".sho",
+		wantErr: false,
+	},
 }
 
 func TestHandleMetaCommand(t *testing.T) {
@@ -120,6 +140,42 @@ func TestFormatBool(t *testing.T) {
 			got := formatBool(tt.input)
 			if got != tt.want {
 				t.Errorf("formatBool() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+type findMetaCommandTest struct {
+	name    string
+	prefix  string
+	wantNil bool
+	wantErr bool
+}
+
+var findMetaCommandTests = []findMetaCommandTest{
+	{".s is ambiguous", ".s", true, true},
+	{".se matches .set", ".se", false, false},
+	{".set matches .set", ".set", false, false},
+	{".sh matches .show", ".sh", false, false},
+	{".show matches .show", ".show", false, false},
+	{".h matches .help", ".h", false, false},
+	{".help matches .help", ".help", false, false},
+	{"unknown prefix errors", ".x", true, true},
+	{"empty string errors", ".", true, true},
+}
+
+func TestFindMetaCommand(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range findMetaCommandTests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := findMetaCommand(tt.prefix)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("findMetaCommand() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if (got == nil) != tt.wantNil {
+				t.Errorf("findMetaCommand() = %v, want %v", got, tt.wantNil)
 			}
 		})
 	}
