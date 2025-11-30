@@ -74,21 +74,29 @@ var settingsRegistry = []SettingDescriptor{
 	},
 }
 
-// settingsIndex provides fast O(1) lookup by name
-var settingsIndex map[string]*SettingDescriptor
+// findSetting looks up a setting by prefix matching (case-insensitive).
+// Returns the setting if exactly one match is found. Returns error if no
+// matches or multiple (ambiguous) matches.
+func findSetting(prefix string) (*SettingDescriptor, error) {
+	var matches []*SettingDescriptor
+	prefix = strings.ToLower(prefix)
 
-func init() {
-	settingsIndex = make(map[string]*SettingDescriptor, len(settingsRegistry))
 	for i := range settingsRegistry {
-		settingsIndex[settingsRegistry[i].Name] = &settingsRegistry[i]
+		if strings.HasPrefix(settingsRegistry[i].Name, prefix) {
+			matches = append(matches, &settingsRegistry[i])
+		}
 	}
-}
 
-// findSetting looks up a setting by name (case-insensitive)
-func findSetting(name string) (*SettingDescriptor, error) {
-	setting, ok := settingsIndex[strings.ToLower(name)]
-	if !ok {
-		return nil, fmt.Errorf("unknown setting: %s", name)
+	if len(matches) == 0 {
+		return nil, fmt.Errorf("unknown setting: %s", prefix)
+	} else if len(matches) > 1 {
+		names := make([]string, len(matches))
+		for i, m := range matches {
+			names[i] = m.Name
+		}
+		return nil, fmt.Errorf("ambiguous setting %q, could be one of: %s",
+			prefix, strings.Join(names, ", "))
 	}
-	return setting, nil
+
+	return matches[0], nil
 }
