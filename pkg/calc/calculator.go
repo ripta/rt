@@ -137,55 +137,35 @@ func (c *Calculator) handleSet(args []string) error {
 		return fmt.Errorf("usage: .set <setting> <value>")
 	}
 
-	setting := strings.ToLower(args[0])
+	setting, err := findSetting(args[0])
+	if err != nil {
+		return err
+	}
+
 	value := args[1]
 
-	switch setting {
-	case "trace":
+	switch setting.Type {
+	case SettingTypeBool:
 		v, err := parseBool(value)
 		if err != nil {
-			return fmt.Errorf("invalid value for trace: %s (use on/off, true/false, yes/no)", value)
+			return fmt.Errorf("invalid value for %s: %s (use on/off, true/false, yes/no)",
+				setting.Name, value)
 		}
-		c.Trace = v
-		fmt.Printf("Trace mode %s\n", formatBool(v))
+		setting.SetBool(c, v)
+		fmt.Printf("%s %s\n", formatSettingName(setting.Name), formatBool(v))
 
-	case "decimal_places":
+	case SettingTypeInt:
 		v, err := strconv.Atoi(value)
 		if err != nil {
 			return fmt.Errorf("invalid number: %s", value)
 		}
-		if v < 0 {
-			return fmt.Errorf("decimal_places must be non-negative")
+		if setting.ValidateInt != nil {
+			if err := setting.ValidateInt(v); err != nil {
+				return err
+			}
 		}
-		c.DecimalPlaces = v
-		fmt.Printf("Decimal places set to %d\n", v)
-
-	case "keep_trailing_zeros":
-		v, err := parseBool(value)
-		if err != nil {
-			return fmt.Errorf("invalid value for keep_trailing_zeros: %s (use on/off, true/false, yes/no)", value)
-		}
-		c.KeepTrailingZeros = v
-		fmt.Printf("Keep trailing zeros %s\n", formatBool(v))
-
-	case "underscore_zeros":
-		v, err := parseBool(value)
-		if err != nil {
-			return fmt.Errorf("invalid value for underscore_zeros: %s (use on/off, true/false, yes/no)", value)
-		}
-		c.UnderscoreZeros = v
-		fmt.Printf("Underscore zeros %s\n", formatBool(v))
-
-	case "verbose":
-		v, err := parseBool(value)
-		if err != nil {
-			return fmt.Errorf("invalid value for verbose: %s (use on/off, true/false, yes/no)", value)
-		}
-		c.Verbose = v
-		fmt.Printf("Verbose mode %s\n", formatBool(v))
-
-	default:
-		return fmt.Errorf("unknown setting: %s", setting)
+		setting.SetInt(c, v)
+		fmt.Printf("%s set to %d\n", formatSettingName(setting.Name), v)
 	}
 
 	return nil
@@ -194,11 +174,14 @@ func (c *Calculator) handleSet(args []string) error {
 // handleShow displays current settings
 func (c *Calculator) handleShow() {
 	fmt.Println("settings:")
-	fmt.Printf("  trace: %s\n", formatBool(c.Trace))
-	fmt.Printf("  decimal_places: %d\n", c.DecimalPlaces)
-	fmt.Printf("  keep_trailing_zeros: %s\n", formatBool(c.KeepTrailingZeros))
-	fmt.Printf("  underscore_zeros: %s\n", formatBool(c.UnderscoreZeros))
-	fmt.Printf("  verbose: %s\n", formatBool(c.Verbose))
+	for _, setting := range settingsRegistry {
+		switch setting.Type {
+		case SettingTypeBool:
+			fmt.Printf("  %s: %s\n", setting.Name, formatBool(setting.GetBool(c)))
+		case SettingTypeInt:
+			fmt.Printf("  %s: %d\n", setting.Name, setting.GetInt(c))
+		}
+	}
 }
 
 // handleHelp displays available meta-commands
@@ -209,11 +192,9 @@ func (c *Calculator) handleHelp() {
 	fmt.Println("  .help                   - Show this help message")
 	fmt.Println()
 	fmt.Println("Available settings:")
-	fmt.Println("  trace               - Enable/disable trace output (on/off)")
-	fmt.Println("  decimal_places      - Number of decimal places to display (integer)")
-	fmt.Println("  keep_trailing_zeros - Keep trailing zeros in output (on/off)")
-	fmt.Println("  underscore_zeros    - Insert underscore before trailing zeros (on/off)")
-	fmt.Println("  verbose             - Enable verbose output (on/off)")
+	for _, setting := range settingsRegistry {
+		fmt.Printf("  %-20s - %s\n", setting.Name, setting.Description)
+	}
 }
 
 // parseBool parses boolean values from strings
