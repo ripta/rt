@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"runtime/debug"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/elk-language/go-prompt"
 	"github.com/ripta/reals/pkg/constructive"
@@ -28,8 +30,9 @@ type Calculator struct {
 	Verbose           bool
 	Trace             bool
 
-	count int
-	env   *parser.Env
+	count   int
+	env     *parser.Env
+	history []string
 }
 
 func (c *Calculator) Evaluate(expr string) (*unified.Real, error) {
@@ -55,6 +58,8 @@ func (c *Calculator) Execute(expr string) {
 		}
 		return
 	}
+
+	c.history = append(c.history, expr)
 
 	res, err := c.Evaluate(expr)
 	if err != nil {
@@ -129,6 +134,8 @@ func (c *Calculator) ProcessSTDIN() error {
 			continue
 		}
 
+		c.history = append(c.history, line)
+
 		res, err := c.Evaluate(line)
 		if err != nil {
 			c.DisplayError(err)
@@ -146,21 +153,31 @@ func (c *Calculator) ProcessSTDIN() error {
 type metaCommandFunc func(*Calculator, []string) error
 
 // metaCommands is the list of available meta-commands
-var metaCommands = map[string]metaCommandFunc{
-	".help": func(c *Calculator, args []string) error {
-		c.handleHelp()
-		return nil
-	},
-	".set": func(c *Calculator, args []string) error {
-		return c.handleSet(args)
-	},
-	".show": func(c *Calculator, args []string) error {
-		c.handleShow()
-		return nil
-	},
-	".toggle": func(c *Calculator, args []string) error {
-		return c.handleToggle(args)
-	},
+var metaCommands map[string]metaCommandFunc
+
+func init() {
+	metaCommands = map[string]metaCommandFunc{
+		".help": func(c *Calculator, args []string) error {
+			c.handleHelp()
+			return nil
+		},
+		".set": func(c *Calculator, args []string) error {
+			return c.handleSet(args)
+		},
+		".show": func(c *Calculator, args []string) error {
+			c.handleShow()
+			return nil
+		},
+		".toggle": func(c *Calculator, args []string) error {
+			return c.handleToggle(args)
+		},
+		".save": func(c *Calculator, args []string) error {
+			return c.handleSave(args)
+		},
+		".load": func(c *Calculator, args []string) error {
+			return c.handleLoad(args)
+		},
+	}
 }
 
 // findMetaCommand finds a meta-command by prefix matching. Returns the command
@@ -261,6 +278,155 @@ func (c *Calculator) handleToggle(args []string) error {
 	return nil
 }
 
+const defaultFilename = "session.txt"
+
+// getSessionPath resolves the session file path based on user input.
+// Default: ~/.local/state/rt/calc/session.txt
+// If arg is a directory, use default filename in that directory
+// If arg is a file path, use it as-is
+func getSessionPath(arg string) (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("failed to get home directory: %w", err)
+	}
+
+	if arg == "" {
+		stateDir := filepath.Join(home, ".local", "state", "rt", "calc")
+		if err := os.MkdirAll(stateDir, 0755); err != nil {
+			return "", fmt.Errorf("failed to create state directory: %w", err)
+		}
+
+		return filepath.Join(stateDir, defaultFilename), nil
+	}
+
+	if strings.HasPrefix(arg, "~/") {
+		arg = filepath.Join(home, arg[2:])
+	}
+	if strings.Contains(arg, "$") {
+		arg = os.ExpandEnv(arg)
+	}
+
+	// If arg is an existing directory, use default filename in that directory
+	if info, err := os.Stat(arg); err == nil && info.IsDir() {
+		return filepath.Join(arg, defaultFilename), nil
+	}
+
+	return arg, nil
+}
+
+// handleSave saves the current session to a file
+func (c *Calculator) handleSave(args []string) error {
+	var argPath string
+	if len(args) > 0 {
+		argPath = args[0]
+	}
+
+	filename, err := getSessionPath(argPath)
+	if err != nil {
+		return err
+	}
+
+	f, err := os.Create(filename)
+	if err != nil {
+		return fmt.Errorf("failed to create file: %w", err)
+	}
+	defer f.Close()
+
+	w := bufio.NewWriter(f)
+	defer w.Flush()
+
+	// Write header
+	fmt.Fprintf(w, "# Calculator Session\n")
+	fmt.Fprintf(w, "# Saved: %s\n\n", time.Now().Format("2006-01-02 15:04:05"))
+
+	// Write settings as .set commands
+	for _, setting := range settingsRegistry {
+		switch setting.Type {
+		case SettingTypeBool:
+			value := setting.GetBool(c)
+			fmt.Fprintf(w, ".set %s %s\n", setting.Name, formatBool(value))
+		case SettingTypeInt:
+			value := setting.GetInt(c)
+			fmt.Fprintf(w, ".set %s %d\n", setting.Name, value)
+		}
+	}
+
+	// Write blank line separator
+	if len(c.history) > 0 {
+		fmt.Fprintln(w)
+	}
+
+	// Write expression history
+	for _, expr := range c.history {
+		fmt.Fprintln(w, expr)
+	}
+
+	fmt.Printf("Session saved to %s\n", filename)
+	return nil
+}
+
+// handleLoad loads a session from a file
+func (c *Calculator) handleLoad(args []string) error {
+	var argPath string
+	if len(args) > 0 {
+		argPath = args[0]
+	}
+
+	filename, err := getSessionPath(argPath)
+	if err != nil {
+		return err
+	}
+
+	f, err := os.Open(filename)
+	if err != nil {
+		return fmt.Errorf("failed to open file: %w", err)
+	}
+	defer f.Close()
+
+	// Clear current state
+	c.history = nil
+	c.env = parser.NewEnv()
+	// Note: settings are not reset, they'll be overwritten by .set commands
+
+	scanner := bufio.NewScanner(f)
+	lineNum := 0
+	for scanner.Scan() {
+		lineNum++
+		line := strings.TrimSpace(scanner.Text())
+
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		if strings.HasPrefix(line, ".") {
+			if err := c.handleMetaCommand(line); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: line %d: %v\n", lineNum, err)
+			}
+			continue
+		}
+
+		res, err := c.Evaluate(line)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: line %d: %v\n", lineNum, err)
+			continue
+		}
+
+		// Add to history manually (since we're not calling Execute)
+		c.history = append(c.history, line)
+
+		// Optionally display result (might be too verbose)
+		// c.DisplayResult(res)
+		_ = res
+	}
+
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("error reading file: %w", err)
+	}
+
+	fmt.Printf("Session loaded from %s (%d expressions)\n", filename, len(c.history))
+	return nil
+}
+
 // handleShow displays current settings
 func (c *Calculator) handleShow() {
 	fmt.Println("settings:")
@@ -280,6 +446,8 @@ func (c *Calculator) handleHelp() {
 	fmt.Println("  .set <setting> <value>  - Change a setting")
 	fmt.Println("  .show                   - Show current settings")
 	fmt.Println("  .toggle <setting>       - Toggle a boolean setting")
+	fmt.Println("  .save [path]            - Save session (default: ~/.local/state/rt/calc/session.txt)")
+	fmt.Println("  .load [path]            - Load session (default: ~/.local/state/rt/calc/session.txt)")
 	fmt.Println("  .help                   - Show this help message")
 	fmt.Println()
 	fmt.Println("Commands accept any unambiguous prefix, e.g., .se for .set, .sh for .show)")
