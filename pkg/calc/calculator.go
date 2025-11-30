@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"runtime/debug"
-	"strconv"
 	"strings"
 
 	"github.com/elk-language/go-prompt"
@@ -142,45 +141,14 @@ func (c *Calculator) handleSet(args []string) error {
 		return err
 	}
 
-	value := args[1]
-
-	switch setting.Type {
-	case SettingTypeBool:
-		v, err := parseBool(value)
-		if err != nil {
-			return fmt.Errorf("invalid value for %s: %s (use on/off, true/false, yes/no)",
-				setting.Name, value)
-		}
-		setting.SetBool(c, v)
-		fmt.Printf("%s %s\n", formatSettingName(setting.Name), formatBool(v))
-
-	case SettingTypeInt:
-		v, err := strconv.Atoi(value)
-		if err != nil {
-			return fmt.Errorf("invalid number: %s", value)
-		}
-		if setting.ValidateInt != nil {
-			if err := setting.ValidateInt(v); err != nil {
-				return err
-			}
-		}
-		setting.SetInt(c, v)
-		fmt.Printf("%s set to %d\n", formatSettingName(setting.Name), v)
-	}
-
-	return nil
+	return setting.SetValue(c, args[1])
 }
 
 // handleShow displays current settings
 func (c *Calculator) handleShow() {
 	fmt.Println("settings:")
 	for _, setting := range settingsRegistry {
-		switch setting.Type {
-		case SettingTypeBool:
-			fmt.Printf("  %s: %s\n", setting.Name, formatBool(setting.GetBool(c)))
-		case SettingTypeInt:
-			fmt.Printf("  %s: %d\n", setting.Name, setting.GetInt(c))
-		}
+		fmt.Printf("  %s: %s\n", setting.Name(), setting.GetValue(c))
 	}
 }
 
@@ -193,7 +161,7 @@ func (c *Calculator) handleHelp() {
 	fmt.Println()
 	fmt.Println("Available settings:")
 	for _, setting := range settingsRegistry {
-		fmt.Printf("  %-20s - %s\n", setting.Name, setting.Description)
+		fmt.Printf("  %-20s - %s\n", setting.Name(), setting.Description())
 	}
 }
 
