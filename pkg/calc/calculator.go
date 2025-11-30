@@ -158,6 +158,9 @@ var metaCommands = map[string]metaCommandFunc{
 		c.handleShow()
 		return nil
 	},
+	".toggle": func(c *Calculator, args []string) error {
+		return c.handleToggle(args)
+	},
 }
 
 // findMetaCommand finds a meta-command by prefix matching. Returns the command
@@ -235,6 +238,29 @@ func (c *Calculator) handleSet(args []string) error {
 	return nil
 }
 
+// handleToggle toggles a boolean setting
+func (c *Calculator) handleToggle(args []string) error {
+	if len(args) != 1 {
+		return fmt.Errorf("usage: .toggle <setting>")
+	}
+
+	setting, err := findSetting(args[0])
+	if err != nil {
+		return err
+	}
+
+	if setting.Type != SettingTypeBool {
+		return fmt.Errorf("cannot toggle %s: not a boolean setting", setting.Name)
+	}
+
+	currentValue := setting.GetBool(c)
+	newValue := !currentValue
+	setting.SetBool(c, newValue)
+	fmt.Printf("%s %s\n", formatSettingName(setting.Name), formatBool(newValue))
+
+	return nil
+}
+
 // handleShow displays current settings
 func (c *Calculator) handleShow() {
 	fmt.Println("settings:")
@@ -253,9 +279,10 @@ func (c *Calculator) handleHelp() {
 	fmt.Println("Available commands:")
 	fmt.Println("  .set <setting> <value>  - Change a setting")
 	fmt.Println("  .show                   - Show current settings")
+	fmt.Println("  .toggle <setting>       - Toggle a boolean setting")
 	fmt.Println("  .help                   - Show this help message")
 	fmt.Println()
-	fmt.Println("Commands accept any unambiguous prefix (e.g., .se for .set, .sh for .show, .h for .help)")
+	fmt.Println("Commands accept any unambiguous prefix, e.g., .se for .set, .sh for .show)")
 	fmt.Println()
 	fmt.Println("Available settings:")
 	for _, setting := range settingsRegistry {

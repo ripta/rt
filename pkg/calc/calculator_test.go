@@ -196,8 +196,7 @@ func TestMetaCommandPersistence(t *testing.T) {
 		t.Error("Trace setting did not persist")
 	}
 
-	err = c.handleSet([]string{"decimal_places", "5"})
-	if err != nil {
+	if err := c.handleSet([]string{"decimal_places", "5"}); err != nil {
 		t.Fatalf("Failed to set decimal_places: %v", err)
 	}
 
@@ -229,5 +228,114 @@ func TestIntegrationWithEvaluation(t *testing.T) {
 
 	if !c.Verbose {
 		t.Error("Verbose should be enabled")
+	}
+}
+
+type toggleTest struct {
+	name        string
+	setting     string
+	initialVal  bool
+	expectedVal bool
+	wantErr     bool
+}
+
+var toggleTests = []toggleTest{
+	{
+		name:        "toggle trace from off to on",
+		setting:     "trace",
+		initialVal:  false,
+		expectedVal: true,
+		wantErr:     false,
+	},
+	{
+		name:        "toggle verbose from on to off",
+		setting:     "verbose",
+		initialVal:  true,
+		expectedVal: false,
+		wantErr:     false,
+	},
+	{
+		name:        "toggle keep_trailing_zeros",
+		setting:     "keep_trailing_zeros",
+		initialVal:  false,
+		expectedVal: true,
+		wantErr:     false,
+	},
+}
+
+// TestToggle verifies that the toggle command works correctly
+func TestToggle(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range toggleTests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := &Calculator{
+				DecimalPlaces: 30,
+			}
+
+			setting, _ := findSetting(tt.setting)
+			setting.SetBool(c, tt.initialVal)
+
+			if err := c.handleToggle([]string{tt.setting}); (err != nil) != tt.wantErr {
+				t.Errorf("handleToggle() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+
+			if !tt.wantErr {
+				got := setting.GetBool(c)
+				if got != tt.expectedVal {
+					t.Errorf("After toggle, %s = %v, want %v", tt.setting, got, tt.expectedVal)
+				}
+			}
+		})
+	}
+}
+
+// TestToggleNonBoolean verifies that toggle fails on non-boolean settings
+func TestToggleNonBoolean(t *testing.T) {
+	c := &Calculator{
+		DecimalPlaces: 30,
+	}
+
+	err := c.handleToggle([]string{"decimal_places"})
+	if err == nil {
+		t.Error("Expected error when toggling non-boolean setting, got nil")
+	}
+}
+
+type toggleInvalidUsageTest struct {
+	name string
+	args []string
+}
+
+var toggleInvalidUsageTests = []toggleInvalidUsageTest{
+	{
+		name: "no arguments",
+		args: []string{},
+	},
+	{
+		name: "too many arguments",
+		args: []string{"trace", "extra"},
+	},
+	{
+		name: "unknown setting",
+		args: []string{"nonexistent"},
+	},
+}
+
+// TestToggleInvalidUsage tests error cases for toggle
+func TestToggleInvalidUsage(t *testing.T) {
+	t.Parallel()
+	for _, tt := range toggleInvalidUsageTests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := &Calculator{
+				DecimalPlaces: 30,
+			}
+
+			err := c.handleToggle(tt.args)
+			if err == nil {
+				t.Error("Expected error, got nil")
+			}
+		})
 	}
 }
