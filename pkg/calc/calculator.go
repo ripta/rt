@@ -1,6 +1,7 @@
 package calc
 
 import (
+	"bufio"
 	"errors"
 	"fmt"
 	"os"
@@ -91,7 +92,7 @@ func (c *Calculator) DisplayResult(res *unified.Real) {
 	fmt.Printf("%s\n", t)
 }
 
-func (c *Calculator) REPL() {
+func (c *Calculator) REPL() error {
 	p := prompt.New(
 		c.Execute,
 		prompt.WithPrefixCallback(func() string {
@@ -107,6 +108,39 @@ func (c *Calculator) REPL() {
 	p.Run()
 
 	fmt.Println("calc: goodbye")
+	return nil
+}
+
+// ProcessSTDIN reads expressions from STDIN and evaluates them line by line.
+// This is used for non-interactive mode (e.g., piped input).
+func (c *Calculator) ProcessSTDIN() error {
+	scanner := bufio.NewScanner(os.Stdin)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+
+		if strings.HasPrefix(line, ".") {
+			if err := c.handleMetaCommand(line); err != nil {
+				c.DisplayError(err)
+			}
+			c.count++
+			continue
+		}
+
+		res, err := c.Evaluate(line)
+		if err != nil {
+			c.DisplayError(err)
+			c.count++
+			continue
+		}
+
+		c.DisplayResult(res)
+		c.count++
+	}
+
+	return scanner.Err()
 }
 
 type metaCommandFunc func(*Calculator, []string) error

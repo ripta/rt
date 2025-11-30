@@ -1,15 +1,11 @@
 package calc
 
 import (
-	"errors"
-	"fmt"
 	"os"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
-
-var ErrNotTTY = errors.New("STDIN is not a TTY")
 
 // NewCommand creates a new calculator command.
 //
@@ -28,25 +24,26 @@ func NewCommand() *cobra.Command {
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if len(args) == 0 {
-				if term.IsTerminal(int(os.Stdin.Fd())) {
-					c.REPL()
-					return nil
-				}
+			// mode 1: evaluate each arg
+			if len(args) > 0 {
+				for _, arg := range args {
+					res, err := c.Evaluate(arg)
+					if err != nil {
+						return err
+					}
 
-				return fmt.Errorf("%w: must specify expression as arguments", ErrNotTTY)
+					c.DisplayResult(res)
+				}
+				return nil
 			}
 
-			for _, arg := range args {
-				res, err := c.Evaluate(arg)
-				if err != nil {
-					return err
-				}
-
-				c.DisplayResult(res)
+			// mode 2: start interactive REPL if STDIN is a TTY
+			if term.IsTerminal(int(os.Stdin.Fd())) {
+				return c.REPL()
 			}
 
-			return nil
+			// otherwise, read from stdin
+			return c.ProcessSTDIN()
 		},
 	}
 
