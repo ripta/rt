@@ -5,7 +5,7 @@ go 1.24.0
 toolchain go1.24.1
 
 require (
-	github.com/BurntSushi/toml v1.5.0
+	github.com/BurntSushi/toml v1.6.0
 	github.com/containerd/console v1.0.5
 	github.com/elk-language/go-prompt v1.3.1
 	github.com/go-logfmt/logfmt v0.6.1
