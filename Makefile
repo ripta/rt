@@ -18,3 +18,8 @@ fast-test:
 
 test:
 	go test -v ./...
+
+samples:
+	echo ABCDEFGHIJKLMNOPQRSTUVWXYZ abcdefghijklmnopqrstuvwxyz 0123456789 | go run ./cmd/uni map -a > samples/uni.txt
+
+.PHONY: generate-proto imports install install-protoc hyper fast-test test samples
