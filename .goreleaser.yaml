@@ -23,6 +23,8 @@ builds:
     goarch:
       - amd64
       - arm64
+    ldflags:
+      - '-X github.com/ripta/rt/pkg/version.Version={{ .Version }}'
   - id: rt_lite
     main: ./hypercmd/rt_lite
     binary: rt_lite
@@ -32,6 +34,8 @@ builds:
       - wasip1
     goarch:
       - wasm
+    ldflags:
+      - '-X github.com/ripta/rt/pkg/version.Version={{ .Version }}'
 
 archives:
   - formats: [tar.gz]
