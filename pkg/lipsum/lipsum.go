@@ -5,9 +5,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/ripta/rt/pkg/lipsum/data"
 	"github.com/spf13/cobra"
 	"golang.org/x/time/rate"
+
+	"github.com/ripta/rt/pkg/lipsum/data"
 )
 
 type Options struct {
