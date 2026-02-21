@@ -1,5 +1,5 @@
 generate-proto:
-	protoc --go_out=. --go_opt=paths=source_relative ./samples/data/v1/data.proto
+	protoc -I./samples --go_out=./samples --go_opt=paths=source_relative ./samples/data/v1/data.proto
 
 imports:
 	goimports -w -l -local github.com/ripta/rt .
