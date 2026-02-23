@@ -21,6 +21,7 @@ go install github.com/ripta/rt/cmd/...@latest
 
 or pick-and-choose each tool to individually install:
 
+* [cg](#cg) to run a command and annotate its output with timestamps
 * [enc](#enc) to encode and decode STDIN
 * [grpcto](#grpcto) to frame and unframe gRPC messages
 * [hs](#hs) to hash STDIN
@@ -41,6 +42,67 @@ GOOS=wasip1 GOARCH=wasm CGO_ENABLED=0 go build -o rt_lite.wasm -v ./hypercmd/rt_
 
 Pull requests welcome, though you should probably check first before sinking any time.
 
+
+
+`cg`
+----
+
+Run a command and annotate each line of its stdout and stderr with a timestamp
+and stream indicator (`O` for stdout, `E` for stderr, `I` for cg's own
+lifecycle messages).
+
+Acts like `annotate-output` script.
+
+```
+go install github.com/ripta/rt/cmd/cg@latest
+```
+
+Basic usage:
+
+```
+❯ cg -- echo hello
+19:02:59 I: cg v0.1.0
+19:02:59 I: prefix="15:04:05 "
+19:02:59 I: Started echo hello
+19:02:59 O: hello
+19:02:59 I: Finished with exitcode 0
+```
+
+Stdout and stderr are distinguished:
+
+```
+❯ cg -- sh -c 'echo out; echo err >&2'
+19:03:04 I: cg v0.1.0
+19:03:04 I: prefix="15:04:05 "
+19:03:04 I: Started sh -c 'echo out; echo err >&2'
+19:03:04 O: out
+19:03:04 E: err
+19:03:04 I: Finished with exitcode 0
+```
+
+The child's exit code is propagated:
+
+```
+❯ cg -- sh -c 'exit 42'; echo $?
+19:20:35 I: cg v0.1.0
+19:20:35 I: prefix="15:04:05 "
+19:20:35 I: Started sh -c 'exit 42'
+19:20:35 I: Finished with exitcode 42
+42
+```
+
+Use `--format` to change the timestamp prefix. It takes the golang `time.Format` layout:
+
+```
+❯ cg --format '2006-01-02T15:04:05 ' -- echo hello
+2026-02-22T19:05:00 I: cg v0.1.0
+2026-02-22T19:05:00 I: prefix="2006-01-02T15:04:05 "
+2026-02-22T19:05:00 I: Started echo hello
+2026-02-22T19:05:00 O: hello
+2026-02-22T19:05:00 I: Finished with exitcode 0
+```
+
+Signals SIGINT and SIGTERM are forwarded to the child process.
 
 
 `enc`
