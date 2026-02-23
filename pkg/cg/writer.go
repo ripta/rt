@@ -30,7 +30,7 @@ type AnnotatedWriter struct {
 	prefix PrefixFunc
 }
 
-// NewAnnotatedWriter cre ates an AnnotatedWriter that writes to dest, calling
+// NewAnnotatedWriter creates an AnnotatedWriter that writes to dest, calling
 // prefix before each line to obtain the current prefix string.
 func NewAnnotatedWriter(dest io.Writer, prefix PrefixFunc) *AnnotatedWriter {
 	return &AnnotatedWriter{
@@ -70,6 +70,9 @@ func (w *AnnotatedWriter) WriteLines(r io.Reader, ind Indicator) error {
 		line, err := br.ReadBytes('\n')
 		if err != nil {
 			if err == io.EOF {
+				if len(line) > 0 {
+					return w.WritePartialLine(ind, string(line))
+				}
 				return nil
 			}
 			return err
