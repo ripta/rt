@@ -88,6 +88,9 @@ func lexExpression(l *L) lexingState {
 		l.Emit(tokens.RPAREN)
 		return lexExpression
 
+	case r == '$':
+		return lexLineIdent
+
 	case IsAlnum(r):
 		l.Rewind()
 		return lexIdent

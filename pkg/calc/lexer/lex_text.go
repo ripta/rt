@@ -12,6 +12,15 @@ func lexIdent(l *L) lexingState {
 	return lexExpression
 }
 
+func lexLineIdent(l *L) lexingState {
+	if !l.AcceptWhile(func(r rune) bool { return r >= '0' && r <= '9' }) {
+		return l.Errorf("expected digits after '$'")
+	}
+
+	l.Emit(tokens.IDENT)
+	return lexExpression
+}
+
 func lexNumber(l *L) lexingState {
 	if !l.AcceptWhile(IsNumeric) {
 		return l.Errorf("invalid number: %s", l.Current())

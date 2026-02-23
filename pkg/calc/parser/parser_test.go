@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/ripta/reals/pkg/constructive"
+	"github.com/ripta/reals/pkg/rational"
 	"github.com/ripta/reals/pkg/unified"
 )
 
@@ -401,9 +402,9 @@ func TestParserErrors(t *testing.T) {
 			wantErr: "unexpected token RPAREN",
 		},
 		{
-			name:    "illegal tokens",
+			name:    "bare dollar sign",
 			expr:    "$",
-			wantErr: "unexpected token",
+			wantErr: "expected digits after '$'",
 		},
 	}
 
@@ -615,4 +616,54 @@ func approximateRealForTest(t *testing.T, r *unified.Real, precision int) *big.R
 	exp := int64(-precision)
 	denom := new(big.Int).Exp(big.NewInt(2), big.NewInt(exp), nil)
 	return new(big.Rat).SetFrac(approx, denom)
+}
+
+func makeReal(n int64) *unified.Real {
+	rat := new(big.Rat).SetInt64(n)
+	return unified.New(constructive.One(), rational.FromRational(rat))
+}
+
+func TestResultHistoryVariable(t *testing.T) {
+	t.Parallel()
+
+	env := NewEnv()
+	env.SetConstant("$0", makeReal(42))
+
+	result, err := parseAndEval(t, "$0 + 1", env)
+	if err != nil {
+		t.Fatalf("eval $0 + 1: %v", err)
+	}
+
+	got := realToFloat(t, result)
+	if diff := math.Abs(got - 43); diff > 1e-9 {
+		t.Fatalf("result mismatch: got %v, want 43", got)
+	}
+}
+
+func TestResultHistoryUndefined(t *testing.T) {
+	t.Parallel()
+
+	env := NewEnv()
+	_, err := parseAndEval(t, "$5", env)
+	if err == nil {
+		t.Fatalf("expected error for undefined $5")
+	}
+	if !strings.Contains(err.Error(), "no result for line 5") {
+		t.Fatalf("error mismatch: got %v, want substring %q", err, "no result for line 5")
+	}
+}
+
+func TestResultHistoryImmutable(t *testing.T) {
+	t.Parallel()
+
+	env := NewEnv()
+	env.SetConstant("$0", makeReal(7))
+
+	_, err := parseAndEval(t, "$0 = 99", env)
+	if err == nil {
+		t.Fatalf("expected error when assigning to $0")
+	}
+	if !strings.Contains(err.Error(), "cannot assign to constant") {
+		t.Fatalf("error mismatch: got %v, want substring %q", err, "cannot assign to constant")
+	}
 }

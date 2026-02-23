@@ -227,6 +227,50 @@ var tokenTests = []tokenTest{
 		},
 	},
 	{
+		name:  "result history variable",
+		input: "$0",
+		want: []tokenExpectation{
+			{Type: tokens.IDENT, Value: "$0", Col: 1},
+		},
+	},
+	{
+		name:  "result history variable multi-digit",
+		input: "$123",
+		want: []tokenExpectation{
+			{Type: tokens.IDENT, Value: "$123", Col: 1},
+		},
+	},
+	{
+		name:  "result history variable in expression",
+		input: "$0 + 1",
+		want: []tokenExpectation{
+			{Type: tokens.IDENT, Value: "$0", Col: 1},
+			{Type: tokens.WHITESPACE, Value: " ", Col: 3},
+			{Type: tokens.OP_PLUS, Value: "+", Col: 4},
+			{Type: tokens.WHITESPACE, Value: " ", Col: 5},
+			{Type: tokens.LIT_INT, Value: "1", Col: 6},
+		},
+	},
+	{
+		name:  "bare dollar sign is illegal",
+		input: "$",
+		want: []tokenExpectation{
+			{Type: tokens.ILLEGAL, Value: "$", Col: 1},
+		},
+		wantErr: "expected digits after '$'",
+	},
+	{
+		name:  "two result history variables",
+		input: "$0 + $1",
+		want: []tokenExpectation{
+			{Type: tokens.IDENT, Value: "$0", Col: 1},
+			{Type: tokens.WHITESPACE, Value: " ", Col: 3},
+			{Type: tokens.OP_PLUS, Value: "+", Col: 4},
+			{Type: tokens.WHITESPACE, Value: " ", Col: 5},
+			{Type: tokens.IDENT, Value: "$1", Col: 6},
+		},
+	},
+	{
 		name:  "fraction additions with integer",
 		input: "1/2 + 3",
 		want: []tokenExpectation{

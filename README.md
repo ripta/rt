@@ -21,6 +21,7 @@ go install github.com/ripta/rt/cmd/...@latest
 
 or pick-and-choose each tool to individually install:
 
+* [calc](#calc) for arbitrary-precision arithmetic
 * [cg](#cg) to run a command and annotate its output with timestamps
 * [enc](#enc) to encode and decode STDIN
 * [grpcto](#grpcto) to frame and unframe gRPC messages
@@ -42,6 +43,43 @@ GOOS=wasip1 GOARCH=wasm CGO_ENABLED=0 go build -o rt_lite.wasm -v ./hypercmd/rt_
 
 Pull requests welcome, though you should probably check first before sinking any time.
 
+
+
+`calc`
+------
+
+Arbitrary-precision calculator. Expressions can be passed as arguments, piped
+via stdin, or entered in an interactive REPL.
+
+```
+❯ calc '355/113'
+3.14159
+```
+
+In REPL mode, results are stored as `$N` variables for reuse:
+
+```
+❯ calc
+calc: type an expression to calculate, ".help" for help, or ^D to exit
+calc:000> 2**128
+340282366920938463463374607431768211456
+calc:001> $0 + 1
+340282366920938463463374607431768211457
+```
+
+Use `-d` to control decimal places (default 30), and `-v` for verbose output
+showing the internal construction:
+
+```
+❯ calc -d 50 '√2'
+1.41421356237309504880168872420969807856967187537695
+
+❯ calc -v '22/7'
+calc:000/ Construction: Multiply(Inverse(Named("1", Int(1))), Multiply(Int(22), Inverse(Int(7))))
+3.142857142857142857142857142857
+```
+
+Sessions can be saved and loaded with `.save` and `.load`.
 
 
 `cg`
