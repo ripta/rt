@@ -381,6 +381,44 @@ func TestREPLResultHistoryImmutable(t *testing.T) {
 	}
 }
 
+func TestREPLResultHistorySurvivesErrors(t *testing.T) {
+	c := &Calculator{DecimalPlaces: 30}
+
+	if err := c.processLine("10", ModeREPL, 0); err != nil {
+		t.Fatalf("processLine(10): %v", err)
+	}
+
+	if err := c.processLine("1/0", ModeREPL, 0); err == nil {
+		t.Fatalf("expected division by zero error")
+	}
+
+	if err := c.processLine("20", ModeREPL, 0); err != nil {
+		t.Fatalf("processLine(20): %v", err)
+	}
+
+	res, err := c.Evaluate("$0")
+	if err != nil {
+		t.Fatalf("Evaluate($0): %v", err)
+	}
+	if got := approxFloat(t, res); math.Abs(got-10) > 1e-9 {
+		t.Fatalf("$0 = %v, want 10", got)
+	}
+
+	if _, err := c.Evaluate("$1"); err == nil {
+		t.Fatalf("expected error for $1 after failed line")
+	} else if !strings.Contains(err.Error(), "no result for line 1") {
+		t.Fatalf("error mismatch: got %v, want substring %q", err, "no result for line 1")
+	}
+
+	res, err = c.Evaluate("$2")
+	if err != nil {
+		t.Fatalf("Evaluate($2): %v", err)
+	}
+	if got := approxFloat(t, res); math.Abs(got-20) > 1e-9 {
+		t.Fatalf("$2 = %v, want 20", got)
+	}
+}
+
 func approxFloat(t *testing.T, res *unified.Real) float64 {
 	t.Helper()
 	cons := res.Constructive()

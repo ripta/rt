@@ -260,6 +260,14 @@ var tokenTests = []tokenTest{
 		wantErr: "expected digits after '$'",
 	},
 	{
+		name:  "dollar followed by letters is illegal",
+		input: "$abc",
+		want: []tokenExpectation{
+			{Type: tokens.ILLEGAL, Value: "$", Col: 1},
+		},
+		wantErr: "expected digits after '$'",
+	},
+	{
 		name:  "two result history variables",
 		input: "$0 + $1",
 		want: []tokenExpectation{
