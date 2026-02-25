@@ -21,6 +21,11 @@ func (opts *Options) run(cmd *cobra.Command, args []string) error {
 	}
 	w := NewAnnotatedWriter(cmd.OutOrStdout(), prefix)
 
+	var buf *LineBuffer
+	if opts.Buffered {
+		buf = NewLineBuffer(prefix)
+	}
+
 	// writeInfo writes a lifecycle message to the annotated writer and
 	// optionally buffers it for later replay to the capture lifecycle file.
 	var preCaptureMsgs []string
@@ -45,6 +50,12 @@ func (opts *Options) run(cmd *cobra.Command, args []string) error {
 
 	if err := writeInfo(fmt.Sprintf("prefix=%q", opts.Format)); err != nil {
 		return fmt.Errorf("writing prefix info: %w", err)
+	}
+
+	if opts.Buffered {
+		if err := writeInfo("buffered mode, output deferred"); err != nil {
+			return fmt.Errorf("writing buffered info: %w", err)
+		}
 	}
 
 	if err := writeInfo(fmt.Sprintf("Started %s", escapeArgs(args))); err != nil {
@@ -122,7 +133,17 @@ func (opts *Options) run(cmd *cobra.Command, args []string) error {
 	var wg sync.WaitGroup
 	wg.Add(2)
 
-	if cap != nil {
+	switch {
+	case cap != nil && buf != nil:
+		go func() {
+			defer wg.Done()
+			_ = buf.WriteLines(io.TeeReader(stdout, cap.Stdout), IndicatorOut)
+		}()
+		go func() {
+			defer wg.Done()
+			_ = buf.WriteLines(io.TeeReader(stderr, cap.Stderr), IndicatorErr)
+		}()
+	case cap != nil:
 		go func() {
 			defer wg.Done()
 			_, _ = io.Copy(cap.Stdout, stdout)
@@ -131,7 +152,16 @@ func (opts *Options) run(cmd *cobra.Command, args []string) error {
 			defer wg.Done()
 			_, _ = io.Copy(cap.Stderr, stderr)
 		}()
-	} else {
+	case buf != nil:
+		go func() {
+			defer wg.Done()
+			_ = buf.WriteLines(stdout, IndicatorOut)
+		}()
+		go func() {
+			defer wg.Done()
+			_ = buf.WriteLines(stderr, IndicatorErr)
+		}()
+	default:
 		go func() {
 			defer wg.Done()
 			_ = w.WriteLines(stdout, IndicatorOut)
@@ -146,6 +176,13 @@ func (opts *Options) run(cmd *cobra.Command, args []string) error {
 
 	waitErr := child.Wait()
 	code := ExitCodeFromError(waitErr)
+
+	if buf != nil {
+		if err := buf.Flush(w); err != nil {
+			return fmt.Errorf("flushing buffered output: %w", err)
+		}
+	}
+
 	if ws := exitStatus(child); ws != nil && ws.Signaled() {
 		_ = writeInfo(fmt.Sprintf("Finished with signal %d", ws.Signal()))
 	} else {

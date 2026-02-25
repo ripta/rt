@@ -60,6 +60,27 @@ func (w *AnnotatedWriter) WritePartialLine(ind Indicator, line string) error {
 	return err
 }
 
+// WriteLineWithPrefix writes a single annotated line using the given prefix
+// instead of calling the prefix function. Used for replaying buffered lines
+// with their original receive-time prefix.
+func (w *AnnotatedWriter) WriteLineWithPrefix(prefix string, ind Indicator, line string) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	_, err := fmt.Fprintf(w.dest, "%s%c: %s\n", prefix, ind, line)
+	return err
+}
+
+// WritePartialLineWithPrefix writes a single annotated line without a trailing
+// newline, using the given prefix instead of calling the prefix function.
+func (w *AnnotatedWriter) WritePartialLineWithPrefix(prefix string, ind Indicator, line string) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	_, err := fmt.Fprintf(w.dest, "%s%c: %s", prefix, ind, line)
+	return err
+}
+
 // WriteLines reads linewise from r, and writes each as an annotated line.
 //
 // If the final line does not end with a newline, it is written without a

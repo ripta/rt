@@ -114,6 +114,108 @@ var writeLinesTests = []writeLinesTest{
 	},
 }
 
+type writeLineWithPrefixTest struct {
+	name      string
+	prefix    string
+	indicator Indicator
+	line      string
+	want      string
+}
+
+var writeLineWithPrefixTests = []writeLineWithPrefixTest{
+	{
+		name:      "stdout line with custom prefix",
+		prefix:    "12:00:00 ",
+		indicator: IndicatorOut,
+		line:      "hello world",
+		want:      "12:00:00 O: hello world\n",
+	},
+	{
+		name:      "stderr line with custom prefix",
+		prefix:    "12:00:01 ",
+		indicator: IndicatorErr,
+		line:      "an error",
+		want:      "12:00:01 E: an error\n",
+	},
+	{
+		name:      "info line with custom prefix",
+		prefix:    "12:00:02 ",
+		indicator: IndicatorInfo,
+		line:      "lifecycle",
+		want:      "12:00:02 I: lifecycle\n",
+	},
+	{
+		name:      "empty line with custom prefix",
+		prefix:    "T ",
+		indicator: IndicatorOut,
+		line:      "",
+		want:      "T O: \n",
+	},
+}
+
+func TestWriteLineWithPrefix(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range writeLineWithPrefixTests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			w := NewAnnotatedWriter(&buf, func() string { return "UNUSED " })
+
+			if err := w.WriteLineWithPrefix(tt.prefix, tt.indicator, tt.line); err != nil {
+				t.Fatalf("WriteLineWithPrefix() error = %v", err)
+			}
+
+			if got := buf.String(); got != tt.want {
+				t.Errorf("WriteLineWithPrefix() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+type writePartialLineWithPrefixTest struct {
+	name      string
+	prefix    string
+	indicator Indicator
+	line      string
+	want      string
+}
+
+var writePartialLineWithPrefixTests = []writePartialLineWithPrefixTest{
+	{
+		name:      "stdout partial with custom prefix",
+		prefix:    "12:00:00 ",
+		indicator: IndicatorOut,
+		line:      "partial",
+		want:      "12:00:00 O: partial",
+	},
+	{
+		name:      "stderr partial with custom prefix",
+		prefix:    "12:00:01 ",
+		indicator: IndicatorErr,
+		line:      "err partial",
+		want:      "12:00:01 E: err partial",
+	},
+}
+
+func TestWritePartialLineWithPrefix(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range writePartialLineWithPrefixTests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			w := NewAnnotatedWriter(&buf, func() string { return "UNUSED " })
+
+			if err := w.WritePartialLineWithPrefix(tt.prefix, tt.indicator, tt.line); err != nil {
+				t.Fatalf("WritePartialLineWithPrefix() error = %v", err)
+			}
+
+			if got := buf.String(); got != tt.want {
+				t.Errorf("WritePartialLineWithPrefix() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestWriteLines(t *testing.T) {
 	t.Parallel()
 
