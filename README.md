@@ -51,7 +51,7 @@ Run a command and annotate each line of its stdout and stderr with a timestamp
 and stream indicator (`O` for stdout, `E` for stderr, `I` for cg's own
 lifecycle messages).
 
-Acts like `annotate-output` script.
+Acts like the `annotate-output` script; `cg` is short for command guard.
 
 ```
 go install github.com/ripta/rt/cmd/cg@latest
@@ -91,7 +91,8 @@ The child's exit code is propagated:
 42
 ```
 
-Use `--format` to change the timestamp prefix. It takes the golang `time.Format` layout:
+Use `--format` to change the timestamp prefix. It takes the golang
+`time.Format` layout:
 
 ```
 ❯ cg --format '2006-01-02T15:04:05 ' -- echo hello
@@ -103,6 +104,10 @@ Use `--format` to change the timestamp prefix. It takes the golang `time.Format`
 ```
 
 Signals SIGINT and SIGTERM are forwarded to the child process.
+
+`cg` also supports `--capture` to capture the child's stdout and stderr into
+separate files, and `--buffered` to buffer the child's output and print it all
+at once when the child finishes, instead of streaming it in real time.
 
 
 `enc`
