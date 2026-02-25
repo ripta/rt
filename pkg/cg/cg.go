@@ -39,7 +39,7 @@ func NewCommand() *cobra.Command {
 	c.Flags().StringVar(&opts.Format, "format", DefaultFormat, "time prefix format (Go time.Format layout)")
 	c.Flags().BoolVar(&opts.Capture, "capture", false, "capture child output to temporary files")
 	c.Flags().BoolVar(&opts.Buffered, "buffered", false, "defer child output until command finishes, grouped by stream")
-	c.Flags().StringVar(&opts.LogParse, "log-parse", "", "log line parser (\"json\")")
+	c.Flags().StringVar(&opts.LogParse, "log-parse", "", "log line parser (\"json\", \"logfmt\")")
 	c.Flags().StringVar(&opts.LogMsgKey, "log-message-key", "message", "JSON key for the log message")
 	c.Flags().StringVar(&opts.LogTSKey, "log-timestamp-key", "timestamp", "JSON key for the timestamp (empty to disable)")
 	c.Flags().StringVar(&opts.LogTSFmt, "log-timestamp-format", "", "timestamp format: rfc3339, unix-s, unix-ms (empty for auto-detect)")
@@ -66,8 +66,10 @@ func (opts *Options) validateFlags(cmd *cobra.Command) error {
 		return nil
 	}
 
-	if opts.LogParse != "json" {
-		return fmt.Errorf("unsupported --log-parse value: %q (supported: json)", opts.LogParse)
+	switch opts.LogParse {
+	case "json", "logfmt":
+	default:
+		return fmt.Errorf("unsupported --log-parse value: %q (supported: json, logfmt)", opts.LogParse)
 	}
 
 	switch opts.LogTSFmt {

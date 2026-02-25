@@ -26,15 +26,23 @@ func (opts *Options) run(cmd *cobra.Command, args []string) error {
 	}
 	w := NewAnnotatedWriter(cmd.OutOrStdout(), prefix)
 
-	if opts.LogParse != "" {
-		proc := NewJSONProcessor(JSONProcessorOptions{
+	switch opts.LogParse {
+	case "json":
+		w.SetProcessor(NewJSONProcessor(JSONProcessorOptions{
 			MessageKey:   opts.LogMsgKey,
 			TimestampKey: opts.LogTSKey,
 			TimestampFmt: opts.LogTSFmt,
 			Fields:       parseFieldsFlag(opts.LogFields),
 			Format:       opts.Format,
-		})
-		w.SetProcessor(proc)
+		}))
+	case "logfmt":
+		w.SetProcessor(NewLogfmtProcessor(LogfmtProcessorOptions{
+			MessageKey:   opts.LogMsgKey,
+			TimestampKey: opts.LogTSKey,
+			TimestampFmt: opts.LogTSFmt,
+			Fields:       parseFieldsFlag(opts.LogFields),
+			Format:       opts.Format,
+		}))
 	}
 
 	var buf *LineBuffer
