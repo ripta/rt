@@ -8,7 +8,8 @@ import (
 const DefaultFormat = "15:04:05 "
 
 type Options struct {
-	Format string
+	Format  string
+	Capture bool
 }
 
 // NewCommand creates the cg cobra command.
@@ -27,6 +28,7 @@ func NewCommand() *cobra.Command {
 	}
 
 	c.Flags().StringVar(&opts.Format, "format", DefaultFormat, "time prefix format (Go time.Format layout)")
+	c.Flags().BoolVar(&opts.Capture, "capture", false, "capture child output to temporary files")
 
 	return c
 }
