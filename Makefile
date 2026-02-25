@@ -22,4 +22,7 @@ test:
 samples:
 	echo ABCDEFGHIJKLMNOPQRSTUVWXYZ abcdefghijklmnopqrstuvwxyz 0123456789 | go run ./cmd/uni map -a > samples/uni.txt
 
+lint:
+	go vet ./...
+
 .PHONY: generate-proto imports install install-protoc hyper fast-test test samples

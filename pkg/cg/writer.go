@@ -28,6 +28,12 @@ type AnnotatedWriter struct {
 	mu     sync.Mutex
 	dest   io.Writer
 	prefix PrefixFunc
+	proc   LineProcessor
+}
+
+// SetProcessor sets the line processor for this writer.
+func (w *AnnotatedWriter) SetProcessor(proc LineProcessor) {
+	w.proc = proc
 }
 
 // NewAnnotatedWriter creates an AnnotatedWriter that writes to dest, calling
@@ -92,22 +98,38 @@ func (w *AnnotatedWriter) WriteLines(r io.Reader, ind Indicator) error {
 		if err != nil {
 			if err == io.EOF {
 				if len(line) > 0 {
-					return w.WritePartialLine(ind, string(line))
+					prefix, display := w.processLine(string(line))
+					if prefix != "" {
+						return w.WritePartialLineWithPrefix(prefix, ind, display)
+					}
+					return w.WritePartialLine(ind, display)
 				}
 				return nil
 			}
 			return err
 		}
 
-		if line[len(line)-1] == '\n' {
-			if werr := w.WriteLine(ind, string(line[:len(line)-1])); werr != nil {
+		raw := string(line[:len(line)-1])
+		prefix, display := w.processLine(raw)
+		if prefix != "" {
+			if werr := w.WriteLineWithPrefix(prefix, ind, display); werr != nil {
 				return werr
 			}
-			continue
-		}
-
-		if werr := w.WritePartialLine(ind, string(line)); werr != nil {
-			return werr
+		} else {
+			if werr := w.WriteLine(ind, display); werr != nil {
+				return werr
+			}
 		}
 	}
+}
+
+func (w *AnnotatedWriter) processLine(line string) (prefix string, display string) {
+	if w.proc == nil {
+		return "", line
+	}
+	result := w.proc(line)
+	if result == nil {
+		return "", line
+	}
+	return result.Prefix, result.Line
 }

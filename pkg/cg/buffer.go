@@ -18,7 +18,13 @@ type bufferedLine struct {
 type LineBuffer struct {
 	mu      sync.Mutex
 	prefix  PrefixFunc
+	proc    LineProcessor
 	streams map[Indicator][]bufferedLine
+}
+
+// SetProcessor sets the line processor for this buffer.
+func (b *LineBuffer) SetProcessor(proc LineProcessor) {
+	b.proc = proc
 }
 
 // NewLineBuffer creates a LineBuffer that calls prefix to obtain the prefix
@@ -40,10 +46,15 @@ func (b *LineBuffer) WriteLines(r io.Reader, ind Indicator) error {
 		if err != nil {
 			if err == io.EOF {
 				if len(line) > 0 {
+					prefix, display := b.processLine(string(line))
+					if prefix == "" {
+						prefix = b.prefix()
+					}
+
 					b.mu.Lock()
 					b.streams[ind] = append(b.streams[ind], bufferedLine{
-						prefix:  b.prefix(),
-						line:    string(line),
+						prefix:  prefix,
+						line:    display,
 						partial: true,
 					})
 					b.mu.Unlock()
@@ -53,14 +64,32 @@ func (b *LineBuffer) WriteLines(r io.Reader, ind Indicator) error {
 			return err
 		}
 
-		p := b.prefix()
+		raw := string(line[:len(line)-1])
+		prefix, display := b.processLine(raw)
+		if prefix == "" {
+			prefix = b.prefix()
+		}
+
 		b.mu.Lock()
 		b.streams[ind] = append(b.streams[ind], bufferedLine{
-			prefix: p,
-			line:   string(line[:len(line)-1]),
+			prefix: prefix,
+			line:   display,
 		})
 		b.mu.Unlock()
 	}
+}
+
+func (b *LineBuffer) processLine(line string) (prefix string, display string) {
+	if b.proc == nil {
+		return "", line
+	}
+
+	result := b.proc(line)
+	if result == nil {
+		return "", line
+	}
+
+	return result.Prefix, result.Line
 }
 
 // Flush writes all buffered lines to w, grouped by stream. Stdout lines are

@@ -16,14 +16,33 @@ import (
 )
 
 func (opts *Options) run(cmd *cobra.Command, args []string) error {
+	if err := opts.validateFlags(cmd); err != nil {
+		fmt.Fprintln(cmd.ErrOrStderr(), err)
+		return &ExitError{Code: 2}
+	}
+
 	prefix := func() string {
 		return time.Now().Format(opts.Format)
 	}
 	w := NewAnnotatedWriter(cmd.OutOrStdout(), prefix)
 
+	if opts.LogParse != "" {
+		proc := NewJSONProcessor(JSONProcessorOptions{
+			MessageKey:   opts.LogMsgKey,
+			TimestampKey: opts.LogTSKey,
+			TimestampFmt: opts.LogTSFmt,
+			Fields:       parseFieldsFlag(opts.LogFields),
+			Format:       opts.Format,
+		})
+		w.SetProcessor(proc)
+	}
+
 	var buf *LineBuffer
 	if opts.Buffered {
 		buf = NewLineBuffer(prefix)
+		if w.proc != nil {
+			buf.SetProcessor(w.proc)
+		}
 	}
 
 	// writeInfo writes a lifecycle message to the annotated writer and
