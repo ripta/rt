@@ -1,0 +1,3 @@
+exec cg --format 'T ' -- sh -c 'echo out; echo err >&2'
+stdout 'T O: out'
+stdout 'T E: err'
