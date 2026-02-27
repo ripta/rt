@@ -1,0 +1,9 @@
+# Message extraction from logfmt log lines
+exec cg --log-parse logfmt --format 'T ' -- emit-logfmt-log
+stdout 'T O: server started'
+stdout 'T O: listening on port'
+! stdout 'message='
+
+# Field extraction appends key=value pairs
+exec cg --log-parse logfmt --format 'T ' --log-fields port -- emit-logfmt-log
+stdout 'O: server started port=8080'

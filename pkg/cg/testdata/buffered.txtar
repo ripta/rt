@@ -1,0 +1,7 @@
+exec cg --format 'T ' --buffered -- sh -c 'echo out; echo err >&2'
+stdout 'T I: buffered mode, output deferred'
+stdout 'T I: --- stdout ---'
+stdout 'T O: out'
+stdout 'T I: --- stderr ---'
+stdout 'T E: err'
+stdout 'T I: Finished with exitcode 0'

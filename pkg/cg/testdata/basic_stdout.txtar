@@ -1,0 +1,3 @@
+exec cg --format 'T ' -- echo hello
+stdout 'T O: hello'
+stdout 'T I: Finished with exitcode 0'

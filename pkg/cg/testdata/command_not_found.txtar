@@ -1,0 +1,2 @@
+! exec cg --format 'T ' -- __nonexistent_command_for_cg_test__
+stdout 'T I: Finished with exitcode 127'

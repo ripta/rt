@@ -1,0 +1,9 @@
+# Message extraction from JSON log lines
+exec cg --log-parse json --format 'T ' -- emit-json-log
+stdout 'T O: server started'
+stdout 'T O: listening on port'
+! stdout '"message"'
+
+# Field extraction appends key=value pairs
+exec cg --log-parse json --format 'T ' --log-fields port -- emit-json-log
+stdout 'O: server started port=8080'

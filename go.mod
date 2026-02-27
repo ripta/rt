@@ -16,6 +16,7 @@ require (
 	github.com/ripta/hypercmd v0.5.0
 	github.com/ripta/reals v0.0.0-20251220032726-c99f163d5c5c
 	github.com/ripta/unihan v0.0.0-20250404091138-c307c698a880
+	github.com/rogpeppe/go-internal v1.14.1
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10
 	github.com/stretchr/testify v1.11.1

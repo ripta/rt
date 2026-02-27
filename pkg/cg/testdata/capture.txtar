@@ -1,0 +1,6 @@
+exec cg --format 'T ' --capture -- echo hello
+stdout 'T I: capture\.stdout='
+stdout 'T I: capture\.stderr='
+stdout 'T I: capture\.lifecycle='
+! stdout 'T O: hello'
+stdout 'T I: Finished with exitcode 0'

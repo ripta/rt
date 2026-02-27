@@ -1,0 +1,2 @@
+! exec cg --format 'T ' -- sh -c 'exit 42'
+stdout 'T I: Finished with exitcode 42'
