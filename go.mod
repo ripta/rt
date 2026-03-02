@@ -22,7 +22,7 @@ require (
 	github.com/stretchr/testify v1.11.1
 	github.com/thediveo/enumflag/v2 v2.1.0
 	github.com/vmihailenco/msgpack/v5 v5.4.1
-	github.com/zclconf/go-cty v1.17.0
+	github.com/zclconf/go-cty v1.18.0
 	golang.org/x/crypto v0.48.0
 	golang.org/x/term v0.40.0
 	golang.org/x/text v0.34.0
