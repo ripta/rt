@@ -20,7 +20,7 @@ require (
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10
 	github.com/stretchr/testify v1.11.1
-	github.com/thediveo/enumflag/v2 v2.1.0
+	github.com/thediveo/enumflag/v2 v2.2.0
 	github.com/vmihailenco/msgpack/v5 v5.4.1
 	github.com/zclconf/go-cty v1.18.0
 	golang.org/x/crypto v0.49.0
