@@ -28,14 +28,17 @@ func TestHandleMetaSuccess(t *testing.T) {
 	if out.ID != "AAAAAA" {
 		t.Errorf("ID = %q, want AAAAAA", out.ID)
 	}
-	if out.ExitCode != -1 {
-		t.Errorf("ExitCode = %d, want -1", out.ExitCode)
+	if out.State != "finished" {
+		t.Errorf("State = %q, want finished", out.State)
+	}
+	if out.ExitCode == nil || *out.ExitCode != -1 {
+		t.Errorf("ExitCode = %v, want -1", out.ExitCode)
 	}
 	if out.Signal == nil || *out.Signal != 15 {
 		t.Errorf("Signal = %v, want 15", out.Signal)
 	}
-	if out.StdoutLines != 1 {
-		t.Errorf("StdoutLines = %d, want 1", out.StdoutLines)
+	if out.StdoutLines == nil || *out.StdoutLines != 1 {
+		t.Errorf("StdoutLines = %v, want 1", out.StdoutLines)
 	}
 }
 
@@ -63,16 +66,28 @@ func TestHandleMetaInvalidID(t *testing.T) {
 	}
 }
 
-func TestHandleMetaIncompleteRun(t *testing.T) {
+func TestHandleMetaInFlight(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 
 	seedRunDir(t, "AAAAAA", nil)
 
-	_, _, err := handleMeta(context.Background(), nil, metaInput{ID: "AAAAAA"})
-	if err == nil {
-		t.Fatalf("expected error for incomplete run")
+	_, out, err := handleMeta(context.Background(), nil, metaInput{ID: "AAAAAA"})
+	if err != nil {
+		t.Fatalf("handleMeta: %v", err)
 	}
-	if !strings.Contains(err.Error(), "incomplete run") {
-		t.Errorf("error = %q, want incomplete run message", err.Error())
+	if out.ID != "AAAAAA" {
+		t.Errorf("ID = %q, want AAAAAA", out.ID)
+	}
+	if out.State != "running" {
+		t.Errorf("State = %q, want running", out.State)
+	}
+	if out.Command != nil {
+		t.Errorf("Command = %v, want nil for in-flight", out.Command)
+	}
+	if out.ExitCode != nil {
+		t.Errorf("ExitCode = %v, want nil for in-flight", out.ExitCode)
+	}
+	if out.StartedAt != nil {
+		t.Errorf("StartedAt = %v, want nil for in-flight", out.StartedAt)
 	}
 }

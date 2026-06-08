@@ -19,11 +19,9 @@ const (
 	defaultListLimit = 20
 	maxListLimit     = 1000
 
-	listStateAll      = "all"
-	listStateFinished = "finished"
-	listStateRunning  = "running"
+	listStateAll = "all"
 
-	defaultListState = listStateFinished
+	defaultListState = stateFinished
 )
 
 // listInput is the argument shape for `cg_list`.
@@ -75,7 +73,7 @@ func handleList(_ context.Context, _ *mcpsdk.CallToolRequest, in listInput) (*mc
 		state = defaultListState
 	}
 	switch state {
-	case listStateAll, listStateFinished, listStateRunning:
+	case listStateAll, stateFinished, stateRunning:
 	default:
 		return nil, listOutput{}, fmt.Errorf("invalid state %q: want all|finished|running", in.State)
 	}
@@ -108,7 +106,7 @@ func handleList(_ context.Context, _ *mcpsdk.CallToolRequest, in listInput) (*mc
 
 		meta, err := cg.ReadMeta(dir)
 		if err != nil {
-			if state == listStateFinished {
+			if state == stateFinished {
 				continue
 			}
 			started := mtime
@@ -116,14 +114,14 @@ func handleList(_ context.Context, _ *mcpsdk.CallToolRequest, in listInput) (*mc
 				mtime: mtime,
 				run: listRun{
 					ID:        name,
-					State:     listStateRunning,
+					State:     stateRunning,
 					StartedAt: &started,
 				},
 			})
 			continue
 		}
 
-		if state == listStateRunning {
+		if state == stateRunning {
 			continue
 		}
 
@@ -135,7 +133,7 @@ func handleList(_ context.Context, _ *mcpsdk.CallToolRequest, in listInput) (*mc
 		stderrLines := meta.StderrLines
 		r := listRun{
 			ID:          meta.ID,
-			State:       listStateFinished,
+			State:       stateFinished,
 			Command:     meta.Command,
 			StartedAt:   &started,
 			FinishedAt:  &finished,

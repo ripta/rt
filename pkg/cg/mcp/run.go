@@ -45,14 +45,16 @@ type runOutput struct {
 	Truncated     bool   `json:"truncated"`
 }
 
-func registerRun(s *mcpsdk.Server) {
+func registerRun(s *mcpsdk.Server, reg *runRegistry) {
 	mcpsdk.AddTool(s, &mcpsdk.Tool{
 		Name:        "cg_run",
 		Description: "Run a command with capture. Returns metadata, exit code, and short head-excerpts of stdout and stderr. The run is recorded on disk under $TMPDIR/cg/<id>/ and can be inspected with the other cg tools.",
-	}, handleRun)
+	}, func(ctx context.Context, req *mcpsdk.CallToolRequest, in runInput) (*mcpsdk.CallToolResult, runOutput, error) {
+		return handleRun(ctx, reg, in)
+	})
 }
 
-func handleRun(ctx context.Context, _ *mcpsdk.CallToolRequest, in runInput) (*mcpsdk.CallToolResult, runOutput, error) {
+func handleRun(ctx context.Context, reg *runRegistry, in runInput) (*mcpsdk.CallToolResult, runOutput, error) {
 	if len(in.Command) == 0 {
 		return nil, runOutput{}, fmt.Errorf("command must contain at least one element")
 	}
@@ -73,6 +75,9 @@ func handleRun(ctx context.Context, _ *mcpsdk.CallToolRequest, in runInput) (*mc
 	run, err := cg.RunCapture(in.Command, in.Cwd, in.Env)
 	if err != nil {
 		return nil, runOutput{}, fmt.Errorf("starting capture: %w", err)
+	}
+	if reg != nil {
+		reg.Add(run.ID, run.Done)
 	}
 
 	if !wait {

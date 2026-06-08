@@ -36,9 +36,11 @@ func runServer(cmd *cobra.Command, _ []string) error {
 // drive it without going through stdio.
 func newServer(v string) *mcpsdk.Server {
 	s := mcpsdk.NewServer(&mcpsdk.Implementation{Name: "cg", Version: v}, nil)
-	registerRun(s)
+	reg := newRunRegistry()
+	registerRun(s, reg)
 	registerList(s)
 	registerMeta(s)
+	registerWait(s, reg)
 	registerPaths(s)
 	registerStreams(s)
 	registerPrune(s)
