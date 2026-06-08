@@ -11,6 +11,8 @@ package approve
 import (
 	"errors"
 	"regexp"
+	"sync"
+	"sync/atomic"
 
 	"gopkg.in/yaml.v3"
 )
@@ -90,16 +92,24 @@ type Ruleset struct {
 	Allow []Rule
 }
 
-// Store owns the two layers and the frozen ruleset. It performs disk I/O only at
-// load time.
+// Store owns the two layers and the live ruleset. It performs disk I/O at load
+// time and again only when a remembered rule is persisted to the project file.
+//
+// The ruleset is held behind an atomic pointer so the matcher always reads an
+// immutable snapshot: a remember-accept builds a new ruleset and swaps the
+// pointer rather than mutating the live one, which keeps Match race-free against
+// a concurrent persist. mu serializes the project write path so concurrent
+// writers cannot interleave a read-modify-write of the file.
 type Store struct {
 	Global  Layer
 	Project Layer
-	rules   *Ruleset
+
+	mu    sync.Mutex
+	rules atomic.Pointer[Ruleset]
 }
 
-// Ruleset returns the frozen ruleset the matcher evaluates.
-func (s *Store) Ruleset() *Ruleset { return s.rules }
+// Ruleset returns the current ruleset the matcher evaluates.
+func (s *Store) Ruleset() *Ruleset { return s.rules.Load() }
 
 // Decision is the matcher's verdict for a command.
 type Decision int

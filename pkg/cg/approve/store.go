@@ -88,7 +88,10 @@ func Load(opts LoadOptions) (*Store, error) {
 		return nil, err
 	}
 
-	return &Store{Global: global, Project: project, rules: rules}, nil
+	s := &Store{Global: global, Project: project}
+	s.rules.Store(rules)
+
+	return s, nil
 }
 
 // loadLayer reads and parses one layer file. A missing file yields a layer with

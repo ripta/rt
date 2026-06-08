@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -9,11 +10,19 @@ import (
 	"github.com/ripta/rt/pkg/cg/approve"
 )
 
+// elicitor is the subset of *mcpsdk.ServerSession the gate needs to prompt the
+// user. A nil elicitor means the client cannot prompt, so an unmatched command
+// fails closed. Narrowing to an interface lets tests drive the prompt path with
+// a canned response.
+type elicitor interface {
+	Elicit(ctx context.Context, params *mcpsdk.ElicitParams) (*mcpsdk.ElicitResult, error)
+}
+
 // gate is the per-server approval gate consulted before cg_run execs a command.
 // It holds the whole config store, not just the ruleset, so the interactive
-// persistence work can reuse it without rewiring. A nil gate bypasses every
-// check; the server always builds a real gate, so nil only occurs in tests that
-// exercise the non-gated paths.
+// persistence path can reuse it. A nil gate bypasses every check; the server
+// always builds a real gate, so nil only occurs in tests that exercise the
+// non-gated paths.
 type gate struct {
 	store        *approve.Store
 	blindlyAllow bool
@@ -23,9 +32,9 @@ type gate struct {
 // execution or a refusal error. blindlyAllow (and a nil gate) bypasses matching
 // and lets the env override pass through untouched, matching allow-all. A real
 // allow rule additionally gates dangerous env overrides; allow-all (whose rule
-// is nil) does not. A command that matches nothing fails closed: the interactive
-// prompt is not yet wired, so there is no path to approval at runtime.
-func (g *gate) check(in runInput, canElicit bool) error {
+// is nil) does not. A command that matches nothing prompts the user when el is
+// available, and otherwise fails closed.
+func (g *gate) check(ctx context.Context, in runInput, el elicitor) error {
 	if g == nil || g.blindlyAllow {
 		return nil
 	}
@@ -42,8 +51,23 @@ func (g *gate) check(in runInput, canElicit bool) error {
 	case approve.DecisionRefuse:
 		return refusalError(res.Rule)
 	default:
-		return failClosedError(canElicit)
+		return g.promptOrFailClosed(ctx, in, el)
 	}
+}
+
+// promptOrFailClosed handles a command that matched neither allow nor deny. A
+// dangerous env override is refused before prompting, because a prompted command
+// has no rule to carry a permit_unsafe_envs exemption. With no elicitor the gate
+// fails closed; otherwise it prompts for approval.
+func (g *gate) promptOrFailClosed(ctx context.Context, in runInput, el elicitor) error {
+	if bad := (&approve.Rule{}).DisallowedEnvs(in.Env); len(bad) > 0 {
+		return fmt.Errorf("cg_run refused: env override sets %s, which a prompted command cannot permit; add an allow rule with permit_unsafe_envs to .cg/approve.yaml", strings.Join(bad, ", "))
+	}
+	if el == nil {
+		return failClosedError()
+	}
+
+	return g.prompt(ctx, in, el)
 }
 
 // refusalError builds the error for a deny match, appending the rule's message
@@ -56,12 +80,9 @@ func refusalError(rule *approve.Rule) error {
 }
 
 // failClosedError builds the error for a command that matched neither allow nor
-// deny. With no interactive prompt available, the gate refuses; the message
-// points at the ways to permit the command.
-func failClosedError(canElicit bool) error {
-	if canElicit {
-		return fmt.Errorf("cg_run refused: no rule matched and interactive approval is not yet available; add an allow rule to .cg/approve.yaml or start cg mcp with --blindly-allow")
-	}
+// deny when no interactive prompt is available. The message points at the ways
+// to permit the command.
+func failClosedError() error {
 	return fmt.Errorf("cg_run refused: no rule matched and the client cannot prompt for approval; add an allow rule to .cg/approve.yaml or start cg mcp with --blindly-allow")
 }
 

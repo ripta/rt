@@ -56,16 +56,20 @@ func registerRun(s *mcpsdk.Server, reg *runRegistry, g *gate) {
 		Name:        "cg_run",
 		Description: "Run a command with capture. Returns metadata, exit code, and short head-excerpts of stdout and stderr. The run is recorded on disk under $TMPDIR/cg/<id>/ and can be inspected with the other cg tools.",
 	}, func(ctx context.Context, req *mcpsdk.CallToolRequest, in runInput) (*mcpsdk.CallToolResult, runOutput, error) {
-		return handleRun(ctx, reg, g, elicitationAvailable(req), in)
+		var el elicitor
+		if elicitationAvailable(req) {
+			el = req.Session
+		}
+		return handleRun(ctx, reg, g, el, in)
 	})
 }
 
-func handleRun(ctx context.Context, reg *runRegistry, g *gate, canElicit bool, in runInput) (*mcpsdk.CallToolResult, runOutput, error) {
+func handleRun(ctx context.Context, reg *runRegistry, g *gate, el elicitor, in runInput) (*mcpsdk.CallToolResult, runOutput, error) {
 	if len(in.Command) == 0 {
 		return nil, runOutput{}, fmt.Errorf("command must contain at least one element")
 	}
 
-	if err := g.check(in, canElicit); err != nil {
+	if err := g.check(ctx, in, el); err != nil {
 		return nil, runOutput{}, err
 	}
 

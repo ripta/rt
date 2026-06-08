@@ -13,6 +13,7 @@ require (
 	github.com/liggitt/tabwriter v0.0.0-20181228230101-89fcab3d43de
 	github.com/modelcontextprotocol/go-sdk v1.6.1
 	github.com/mr-tron/base58 v1.3.0
+	github.com/pmezard/go-difflib v1.0.0
 	github.com/r3labs/diff/v3 v3.0.2
 	github.com/ripta/hypercmd v0.5.0
 	github.com/ripta/reals v0.0.0-20251220032726-c99f163d5c5c
@@ -51,7 +52,6 @@ require (
 	github.com/mattn/go-tty v0.0.8 // indirect
 	github.com/mitchellh/go-wordwrap v1.0.1 // indirect
 	github.com/pkg/term v1.2.0-beta.2 // indirect
-	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/segmentio/asm v1.2.1 // indirect
 	github.com/segmentio/encoding v0.5.4 // indirect

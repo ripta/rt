@@ -10,13 +10,19 @@ import (
 	"github.com/ripta/rt/pkg/cg/approve"
 )
 
-// newTestGate builds a gate from project YAML written under a temp project root.
-// The global layer is pointed at a nonexistent path so the test never reads the
-// real ~/.config/cg/approve.yaml.
+// newTestGate builds a gate from project YAML written under a fresh temp project
+// root. Use newTestGateAt when the test needs the root path to inspect the file.
 func newTestGate(t *testing.T, projectYAML string, blindly bool) *gate {
 	t.Helper()
+	return newTestGateAt(t, t.TempDir(), projectYAML, blindly)
+}
 
-	root := t.TempDir()
+// newTestGateAt builds a gate rooted at root. The global layer is pointed at a
+// nonexistent path so the test never reads the real ~/.config/cg/approve.yaml.
+// An empty projectYAML leaves the project file absent.
+func newTestGateAt(t *testing.T, root, projectYAML string, blindly bool) *gate {
+	t.Helper()
+
 	if projectYAML != "" {
 		dir := filepath.Join(root, ".cg")
 		if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -41,7 +47,7 @@ func TestGateAllowRuns(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 
 	g := newTestGate(t, "version: 1\nallow:\n  - prefix: [echo]\n", false)
-	_, out, err := handleRun(context.Background(), nil, g, false, runInput{
+	_, out, err := handleRun(context.Background(), nil, g, nil, runInput{
 		Command: []string{"echo", "hi"},
 	})
 	if err != nil {
@@ -56,7 +62,7 @@ func TestGateDenyRefusesWithMessage(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 
 	g := newTestGate(t, "version: 1\ndeny:\n  - prefix: [rm, -rf]\n    message: delete specific paths instead\n", false)
-	_, _, err := handleRun(context.Background(), nil, g, false, runInput{
+	_, _, err := handleRun(context.Background(), nil, g, nil, runInput{
 		Command: []string{"rm", "-rf", "x"},
 	})
 	if err == nil {
@@ -71,7 +77,7 @@ func TestGateBuiltinDenyRefuses(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 
 	g := newTestGate(t, "version: 1\n", false)
-	_, _, err := handleRun(context.Background(), nil, g, false, runInput{
+	_, _, err := handleRun(context.Background(), nil, g, nil, runInput{
 		Command: []string{"sh", "-c", "echo hi"},
 	})
 	if err == nil {
@@ -84,7 +90,7 @@ func TestGateBlindlyAllowBypass(t *testing.T) {
 
 	// sh is in the built-in deny set; --blindly-allow runs it anyway.
 	g := newTestGate(t, "version: 1\n", true)
-	_, out, err := handleRun(context.Background(), nil, g, false, runInput{
+	_, out, err := handleRun(context.Background(), nil, g, nil, runInput{
 		Command: []string{"sh", "-c", "echo bypassed"},
 	})
 	if err != nil {
@@ -99,7 +105,7 @@ func TestGateFailsClosedOnUnmatched(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 
 	g := newTestGate(t, "version: 1\n", false)
-	_, _, err := handleRun(context.Background(), nil, g, false, runInput{
+	_, _, err := handleRun(context.Background(), nil, g, nil, runInput{
 		Command: []string{"echo", "hi"},
 	})
 	if err == nil {
@@ -114,7 +120,7 @@ func TestGateEnvGateRefuses(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 
 	g := newTestGate(t, "version: 1\nallow:\n  - prefix: [echo]\n", false)
-	_, _, err := handleRun(context.Background(), nil, g, false, runInput{
+	_, _, err := handleRun(context.Background(), nil, g, nil, runInput{
 		Command: []string{"echo", "hi"},
 		Env:     map[string]string{"LD_PRELOAD": "evil.so"},
 	})
@@ -130,7 +136,7 @@ func TestGateEnvGatePermitted(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 
 	g := newTestGate(t, "version: 1\nallow:\n  - prefix: [echo]\n    permit_unsafe_envs: [PATH]\n", false)
-	_, out, err := handleRun(context.Background(), nil, g, false, runInput{
+	_, out, err := handleRun(context.Background(), nil, g, nil, runInput{
 		Command: []string{"echo", "hi"},
 		Env:     map[string]string{"PATH": os.Getenv("PATH")},
 	})
@@ -147,7 +153,7 @@ func TestGateAllowAllPassesEnv(t *testing.T) {
 
 	// allow-all short-circuits to run and does not apply the env gate.
 	g := newTestGate(t, "version: 1\nmode: allow-all\n", false)
-	_, out, err := handleRun(context.Background(), nil, g, false, runInput{
+	_, out, err := handleRun(context.Background(), nil, g, nil, runInput{
 		Command: []string{"echo", "hi"},
 		Env:     map[string]string{"PATH": os.Getenv("PATH")},
 	})
