@@ -46,5 +46,6 @@ func newServer(v string) *mcpsdk.Server {
 	registerStreams(s)
 	registerGrep(s)
 	registerPrune(s)
+	registerElicitTest(s)
 	return s
 }
