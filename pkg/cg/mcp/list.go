@@ -18,11 +18,18 @@ import (
 const (
 	defaultListLimit = 20
 	maxListLimit     = 1000
+
+	listStateAll      = "all"
+	listStateFinished = "finished"
+	listStateRunning  = "running"
+
+	defaultListState = listStateFinished
 )
 
 // listInput is the argument shape for `cg_list`.
 type listInput struct {
-	Limit int `json:"limit,omitempty" jsonschema:"maximum number of runs to return; default 20, max 1000"`
+	Limit int    `json:"limit,omitempty" jsonschema:"maximum number of runs to return; default 20, max 1000"`
+	State string `json:"state,omitempty" jsonschema:"which runs to surface: all|finished|running; default finished"`
 }
 
 // listOutput is the result shape for `cg_list`.
@@ -30,24 +37,27 @@ type listOutput struct {
 	Runs []listRun `json:"runs"`
 }
 
-// listRun is a single row in the cg_list response. Incomplete runs are
-// skipped, so every field on this struct is reliable.
+// listRun is a single row in the cg_list response. Only `id` and `state` are
+// guaranteed; the meta-derived fields are populated for finished runs only.
+// In-flight rows may carry `started_at` synthesized from the run dir's mtime
+// when filesystem stat succeeds.
 type listRun struct {
-	ID          string    `json:"id"`
-	Command     []string  `json:"command"`
-	StartedAt   time.Time `json:"started_at"`
-	FinishedAt  time.Time `json:"finished_at"`
-	DurationMs  int64     `json:"duration_ms"`
-	ExitCode    int       `json:"exit_code"`
-	Signal      *int      `json:"signal,omitempty"`
-	StdoutLines int64     `json:"stdout_lines"`
-	StderrLines int64     `json:"stderr_lines"`
+	ID          string     `json:"id"`
+	State       string     `json:"state"`
+	Command     []string   `json:"command,omitempty"`
+	StartedAt   *time.Time `json:"started_at,omitempty"`
+	FinishedAt  *time.Time `json:"finished_at,omitempty"`
+	DurationMs  *int64     `json:"duration_ms,omitempty"`
+	ExitCode    *int       `json:"exit_code,omitempty"`
+	Signal      *int       `json:"signal,omitempty"`
+	StdoutLines *int64     `json:"stdout_lines,omitempty"`
+	StderrLines *int64     `json:"stderr_lines,omitempty"`
 }
 
 func registerList(s *mcpsdk.Server) {
 	mcpsdk.AddTool(s, &mcpsdk.Tool{
 		Name:        "cg_list",
-		Description: "List recent capture runs, most-recent-first by directory mtime. Incomplete runs (started, no meta.json yet) are skipped.",
+		Description: "List recent capture runs, most-recent-first by directory mtime. The `state` input filters to finished runs (the default), in-flight runs, or all runs. In-flight rows are sparse: id, state, and started_at synthesized from the run dir's mtime.",
 	}, handleList)
 }
 
@@ -58,6 +68,16 @@ func handleList(_ context.Context, _ *mcpsdk.CallToolRequest, in listInput) (*mc
 	}
 	if limit > maxListLimit {
 		limit = maxListLimit
+	}
+
+	state := in.State
+	if state == "" {
+		state = defaultListState
+	}
+	switch state {
+	case listStateAll, listStateFinished, listStateRunning:
+	default:
+		return nil, listOutput{}, fmt.Errorf("invalid state %q: want all|finished|running", in.State)
 	}
 
 	root := cg.CaptureRoot()
@@ -75,33 +95,60 @@ func handleList(_ context.Context, _ *mcpsdk.CallToolRequest, in listInput) (*mc
 	}
 	rows := make([]row, 0, len(entries))
 	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		dir := filepath.Join(root, e.Name())
-		meta, err := cg.ReadMeta(dir)
-		if err != nil {
+		name := e.Name()
+		if !e.IsDir() || !cg.IsValidRunID(name) {
 			continue
 		}
 		info, err := e.Info()
 		if err != nil {
 			continue
 		}
+		mtime := info.ModTime()
+		dir := filepath.Join(root, name)
+
+		meta, err := cg.ReadMeta(dir)
+		if err != nil {
+			if state == listStateFinished {
+				continue
+			}
+			started := mtime
+			rows = append(rows, row{
+				mtime: mtime,
+				run: listRun{
+					ID:        name,
+					State:     listStateRunning,
+					StartedAt: &started,
+				},
+			})
+			continue
+		}
+
+		if state == listStateRunning {
+			continue
+		}
+
+		started := meta.StartedAt
+		finished := meta.FinishedAt
+		duration := meta.DurationMs
+		exit := meta.ExitCode
+		stdoutLines := meta.StdoutLines
+		stderrLines := meta.StderrLines
 		r := listRun{
 			ID:          meta.ID,
+			State:       listStateFinished,
 			Command:     meta.Command,
-			StartedAt:   meta.StartedAt,
-			FinishedAt:  meta.FinishedAt,
-			DurationMs:  meta.DurationMs,
-			ExitCode:    meta.ExitCode,
-			StdoutLines: meta.StdoutLines,
-			StderrLines: meta.StderrLines,
+			StartedAt:   &started,
+			FinishedAt:  &finished,
+			DurationMs:  &duration,
+			ExitCode:    &exit,
+			StdoutLines: &stdoutLines,
+			StderrLines: &stderrLines,
 		}
 		if meta.Signal != nil {
 			sig := *meta.Signal
 			r.Signal = &sig
 		}
-		rows = append(rows, row{mtime: info.ModTime(), run: r})
+		rows = append(rows, row{mtime: mtime, run: r})
 	}
 
 	sort.Slice(rows, func(i, j int) bool {

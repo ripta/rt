@@ -104,7 +104,7 @@ func PruneRuns(opts PruneOptions) ([]string, error) {
 	candidates := make([]pruneCandidate, 0, len(entries))
 	for _, e := range entries {
 		name := e.Name()
-		if !e.IsDir() || !isValidRunID(name) {
+		if !e.IsDir() || !IsValidRunID(name) {
 			continue
 		}
 		dir := filepath.Join(root, name)

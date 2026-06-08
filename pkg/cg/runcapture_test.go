@@ -86,7 +86,7 @@ func TestRunCaptureStartError(t *testing.T) {
 
 	entries, _ := os.ReadDir(CaptureRoot())
 	for _, e := range entries {
-		if e.IsDir() && isValidRunID(e.Name()) {
+		if e.IsDir() && IsValidRunID(e.Name()) {
 			t.Errorf("leftover capture dir after start failure: %s", e.Name())
 		}
 	}

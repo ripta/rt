@@ -21,9 +21,9 @@ var ErrUnknownRunID = errors.New("unknown run id")
 // but meta.json is missing, i.e. the capture started but has not finished.
 var ErrIncompleteRun = errors.New("incomplete run")
 
-// isValidRunID reports whether id has the right shape for a capture run ID:
+// IsValidRunID reports whether id has the right shape for a capture run ID:
 // the Crockford base-32 alphabet, exactly runIDLen characters.
-func isValidRunID(id string) bool {
+func IsValidRunID(id string) bool {
 	if len(id) != runIDLen {
 		return false
 	}
@@ -44,7 +44,7 @@ func isValidRunID(id string) bool {
 func LookupRunDir(id string) (string, error) {
 	dir := filepath.Join(CaptureRoot(), id)
 
-	if !isValidRunID(id) {
+	if !IsValidRunID(id) {
 		return dir, ErrUnknownRunID
 	}
 
@@ -192,7 +192,7 @@ func (opts *lsOptions) run(cmd *cobra.Command, args []string) error {
 	rows := make([]lsRow, 0, len(entries))
 	for _, e := range entries {
 		name := e.Name()
-		if !e.IsDir() || !isValidRunID(name) {
+		if !e.IsDir() || !IsValidRunID(name) {
 			continue
 		}
 		info, err := e.Info()

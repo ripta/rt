@@ -258,23 +258,28 @@ capture continues on disk.
 
 #### `cg_list`
 
-List recent capture runs, most-recent-first by directory mtime. Incomplete
-runs (started, no `meta.json` yet) are skipped.
+List recent capture runs, most-recent-first by directory mtime. The default
+surfaces only finished runs; pass `state` to include in-flight runs (started,
+no `meta.json` yet) or to ask for them on their own.
 
 **Inputs**
 
 | Field | Type | Default | Notes |
 |-------|------|---------|-------|
 | `limit` | `int` | `20` | maximum runs to return; max `1000`. |
+| `state` | `string` | `finished` | filter: `all`, `finished`, or `running`. |
 
 **Outputs**
 
 | Field | Type | Notes |
 |-------|------|-------|
-| `runs` | `object[]` | One entry per finished run; see fields below. |
+| `runs` | `object[]` | One entry per matching run; see fields below. |
 
-Each `runs[]` entry has `id`, `command`, `started_at`, `finished_at`,
+Every `runs[]` entry has `id` and `state` (`"finished"` or `"running"`).
+Finished entries also carry `command`, `started_at`, `finished_at`,
 `duration_ms`, `exit_code`, `signal?`, `stdout_lines`, `stderr_lines`.
+In-flight entries are sparse: only `id`, `state`, and `started_at`
+synthesized from the run directory's mtime.
 
 #### `cg_meta`
 
