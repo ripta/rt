@@ -46,7 +46,7 @@ func TestWriteLine(t *testing.T) {
 	for _, tt := range writeLineTests {
 		t.Run(tt.name, func(t *testing.T) {
 			var buf bytes.Buffer
-			w := NewAnnotatedWriter(&buf, func() string { return "PFX " })
+			w := NewAnnotatedWriter(&buf, func() string { return "PFX " }, false)
 
 			if err := w.WriteLine(tt.indicator, tt.line); err != nil {
 				t.Fatalf("WriteLine() error = %v", err)
@@ -159,7 +159,7 @@ func TestWriteLineWithPrefix(t *testing.T) {
 	for _, tt := range writeLineWithPrefixTests {
 		t.Run(tt.name, func(t *testing.T) {
 			var buf bytes.Buffer
-			w := NewAnnotatedWriter(&buf, func() string { return "UNUSED " })
+			w := NewAnnotatedWriter(&buf, func() string { return "UNUSED " }, false)
 
 			if err := w.WriteLineWithPrefix(tt.prefix, tt.indicator, tt.line); err != nil {
 				t.Fatalf("WriteLineWithPrefix() error = %v", err)
@@ -203,7 +203,7 @@ func TestWritePartialLineWithPrefix(t *testing.T) {
 	for _, tt := range writePartialLineWithPrefixTests {
 		t.Run(tt.name, func(t *testing.T) {
 			var buf bytes.Buffer
-			w := NewAnnotatedWriter(&buf, func() string { return "UNUSED " })
+			w := NewAnnotatedWriter(&buf, func() string { return "UNUSED " }, false)
 
 			if err := w.WritePartialLineWithPrefix(tt.prefix, tt.indicator, tt.line); err != nil {
 				t.Fatalf("WritePartialLineWithPrefix() error = %v", err)
@@ -216,13 +216,111 @@ func TestWritePartialLineWithPrefix(t *testing.T) {
 	}
 }
 
+type briefWriteTest struct {
+	name      string
+	indicator Indicator
+	line      string
+	want      string
+}
+
+var briefWriteLineTests = []briefWriteTest{
+	{
+		name:      "stdout line, no prefix",
+		indicator: IndicatorOut,
+		line:      "hello",
+		want:      "O: hello\n",
+	},
+	{
+		name:      "stderr line, no prefix",
+		indicator: IndicatorErr,
+		line:      "boom",
+		want:      "E: boom\n",
+	},
+	{
+		name:      "info line, no prefix",
+		indicator: IndicatorInfo,
+		line:      "Finished with exitcode 0",
+		want:      "I: Finished with exitcode 0\n",
+	},
+}
+
+func TestWriteLineBrief(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range briefWriteLineTests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			w := NewAnnotatedWriter(&buf, func() string { return "SHOULD_NOT_APPEAR " }, true)
+
+			if err := w.WriteLine(tt.indicator, tt.line); err != nil {
+				t.Fatalf("WriteLine() error = %v", err)
+			}
+
+			if got := buf.String(); got != tt.want {
+				t.Errorf("WriteLine() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestWriteLineWithPrefixBriefIgnoresPrefix(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	w := NewAnnotatedWriter(&buf, func() string { return "FN " }, true)
+
+	if err := w.WriteLineWithPrefix("FROM_PROC ", IndicatorOut, "server started"); err != nil {
+		t.Fatalf("WriteLineWithPrefix() error = %v", err)
+	}
+
+	want := "O: server started\n"
+	if got := buf.String(); got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestWritePartialLineBrief(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	w := NewAnnotatedWriter(&buf, func() string { return "FN " }, true)
+
+	if err := w.WritePartialLine(IndicatorOut, "no newline"); err != nil {
+		t.Fatalf("WritePartialLine() error = %v", err)
+	}
+	if err := w.WritePartialLineWithPrefix("IGN ", IndicatorErr, "tail"); err != nil {
+		t.Fatalf("WritePartialLineWithPrefix() error = %v", err)
+	}
+
+	want := "O: no newlineE: tail"
+	if got := buf.String(); got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestWriteLinesBrief(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	w := NewAnnotatedWriter(&buf, func() string { return "FN " }, true)
+
+	if err := w.WriteLines(strings.NewReader("line1\nline2\npartial"), IndicatorOut); err != nil {
+		t.Fatalf("WriteLines() error = %v", err)
+	}
+
+	want := "O: line1\nO: line2\nO: partial"
+	if got := buf.String(); got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
 func TestWriteLines(t *testing.T) {
 	t.Parallel()
 
 	for _, tt := range writeLinesTests {
 		t.Run(tt.name, func(t *testing.T) {
 			var buf bytes.Buffer
-			w := NewAnnotatedWriter(&buf, func() string { return "T " })
+			w := NewAnnotatedWriter(&buf, func() string { return "T " }, false)
 
 			err := w.WriteLines(strings.NewReader(tt.input), tt.indicator)
 			if err != nil {

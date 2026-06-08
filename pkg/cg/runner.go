@@ -21,10 +21,11 @@ func (opts *Options) run(cmd *cobra.Command, args []string) error {
 		return &ExitError{Code: 2}
 	}
 
+	brief := !opts.Verbose
 	prefix := func() string {
 		return time.Now().Format(opts.Format)
 	}
-	w := NewAnnotatedWriter(cmd.OutOrStdout(), prefix)
+	w := NewAnnotatedWriter(cmd.OutOrStdout(), prefix, brief)
 
 	switch opts.LogParse {
 	case "json":
@@ -47,7 +48,7 @@ func (opts *Options) run(cmd *cobra.Command, args []string) error {
 
 	var buf *LineBuffer
 	if opts.Buffered {
-		buf = NewLineBuffer(prefix)
+		buf = NewLineBuffer(prefix, brief)
 		if w.proc != nil {
 			buf.SetProcessor(w.proc)
 		}
@@ -66,17 +67,19 @@ func (opts *Options) run(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	v := version.GetString()
-	if v == "" {
-		v = "unknown"
-	}
+	if opts.Verbose {
+		v := version.GetString()
+		if v == "" {
+			v = "unknown"
+		}
 
-	if err := writeInfo(fmt.Sprintf("cg %s", v)); err != nil {
-		return fmt.Errorf("writing version info: %w", err)
-	}
+		if err := writeInfo(fmt.Sprintf("cg %s", v)); err != nil {
+			return fmt.Errorf("writing version info: %w", err)
+		}
 
-	if err := writeInfo(fmt.Sprintf("prefix=%q", opts.Format)); err != nil {
-		return fmt.Errorf("writing prefix info: %w", err)
+		if err := writeInfo(fmt.Sprintf("prefix=%q", opts.Format)); err != nil {
+			return fmt.Errorf("writing prefix info: %w", err)
+		}
 	}
 
 	if opts.Buffered {
@@ -85,8 +88,10 @@ func (opts *Options) run(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	if err := writeInfo(fmt.Sprintf("Started %s", escapeArgs(args))); err != nil {
-		return fmt.Errorf("writing start info: %w", err)
+	if opts.Verbose {
+		if err := writeInfo(fmt.Sprintf("Started %s", escapeArgs(args))); err != nil {
+			return fmt.Errorf("writing start info: %w", err)
+		}
 	}
 
 	child := exec.CommandContext(cmd.Context(), args[0], args[1:]...)

@@ -101,7 +101,7 @@ func TestCommandCaptureCreatesFiles(t *testing.T) {
 		t.Skip("skipping integration test")
 	}
 
-	out, err := runCgCommand("--format", "T ", "--capture", "--", "echo", "hello")
+	out, err := runCgCommand("-v", "--format", "T ", "--capture", "--", "echo", "hello")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -158,7 +158,7 @@ func TestCommandCaptureSuppressesChildOutput(t *testing.T) {
 		t.Skip("skipping integration test")
 	}
 
-	out, err := runCgCommand("--format", "T ", "--capture", "--", "echo", "hello")
+	out, err := runCgCommand("-v", "--format", "T ", "--capture", "--", "echo", "hello")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -183,7 +183,7 @@ func TestCommandCaptureSeparateStreams(t *testing.T) {
 		t.Skip("skipping integration test")
 	}
 
-	out, err := runCgCommand("--format", "T ", "--capture", "--", "sh", "-c", "echo out; echo err >&2")
+	out, err := runCgCommand("-v", "--format", "T ", "--capture", "--", "sh", "-c", "echo out; echo err >&2")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -214,7 +214,7 @@ func TestCommandCaptureLifecycleFileContents(t *testing.T) {
 		t.Skip("skipping integration test")
 	}
 
-	out, err := runCgCommand("--format", "T ", "--capture", "--", "echo", "hello")
+	out, err := runCgCommand("-v", "--format", "T ", "--capture", "--", "echo", "hello")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -261,7 +261,7 @@ func TestCommandCaptureEmptyStreams(t *testing.T) {
 		t.Skip("skipping integration test")
 	}
 
-	out, err := runCgCommand("--format", "T ", "--capture", "--", "true")
+	out, err := runCgCommand("-v", "--format", "T ", "--capture", "--", "true")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

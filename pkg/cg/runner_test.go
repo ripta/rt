@@ -207,12 +207,12 @@ func runCgCommand(args ...string) (string, error) {
 	return buf.String(), err
 }
 
-func TestCommandLifecycleMessages(t *testing.T) {
+func TestCommandLifecycleMessagesVerbose(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
 
-	out, err := runCgCommand("--format", "T ", "--", "echo", "hello")
+	out, err := runCgCommand("-v", "--format", "T ", "--", "echo", "hello")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -252,20 +252,36 @@ func TestCommandLifecycleMessages(t *testing.T) {
 	}
 }
 
+func TestCommandBriefDefault(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	out, err := runCgCommand("--", "echo", "hello")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	want := "O: hello\nI: Finished with exitcode 0\n"
+	if out != want {
+		t.Errorf("brief output = %q, want %q", out, want)
+	}
+}
+
 func TestCommandStderrOutput(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
 
-	out, err := runCgCommand("--format", "T ", "--", "sh", "-c", "echo out; echo err >&2")
+	out, err := runCgCommand("--", "sh", "-c", "echo out; echo err >&2")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if !strings.Contains(out, "T O: out\n") {
+	if !strings.Contains(out, "O: out\n") {
 		t.Errorf("output missing stdout line, got: %q", out)
 	}
-	if !strings.Contains(out, "T E: err\n") {
+	if !strings.Contains(out, "E: err\n") {
 		t.Errorf("output missing stderr line, got: %q", out)
 	}
 }
@@ -275,7 +291,7 @@ func TestCommandExitCodePropagation(t *testing.T) {
 		t.Skip("skipping integration test")
 	}
 
-	out, err := runCgCommand("--format", "T ", "--", "sh", "-c", "exit 42")
+	out, err := runCgCommand("--", "sh", "-c", "exit 42")
 	if err == nil {
 		t.Fatal("expected error from exit 42")
 	}
@@ -288,7 +304,7 @@ func TestCommandExitCodePropagation(t *testing.T) {
 		t.Errorf("exit code = %d, want 42", exitErr.Code)
 	}
 
-	if !strings.Contains(out, "T I: Finished with exitcode 42") {
+	if !strings.Contains(out, "I: Finished with exitcode 42") {
 		t.Errorf("output missing finish message, got: %q", out)
 	}
 }
@@ -298,12 +314,12 @@ func TestCommandPartialLine(t *testing.T) {
 		t.Skip("skipping integration test")
 	}
 
-	out, err := runCgCommand("--format", "T ", "--", "sh", "-c", `printf "no newline"`)
+	out, err := runCgCommand("--", "sh", "-c", `printf "no newline"`)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if !strings.Contains(out, "T O: no newline") {
+	if !strings.Contains(out, "O: no newline") {
 		t.Errorf("output missing partial line, got: %q", out)
 	}
 }
@@ -313,7 +329,7 @@ func TestCommandCustomFormat(t *testing.T) {
 		t.Skip("skipping integration test")
 	}
 
-	out, err := runCgCommand("--format", "2006-01-02 ", "--", "echo", "test")
+	out, err := runCgCommand("-v", "--format", "2006-01-02 ", "--", "echo", "test")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -345,7 +361,7 @@ func TestCommandSignalForwarding(t *testing.T) {
 	cmd := NewCommand()
 	cmd.SetOut(&buf)
 	cmd.SetErr(&buf)
-	cmd.SetArgs([]string{"--format", "T ", "--", "sh", "-c", script})
+	cmd.SetArgs([]string{"--", "sh", "-c", script})
 
 	done := make(chan error, 1)
 	go func() {
@@ -362,7 +378,7 @@ func TestCommandSignalForwarding(t *testing.T) {
 			t.Fatalf("command finished before signal: %v, output: %q", err, buf.String())
 		default:
 		}
-		if strings.Contains(buf.String(), "T O: ready") {
+		if strings.Contains(buf.String(), "O: ready") {
 			break
 		}
 		time.Sleep(10 * time.Millisecond)
@@ -379,7 +395,7 @@ func TestCommandSignalForwarding(t *testing.T) {
 	}
 
 	out := buf.String()
-	if !strings.Contains(out, "T O: got_sigterm") {
+	if !strings.Contains(out, "O: got_sigterm") {
 		t.Errorf("child did not receive signal, output: %q", out)
 	}
 }
