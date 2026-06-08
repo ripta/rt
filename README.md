@@ -179,6 +179,194 @@ by stream instead of streaming in real time.
 `cg --help` for the message-key, timestamp-key, timestamp-format, and field
 selectors.
 
+### MCP server
+
+`cg mcp` starts a stdio MCP server that exposes the capture-run model as
+native tools. Coding agents that speak MCP (Claude Code, the Anthropic SDK,
+others) can call `cg` with structured JSON input and output rather than
+constructing shell argv and parsing printed paths. The server is a thin
+wrapper over the same on-disk capture model the shell subcommands use, so a
+run started with `cg -c -- cmd` is visible to the MCP tools and a run
+started by `cg_run` is visible to `cg ls`. MCP is additive; the shell
+subcommands continue to work unchanged.
+
+Register the server with Claude Code by adding a `cg` entry under
+`mcpServers`:
+
+```json
+{
+  "mcpServers": {
+    "cg": {
+      "command": "cg",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+Any MCP host that speaks the stdio transport launches the server the same
+way: spawn `cg mcp` and exchange MCP messages over its stdin and stdout.
+
+The server registers seven tools:
+
+| Tool | Purpose |
+|------|---------|
+| `cg_run` | Run a command with capture and return metadata plus head excerpts. |
+| `cg_list` | List recent capture runs, most-recent-first by mtime. |
+| `cg_meta` | Return the `meta.json` blob for a finished run. |
+| `cg_paths` | Return absolute paths for a run's `stdout`, `stderr`, `meta.json`. |
+| `cg_stdout` | Fetch captured stdout for a run, with byte limits and head/tail windowing. |
+| `cg_stderr` | Fetch captured stderr for a run, with byte limits and head/tail windowing. |
+| `cg_prune` | Evict capture runs by count (`keep`) or age (`older_than`). |
+
+Unknown IDs and malformed inputs surface as MCP tool errors. A child
+command exiting non-zero is data, not an error: `cg_run` returns
+successfully with `exit_code: N` and the caller decides how to react.
+
+#### `cg_run`
+
+Run a command with capture. Blocks until the child exits or
+`wait_timeout_ms` elapses; on timeout, the child keeps running and the
+capture continues on disk.
+
+**Inputs**
+
+| Field | Type | Default | Notes |
+|-------|------|---------|-------|
+| `command` | `string[]` | required | argv; index 0 is the program. |
+| `cwd` | `string` | server cwd | working directory. |
+| `env` | `object` | server env | environment overrides, merged onto the server's env. |
+| `wait` | `bool` | `true` | block until exit or timeout. |
+| `wait_timeout_ms` | `int` | `60000` | how long to wait before returning `timed_out: true`. |
+| `excerpt_bytes` | `int` | `4096` | per-stream head-excerpt cap; max `16384`. |
+
+**Outputs**
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `id` | `string` | Capture run ID. |
+| `started` | `bool` | Set when `wait: false`. |
+| `timed_out` | `bool` | Set when the wait timeout fired. |
+| `exit_code` | `int?` | Child exit code; absent if timed out. |
+| `signal` | `int?` | Signal that killed the child, if any. |
+| `duration_ms` | `int?` | Wall-clock run duration; absent if timed out. |
+| `stdout_lines` | `int?` | Total stdout lines; absent if timed out. |
+| `stderr_lines` | `int?` | Total stderr lines; absent if timed out. |
+| `stdout_excerpt` | `string` | First `excerpt_bytes` of stdout. |
+| `stderr_excerpt` | `string` | First `excerpt_bytes` of stderr. |
+| `truncated` | `bool` | Either stream had more than `excerpt_bytes`. |
+
+#### `cg_list`
+
+List recent capture runs, most-recent-first by directory mtime. Incomplete
+runs (started, no `meta.json` yet) are skipped.
+
+**Inputs**
+
+| Field | Type | Default | Notes |
+|-------|------|---------|-------|
+| `limit` | `int` | `20` | maximum runs to return; max `1000`. |
+
+**Outputs**
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `runs` | `object[]` | One entry per finished run; see fields below. |
+
+Each `runs[]` entry has `id`, `command`, `started_at`, `finished_at`,
+`duration_ms`, `exit_code`, `signal?`, `stdout_lines`, `stderr_lines`.
+
+#### `cg_meta`
+
+Return the `meta.json` blob for a finished run. In-flight runs (no
+`meta.json` yet) produce a tool error; poll until the run finishes.
+
+**Inputs**
+
+| Field | Type | Default | Notes |
+|-------|------|---------|-------|
+| `id` | `string` | required | capture run ID. |
+
+**Outputs**
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `id` | `string` | Run ID. |
+| `command` | `string[]` | argv that was executed. |
+| `started_at` | `string` | RFC 3339 timestamp. |
+| `finished_at` | `string` | RFC 3339 timestamp. |
+| `duration_ms` | `int` | Wall-clock duration. |
+| `exit_code` | `int` | Child exit code. |
+| `signal` | `int?` | Signal that killed the child, if any. |
+| `stdout_lines` | `int` | Total stdout lines. |
+| `stderr_lines` | `int` | Total stderr lines. |
+
+#### `cg_paths`
+
+Return absolute paths for a run's `stdout`, `stderr`, and `meta.json`
+files. Works for in-flight runs; the `meta` path is returned even when the
+file does not yet exist, so callers can poll the same path.
+
+**Inputs**
+
+| Field | Type | Default | Notes |
+|-------|------|---------|-------|
+| `id` | `string` | required | capture run ID. |
+
+**Outputs**
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `stdout` | `string` | Absolute path to the stdout file. |
+| `stderr` | `string` | Absolute path to the stderr file. |
+| `meta` | `string` | Absolute path to `meta.json` (may not exist yet). |
+
+#### `cg_stdout` and `cg_stderr`
+
+Fetch captured stdout or stderr for a run. Defaults to the first 16 KiB;
+`from: "tail"` reads the last `max_bytes` instead. Works for in-flight
+runs.
+
+**Inputs**
+
+| Field | Type | Default | Notes |
+|-------|------|---------|-------|
+| `id` | `string` | required | capture run ID. |
+| `max_bytes` | `int` | `16384` | response cap; max `1048576` (1 MiB), clamped if higher. |
+| `from` | `string` | `"head"` | `"head"` reads from `offset`; `"tail"` reads the last `max_bytes`. |
+| `offset` | `int` | `0` | byte offset for head reads; ignored when `from: "tail"`. |
+
+**Outputs**
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `content` | `string` | Bytes read from the stream. |
+| `total_bytes` | `int` | Total size of the stream file. |
+| `returned_bytes` | `int` | Length of `content` in bytes. |
+| `truncated` | `bool` | More data exists beyond the returned window. |
+| `clamped` | `bool` | `max_bytes` was reduced to the 1 MiB ceiling. |
+
+#### `cg_prune`
+
+Evict capture runs from `$TMPDIR/cg/`. Either keep the `N` most recent
+runs by mtime or remove runs older than a duration. `keep` and
+`older_than` are mutually exclusive.
+
+**Inputs**
+
+| Field | Type | Default | Notes |
+|-------|------|---------|-------|
+| `keep` | `int` | `50` | keep N most recent runs by mtime. |
+| `older_than` | `string` | unset | evict runs older than the given duration, e.g. `7d`, `2h`, `90m`. |
+| `dry_run` | `bool` | `false` | report what would be removed without removing. |
+
+**Outputs**
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `removed` | `string[]` | Run IDs that were or would be removed. |
+| `dry_run` | `bool` | Echoes the input flag. |
+
 
 `enc`
 ----
