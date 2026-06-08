@@ -332,7 +332,10 @@ file does not yet exist, so callers can poll the same path.
 
 Fetch captured stdout or stderr for a run. Defaults to the first 16 KiB;
 `from: "tail"` reads the last `max_bytes` instead. Works for in-flight
-runs.
+runs. The default encoding validates bytes as UTF-8 and falls back to
+base64 automatically on invalid input (binary streams or a tail read
+that lands mid-codepoint); set `content_encoding: "base64"` to force
+base64 for known binary streams.
 
 **Inputs**
 
@@ -342,12 +345,14 @@ runs.
 | `max_bytes` | `int` | `16384` | response cap; max `1048576` (1 MiB), clamped if higher. |
 | `from` | `string` | `"head"` | `"head"` reads from `offset`; `"tail"` reads the last `max_bytes`. |
 | `offset` | `int` | `0` | byte offset for head reads; ignored when `from: "tail"`. |
+| `content_encoding` | `string` | `"utf8"` | `"utf8"` validates UTF-8 and falls back to base64 on invalid bytes; `"base64"` always base64-encodes. |
 
 **Outputs**
 
 | Field | Type | Notes |
 |-------|------|-------|
-| `content` | `string` | Bytes read from the stream. |
+| `content` | `string` | Bytes read from the stream, encoded per `content_encoding`. |
+| `content_encoding` | `string` | `"utf8"` or `"base64"`; describes how to decode `content`. |
 | `total_bytes` | `int` | Total size of the stream file. |
 | `returned_bytes` | `int` | Length of `content` in bytes. |
 | `truncated` | `bool` | More data exists beyond the returned window. |

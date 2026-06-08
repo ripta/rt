@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"encoding/base64"
 	"os"
 	"path/filepath"
 	"strings"
@@ -31,6 +32,9 @@ func TestHandleStreamHeadShortFile(t *testing.T) {
 	}
 	if out.Content != "hi\n" {
 		t.Errorf("Content = %q, want %q", out.Content, "hi\n")
+	}
+	if out.ContentEncoding != "utf8" {
+		t.Errorf("ContentEncoding = %q, want %q", out.ContentEncoding, "utf8")
 	}
 	if out.TotalBytes != 3 {
 		t.Errorf("TotalBytes = %d, want 3", out.TotalBytes)
@@ -110,6 +114,9 @@ func TestHandleStreamTail(t *testing.T) {
 	}
 	if out.Content != "ghij" {
 		t.Errorf("Content = %q, want %q", out.Content, "ghij")
+	}
+	if out.ContentEncoding != "utf8" {
+		t.Errorf("ContentEncoding = %q, want %q", out.ContentEncoding, "utf8")
 	}
 	if !out.Truncated {
 		t.Errorf("Truncated = false, want true")
@@ -223,5 +230,128 @@ func TestHandleStreamNegativeMaxBytes(t *testing.T) {
 	_, _, err := handleStream("stdout", streamInput{ID: "AAAAAA", MaxBytes: -1})
 	if err == nil {
 		t.Fatalf("expected error for negative max_bytes")
+	}
+}
+
+func TestHandleStreamUTF8Multibyte(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	writeStream(t, "AAAAAA", "stdout", "héllo")
+
+	_, out, err := handleStream("stdout", streamInput{ID: "AAAAAA"})
+	if err != nil {
+		t.Fatalf("handleStream: %v", err)
+	}
+	if out.Content != "héllo" {
+		t.Errorf("Content = %q, want %q", out.Content, "héllo")
+	}
+	if out.ContentEncoding != "utf8" {
+		t.Errorf("ContentEncoding = %q, want %q", out.ContentEncoding, "utf8")
+	}
+}
+
+func TestHandleStreamBinaryFallsBackToBase64(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	raw := []byte{0xff, 0xfe, 0x00, 0x01}
+	writeStream(t, "AAAAAA", "stdout", string(raw))
+
+	_, out, err := handleStream("stdout", streamInput{ID: "AAAAAA"})
+	if err != nil {
+		t.Fatalf("handleStream: %v", err)
+	}
+	if out.ContentEncoding != "base64" {
+		t.Errorf("ContentEncoding = %q, want %q", out.ContentEncoding, "base64")
+	}
+	want := base64.StdEncoding.EncodeToString(raw)
+	if out.Content != want {
+		t.Errorf("Content = %q, want %q", out.Content, want)
+	}
+}
+
+// TestHandleStreamTailMidCodepoint exercises the common case the design calls
+// out: a tail read slices a multibyte codepoint, so the returned window
+// starts with an orphan continuation byte and the encoder falls back to base64.
+func TestHandleStreamTailMidCodepoint(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	// "héllo" is 6 bytes: h(0x68) é(0xC3 0xA9) l(0x6C) l(0x6C) o(0x6F).
+	// A tail of 4 bytes starts at offset 2 (0xA9), an orphan continuation
+	// byte without its 0xC3 leader.
+	writeStream(t, "AAAAAA", "stdout", "héllo")
+
+	_, out, err := handleStream("stdout", streamInput{ID: "AAAAAA", MaxBytes: 4, From: "tail"})
+	if err != nil {
+		t.Fatalf("handleStream: %v", err)
+	}
+	if out.ContentEncoding != "base64" {
+		t.Errorf("ContentEncoding = %q, want %q", out.ContentEncoding, "base64")
+	}
+	decoded, err := base64.StdEncoding.DecodeString(out.Content)
+	if err != nil {
+		t.Fatalf("decoding base64 content: %v", err)
+	}
+	want := []byte("héllo")[2:]
+	if string(decoded) != string(want) {
+		t.Errorf("decoded = %q, want %q", decoded, want)
+	}
+}
+
+func TestHandleStreamForcedBase64(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	writeStream(t, "AAAAAA", "stdout", "hi\n")
+
+	_, out, err := handleStream("stdout", streamInput{ID: "AAAAAA", ContentEncoding: "base64"})
+	if err != nil {
+		t.Fatalf("handleStream: %v", err)
+	}
+	if out.ContentEncoding != "base64" {
+		t.Errorf("ContentEncoding = %q, want %q", out.ContentEncoding, "base64")
+	}
+	want := base64.StdEncoding.EncodeToString([]byte("hi\n"))
+	if out.Content != want {
+		t.Errorf("Content = %q, want %q", out.Content, want)
+	}
+}
+
+func TestHandleStreamExplicitUTF8(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	writeStream(t, "AAAAAA", "stdout", "hi\n")
+
+	_, out, err := handleStream("stdout", streamInput{ID: "AAAAAA", ContentEncoding: "utf8"})
+	if err != nil {
+		t.Fatalf("handleStream: %v", err)
+	}
+	if out.ContentEncoding != "utf8" {
+		t.Errorf("ContentEncoding = %q, want %q", out.ContentEncoding, "utf8")
+	}
+	if out.Content != "hi\n" {
+		t.Errorf("Content = %q, want %q", out.Content, "hi\n")
+	}
+}
+
+func TestHandleStreamInvalidContentEncoding(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	writeStream(t, "AAAAAA", "stdout", "x")
+
+	_, _, err := handleStream("stdout", streamInput{ID: "AAAAAA", ContentEncoding: "hex"})
+	if err == nil {
+		t.Fatalf("expected error for invalid content_encoding")
+	}
+	if !strings.Contains(err.Error(), "content_encoding") {
+		t.Errorf("error = %q, want content_encoding mention", err.Error())
+	}
+}
+
+func TestHandleStreamEmptyContentDefaultsToUTF8(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	writeStream(t, "AAAAAA", "stdout", "")
+
+	_, out, err := handleStream("stdout", streamInput{ID: "AAAAAA"})
+	if err != nil {
+		t.Fatalf("handleStream: %v", err)
+	}
+	if out.Content != "" {
+		t.Errorf("Content = %q, want empty", out.Content)
+	}
+	if out.ContentEncoding != "utf8" {
+		t.Errorf("ContentEncoding = %q, want %q", out.ContentEncoding, "utf8")
 	}
 }
