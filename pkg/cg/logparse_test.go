@@ -371,7 +371,7 @@ func TestWriteLinesWithProcessor(t *testing.T) {
 	for _, tt := range writeLinesProcessorTests {
 		t.Run(tt.name, func(t *testing.T) {
 			var buf bytes.Buffer
-			w := NewAnnotatedWriter(&buf, func() string { return "T " })
+			w := NewAnnotatedWriter(&buf, func() string { return "T " }, false)
 			w.SetProcessor(tt.proc)
 
 			err := w.WriteLines(strings.NewReader(tt.input), tt.indicator)
@@ -421,7 +421,7 @@ func TestLineBufferWriteLinesWithProcessor(t *testing.T) {
 
 	for _, tt := range bufferProcessorTests {
 		t.Run(tt.name, func(t *testing.T) {
-			buf := NewLineBuffer(func() string { return "P " })
+			buf := NewLineBuffer(func() string { return "P " }, false)
 			buf.SetProcessor(tt.proc)
 
 			err := buf.WriteLines(strings.NewReader(tt.input), tt.indicator)

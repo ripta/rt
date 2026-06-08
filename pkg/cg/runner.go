@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -15,16 +16,69 @@ import (
 	"github.com/ripta/rt/pkg/version"
 )
 
+// lineCountingReader wraps an io.Reader and counts '\n' bytes as they pass
+// through. The counter is intended to be read after the reader has been fully
+// drained, but uses atomic operations so callers can sample it earlier if
+// needed.
+type lineCountingReader struct {
+	r io.Reader
+	n atomic.Int64
+}
+
+func (lc *lineCountingReader) Read(p []byte) (int, error) {
+	n, err := lc.r.Read(p)
+	for _, b := range p[:n] {
+		if b == '\n' {
+			lc.n.Add(1)
+		}
+	}
+	return n, err
+}
+
+// formatDuration renders d with tiered rounding so the finish-line duration
+// stays readable at every scale.
+func formatDuration(d time.Duration) string {
+	switch {
+	case d < time.Second:
+		return d.Round(time.Millisecond).String()
+	case d < time.Minute:
+		return d.Round(10 * time.Millisecond).String()
+	default:
+		return d.Round(time.Second).String()
+	}
+}
+
+// formatFinish builds the end-of-run summary line. When signaled is true, the
+// head is rendered as signal=<sig>; otherwise exitcode=<code>. A non-empty id
+// is appended as ` id=<ID>` for runs that produced a capture.
+func formatFinish(code int, signaled bool, sig int, d time.Duration, outLines, errLines int64, id string) string {
+	head := fmt.Sprintf("exitcode=%d", code)
+	if signaled {
+		head = fmt.Sprintf("signal=%d", sig)
+	}
+	line := fmt.Sprintf("Finished %s in %s (out=%d err=%d)", head, formatDuration(d), outLines, errLines)
+	if id != "" {
+		line += " id=" + id
+	}
+	return line
+}
+
 func (opts *Options) run(cmd *cobra.Command, args []string) error {
+	if len(args) == 0 {
+		_ = cmd.Usage()
+		return &ExitError{Code: 2}
+	}
+
 	if err := opts.validateFlags(cmd); err != nil {
 		fmt.Fprintln(cmd.ErrOrStderr(), err)
 		return &ExitError{Code: 2}
 	}
 
+	brief := !opts.Verbose
 	prefix := func() string {
 		return time.Now().Format(opts.Format)
 	}
-	w := NewAnnotatedWriter(cmd.OutOrStdout(), prefix)
+	w := NewAnnotatedWriter(cmd.OutOrStdout(), prefix, brief)
 
 	switch opts.LogParse {
 	case "json":
@@ -47,36 +101,29 @@ func (opts *Options) run(cmd *cobra.Command, args []string) error {
 
 	var buf *LineBuffer
 	if opts.Buffered {
-		buf = NewLineBuffer(prefix)
+		buf = NewLineBuffer(prefix, brief)
 		if w.proc != nil {
 			buf.SetProcessor(w.proc)
 		}
 	}
 
-	// writeInfo writes a lifecycle message to the annotated writer and
-	// optionally buffers it for later replay to the capture lifecycle file.
-	var preCaptureMsgs []string
 	writeInfo := func(msg string) error {
-		if err := w.WriteLine(IndicatorInfo, msg); err != nil {
-			return err
+		return w.WriteLine(IndicatorInfo, msg)
+	}
+
+	if opts.Verbose {
+		v := version.GetString()
+		if v == "" {
+			v = "unknown"
 		}
-		if opts.Capture {
-			preCaptureMsgs = append(preCaptureMsgs, msg)
+
+		if err := writeInfo(fmt.Sprintf("cg %s", v)); err != nil {
+			return fmt.Errorf("writing version info: %w", err)
 		}
-		return nil
-	}
 
-	v := version.GetString()
-	if v == "" {
-		v = "unknown"
-	}
-
-	if err := writeInfo(fmt.Sprintf("cg %s", v)); err != nil {
-		return fmt.Errorf("writing version info: %w", err)
-	}
-
-	if err := writeInfo(fmt.Sprintf("prefix=%q", opts.Format)); err != nil {
-		return fmt.Errorf("writing prefix info: %w", err)
+		if err := writeInfo(fmt.Sprintf("prefix=%q", opts.Format)); err != nil {
+			return fmt.Errorf("writing prefix info: %w", err)
+		}
 	}
 
 	if opts.Buffered {
@@ -85,8 +132,10 @@ func (opts *Options) run(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	if err := writeInfo(fmt.Sprintf("Started %s", escapeArgs(args))); err != nil {
-		return fmt.Errorf("writing start info: %w", err)
+	if opts.Verbose {
+		if err := writeInfo(fmt.Sprintf("Started %s", EscapeArgs(args))); err != nil {
+			return fmt.Errorf("writing start info: %w", err)
+		}
 	}
 
 	child := exec.CommandContext(cmd.Context(), args[0], args[1:]...)
@@ -102,15 +151,16 @@ func (opts *Options) run(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("creating stderr pipe: %w", err)
 	}
 
+	start := time.Now()
 	if err := child.Start(); err != nil {
 		code := ExitCodeFromError(err)
-		_ = writeInfo(fmt.Sprintf("Finished with exitcode %d", code))
+		_ = writeInfo(formatFinish(code, false, 0, time.Since(start), 0, 0, ""))
 		return &ExitError{Code: code}
 	}
 
 	var cap *Capture
 	if opts.Capture {
-		cap, err = NewCapture(child.Process.Pid, prefix)
+		cap, err = NewCapture()
 		if err != nil {
 			_ = child.Process.Kill()
 			_, _ = child.Process.Wait()
@@ -118,28 +168,15 @@ func (opts *Options) run(cmd *cobra.Command, args []string) error {
 		}
 		defer cap.Close()
 
-		for _, msg := range preCaptureMsgs {
-			if err := cap.WriteLifecycle(msg); err != nil {
-				return fmt.Errorf("writing buffered lifecycle: %w", err)
-			}
-		}
+		_ = WritePidFile(cap.Dir, child.Process.Pid)
 
-		// Rebind writeInfo to write to both destinations
-		writeInfo = func(msg string) error {
-			if err := w.WriteLine(IndicatorInfo, msg); err != nil {
-				return err
+		if opts.Verbose {
+			if err := writeInfo(fmt.Sprintf("capture.stdout=%s", cap.Stdout.Name())); err != nil {
+				return fmt.Errorf("writing capture stdout path: %w", err)
 			}
-			return cap.WriteLifecycle(msg)
-		}
-
-		if err := writeInfo(fmt.Sprintf("capture.stdout=%s", cap.Stdout.Name())); err != nil {
-			return fmt.Errorf("writing capture stdout path: %w", err)
-		}
-		if err := writeInfo(fmt.Sprintf("capture.stderr=%s", cap.Stderr.Name())); err != nil {
-			return fmt.Errorf("writing capture stderr path: %w", err)
-		}
-		if err := writeInfo(fmt.Sprintf("capture.lifecycle=%s", cap.Lifecycle.Name())); err != nil {
-			return fmt.Errorf("writing capture lifecycle path: %w", err)
+			if err := writeInfo(fmt.Sprintf("capture.stderr=%s", cap.Stderr.Name())); err != nil {
+				return fmt.Errorf("writing capture stderr path: %w", err)
+			}
 		}
 	}
 
@@ -157,6 +194,9 @@ func (opts *Options) run(cmd *cobra.Command, args []string) error {
 		}
 	}()
 
+	outCounter := &lineCountingReader{r: stdout}
+	errCounter := &lineCountingReader{r: stderr}
+
 	var wg sync.WaitGroup
 	wg.Add(2)
 
@@ -164,44 +204,45 @@ func (opts *Options) run(cmd *cobra.Command, args []string) error {
 	case cap != nil && buf != nil:
 		go func() {
 			defer wg.Done()
-			_ = buf.WriteLines(io.TeeReader(stdout, cap.Stdout), IndicatorOut)
+			_ = buf.WriteLines(io.TeeReader(outCounter, cap.Stdout), IndicatorOut)
 		}()
 		go func() {
 			defer wg.Done()
-			_ = buf.WriteLines(io.TeeReader(stderr, cap.Stderr), IndicatorErr)
+			_ = buf.WriteLines(io.TeeReader(errCounter, cap.Stderr), IndicatorErr)
 		}()
 	case cap != nil:
 		go func() {
 			defer wg.Done()
-			_, _ = io.Copy(cap.Stdout, stdout)
+			_, _ = io.Copy(cap.Stdout, outCounter)
 		}()
 		go func() {
 			defer wg.Done()
-			_, _ = io.Copy(cap.Stderr, stderr)
+			_, _ = io.Copy(cap.Stderr, errCounter)
 		}()
 	case buf != nil:
 		go func() {
 			defer wg.Done()
-			_ = buf.WriteLines(stdout, IndicatorOut)
+			_ = buf.WriteLines(outCounter, IndicatorOut)
 		}()
 		go func() {
 			defer wg.Done()
-			_ = buf.WriteLines(stderr, IndicatorErr)
+			_ = buf.WriteLines(errCounter, IndicatorErr)
 		}()
 	default:
 		go func() {
 			defer wg.Done()
-			_ = w.WriteLines(stdout, IndicatorOut)
+			_ = w.WriteLines(outCounter, IndicatorOut)
 		}()
 		go func() {
 			defer wg.Done()
-			_ = w.WriteLines(stderr, IndicatorErr)
+			_ = w.WriteLines(errCounter, IndicatorErr)
 		}()
 	}
 
 	wg.Wait()
 
 	waitErr := child.Wait()
+	elapsed := time.Since(start)
 	code := ExitCodeFromError(waitErr)
 
 	if buf != nil {
@@ -210,10 +251,40 @@ func (opts *Options) run(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	if ws := exitStatus(child); ws != nil && ws.Signaled() {
-		_ = writeInfo(fmt.Sprintf("Finished with signal %d", ws.Signal()))
-	} else {
-		_ = writeInfo(fmt.Sprintf("Finished with exitcode %d", code))
+	outLines := outCounter.n.Load()
+	errLines := errCounter.n.Load()
+
+	id := ""
+	if cap != nil {
+		id = cap.ID
+	}
+
+	ws := exitStatus(child)
+	signaled := ws != nil && ws.Signaled()
+	var sig int
+	if signaled {
+		sig = int(ws.Signal())
+	}
+	_ = writeInfo(formatFinish(code, signaled, sig, elapsed, outLines, errLines, id))
+
+	if cap != nil {
+		meta := &Meta{
+			ID:          cap.ID,
+			Command:     args,
+			StartedAt:   start.UTC(),
+			FinishedAt:  start.Add(elapsed).UTC(),
+			DurationMs:  elapsed.Milliseconds(),
+			ExitCode:    code,
+			StdoutLines: outLines,
+			StderrLines: errLines,
+		}
+		if signaled {
+			meta.Signal = &sig
+		}
+		if err := WriteMeta(cap.Dir, meta); err != nil {
+			_ = writeInfo(fmt.Sprintf("meta.json write failed: %s", err))
+		}
+		RemovePidFile(cap.Dir)
 	}
 
 	if code != 0 {

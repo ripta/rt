@@ -1,0 +1,45 @@
+env TMPDIR=$WORK
+mkdir $WORK/cg/ABCDEF
+cp meta.json $WORK/cg/ABCDEF/meta.json
+cp empty $WORK/cg/ABCDEF/stdout
+cp empty $WORK/cg/ABCDEF/stderr
+
+# cg out prints the absolute path of the captured stdout
+exec cg out ABCDEF
+stdout '/cg/ABCDEF/stdout$'
+
+# cg err prints the absolute path of the captured stderr
+exec cg err ABCDEF
+stdout '/cg/ABCDEF/stderr$'
+
+# cg paths prints both paths, stdout first
+exec cg paths ABCDEF
+stdout '/cg/ABCDEF/stdout'
+stdout '/cg/ABCDEF/stderr'
+
+# cg ls renders the single seeded run
+exec cg ls
+stdout '^ABCDEF\texit=0\t12ms\techo hi$'
+
+# Unknown ID exits 1 with a single-line stderr message
+! exec cg out NOSUCH
+stderr '^unknown run id: NOSUCH$'
+
+# Incomplete run: dir exists, meta.json missing
+mkdir $WORK/cg/QQQQQQ
+! exec cg out QQQQQQ
+stderr '^incomplete run: QQQQQQ'
+
+-- meta.json --
+{
+  "id": "ABCDEF",
+  "command": ["echo", "hi"],
+  "started_at": "2026-06-06T19:25:06.001Z",
+  "finished_at": "2026-06-06T19:25:06.013Z",
+  "duration_ms": 12,
+  "exit_code": 0,
+  "signal": null,
+  "stdout_lines": 1,
+  "stderr_lines": 0
+}
+-- empty --

@@ -1,0 +1,6 @@
+exec cg -v --format 'T ' -- echo hello
+stdout '^T I: cg '
+stdout '^T I: prefix='
+stdout '^T I: Started echo hello$'
+stdout '^T O: hello$'
+stdout '^T I: Finished exitcode=0 in [0-9.]+(ns|us|µs|ms|s) \(out=1 err=0\)$'

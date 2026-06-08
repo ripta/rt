@@ -24,11 +24,14 @@ type PrefixFunc func() string
 
 // AnnotatedWriter writes lines with a prefix and stream indicator to an
 // underlying writer. All writes are mutex-protected to prevent interleaving.
+// When brief is true, the prefix is omitted entirely from output regardless of
+// what the prefix function or per-line prefix overrides return.
 type AnnotatedWriter struct {
 	mu     sync.Mutex
 	dest   io.Writer
 	prefix PrefixFunc
 	proc   LineProcessor
+	brief  bool
 }
 
 // SetProcessor sets the line processor for this writer.
@@ -37,11 +40,13 @@ func (w *AnnotatedWriter) SetProcessor(proc LineProcessor) {
 }
 
 // NewAnnotatedWriter creates an AnnotatedWriter that writes to dest, calling
-// prefix before each line to obtain the current prefix string.
-func NewAnnotatedWriter(dest io.Writer, prefix PrefixFunc) *AnnotatedWriter {
+// prefix before each line to obtain the current prefix string. When brief is
+// true, the prefix is dropped entirely.
+func NewAnnotatedWriter(dest io.Writer, prefix PrefixFunc, brief bool) *AnnotatedWriter {
 	return &AnnotatedWriter{
 		dest:   dest,
 		prefix: prefix,
+		brief:  brief,
 	}
 }
 
@@ -52,6 +57,10 @@ func (w *AnnotatedWriter) WriteLine(ind Indicator, line string) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
+	if w.brief {
+		_, err := fmt.Fprintf(w.dest, "%c: %s\n", ind, line)
+		return err
+	}
 	_, err := fmt.Fprintf(w.dest, "%s%c: %s\n", w.prefix(), ind, line)
 	return err
 }
@@ -62,27 +71,41 @@ func (w *AnnotatedWriter) WritePartialLine(ind Indicator, line string) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
+	if w.brief {
+		_, err := fmt.Fprintf(w.dest, "%c: %s", ind, line)
+		return err
+	}
 	_, err := fmt.Fprintf(w.dest, "%s%c: %s", w.prefix(), ind, line)
 	return err
 }
 
 // WriteLineWithPrefix writes a single annotated line using the given prefix
 // instead of calling the prefix function. Used for replaying buffered lines
-// with their original receive-time prefix.
+// with their original receive-time prefix. In brief mode the supplied prefix
+// is ignored.
 func (w *AnnotatedWriter) WriteLineWithPrefix(prefix string, ind Indicator, line string) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
+	if w.brief {
+		_, err := fmt.Fprintf(w.dest, "%c: %s\n", ind, line)
+		return err
+	}
 	_, err := fmt.Fprintf(w.dest, "%s%c: %s\n", prefix, ind, line)
 	return err
 }
 
 // WritePartialLineWithPrefix writes a single annotated line without a trailing
-// newline, using the given prefix instead of calling the prefix function.
+// newline, using the given prefix instead of calling the prefix function. In
+// brief mode the supplied prefix is ignored.
 func (w *AnnotatedWriter) WritePartialLineWithPrefix(prefix string, ind Indicator, line string) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
+	if w.brief {
+		_, err := fmt.Fprintf(w.dest, "%c: %s", ind, line)
+		return err
+	}
 	_, err := fmt.Fprintf(w.dest, "%s%c: %s", prefix, ind, line)
 	return err
 }

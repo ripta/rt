@@ -1,97 +1,69 @@
 package cg
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
 
-func TestNewCapture(t *testing.T) {
-	prefix := func() string { return "T " }
-	pid := os.Getpid()
+// runIDLineRE matches the `id=<ID>` suffix on a capture-mode finish line.
+var runIDLineRE = regexp.MustCompile(`id=([` + runIDAlphabet + `]{6})\b`)
 
-	cap, err := NewCapture(pid, prefix)
+// extractRunID pulls the run ID from cg's annotated output by scanning the
+// finish line.
+func extractRunID(output string) string {
+	m := runIDLineRE.FindStringSubmatch(output)
+	if m == nil {
+		return ""
+	}
+	return m[1]
+}
+
+// cleanupRunDir removes the per-run capture directory for the given ID. Tests
+// that drop $TMPDIR override via testscript don't need this; tests that hit
+// the real $TMPDIR/cg do.
+func cleanupRunDir(t *testing.T, id string) {
+	t.Helper()
+	if id == "" {
+		return
+	}
+	os.RemoveAll(filepath.Join(CaptureRoot(), id))
+}
+
+func TestNewCapture(t *testing.T) {
+	t.Parallel()
+
+	cap, err := NewCapture()
 	if err != nil {
 		t.Fatalf("NewCapture() error = %v", err)
 	}
 	defer cap.Close()
-	defer os.Remove(cap.Stdout.Name())
-	defer os.Remove(cap.Stderr.Name())
-	defer os.Remove(cap.Lifecycle.Name())
+	defer os.RemoveAll(cap.Dir)
 
-	dir := os.TempDir()
-	wantStdout := filepath.Join(dir, fmt.Sprintf("cg-%d-stdout", pid))
-	wantStderr := filepath.Join(dir, fmt.Sprintf("cg-%d-stderr", pid))
-	wantLifecycle := filepath.Join(dir, fmt.Sprintf("cg-%d-lifecycle", pid))
-
-	if cap.Stdout.Name() != wantStdout {
-		t.Errorf("Stdout.Name() = %q, want %q", cap.Stdout.Name(), wantStdout)
+	if len(cap.ID) != runIDLen {
+		t.Errorf("len(ID) = %d, want %d (id=%q)", len(cap.ID), runIDLen, cap.ID)
 	}
-	if cap.Stderr.Name() != wantStderr {
-		t.Errorf("Stderr.Name() = %q, want %q", cap.Stderr.Name(), wantStderr)
-	}
-	if cap.Lifecycle.Name() != wantLifecycle {
-		t.Errorf("Lifecycle.Name() = %q, want %q", cap.Lifecycle.Name(), wantLifecycle)
+	for _, r := range cap.ID {
+		if !strings.ContainsRune(runIDAlphabet, r) {
+			t.Errorf("ID %q contains %q, not in Crockford alphabet", cap.ID, r)
+		}
 	}
 
-	for _, f := range []*os.File{cap.Stdout, cap.Stderr, cap.Lifecycle} {
+	wantDir := filepath.Join(CaptureRoot(), cap.ID)
+	if cap.Dir != wantDir {
+		t.Errorf("Dir = %q, want %q", cap.Dir, wantDir)
+	}
+	if cap.Stdout.Name() != filepath.Join(cap.Dir, "stdout") {
+		t.Errorf("Stdout.Name() = %q, want %q", cap.Stdout.Name(), filepath.Join(cap.Dir, "stdout"))
+	}
+	if cap.Stderr.Name() != filepath.Join(cap.Dir, "stderr") {
+		t.Errorf("Stderr.Name() = %q, want %q", cap.Stderr.Name(), filepath.Join(cap.Dir, "stderr"))
+	}
+	for _, f := range []*os.File{cap.Stdout, cap.Stderr} {
 		if _, err := os.Stat(f.Name()); err != nil {
 			t.Errorf("file %s does not exist: %v", f.Name(), err)
-		}
-	}
-}
-
-func TestCaptureWriteLifecycle(t *testing.T) {
-	prefix := func() string { return "T " }
-	pid := os.Getpid() + 10000 // offset to avoid collision with other tests
-
-	cap, err := NewCapture(pid, prefix)
-	if err != nil {
-		t.Fatalf("NewCapture() error = %v", err)
-	}
-	defer os.Remove(cap.Stdout.Name())
-	defer os.Remove(cap.Stderr.Name())
-	defer os.Remove(cap.Lifecycle.Name())
-
-	if err := cap.WriteLifecycle("Started echo hello"); err != nil {
-		t.Fatalf("WriteLifecycle() error = %v", err)
-	}
-	if err := cap.WriteLifecycle("Finished with exitcode 0"); err != nil {
-		t.Fatalf("WriteLifecycle() error = %v", err)
-	}
-	cap.Close()
-
-	data, err := os.ReadFile(cap.Lifecycle.Name())
-	if err != nil {
-		t.Fatalf("reading lifecycle file: %v", err)
-	}
-
-	want := "T I: Started echo hello\nT I: Finished with exitcode 0\n"
-	if got := string(data); got != want {
-		t.Errorf("lifecycle file = %q, want %q", got, want)
-	}
-}
-
-// extractCapturePath finds a capture path announcement in cg output.
-func extractCapturePath(output, key string) string {
-	for _, line := range strings.Split(output, "\n") {
-		idx := strings.Index(line, key)
-		if idx >= 0 {
-			return line[idx+len(key):]
-		}
-	}
-	return ""
-}
-
-// cleanupCaptureFiles removes capture files found in cg output.
-func cleanupCaptureFiles(t *testing.T, output string) {
-	t.Helper()
-	for _, key := range []string{"capture.stdout=", "capture.stderr=", "capture.lifecycle="} {
-		path := extractCapturePath(output, key)
-		if path != "" {
-			os.Remove(path)
 		}
 	}
 }
@@ -101,28 +73,19 @@ func TestCommandCaptureCreatesFiles(t *testing.T) {
 		t.Skip("skipping integration test")
 	}
 
-	out, err := runCgCommand("--format", "T ", "--capture", "--", "echo", "hello")
+	out, err := runCgCommand("--capture", "--", "echo", "hello")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	defer cleanupCaptureFiles(t, out)
-
-	stdoutPath := extractCapturePath(out, "capture.stdout=")
-	stderrPath := extractCapturePath(out, "capture.stderr=")
-	lifecyclePath := extractCapturePath(out, "capture.lifecycle=")
-
-	if stdoutPath == "" {
-		t.Fatal("missing capture.stdout path in output")
+	id := extractRunID(out)
+	if id == "" {
+		t.Fatalf("missing id= in output: %q", out)
 	}
-	if stderrPath == "" {
-		t.Fatal("missing capture.stderr path in output")
-	}
-	if lifecyclePath == "" {
-		t.Fatal("missing capture.lifecycle path in output")
-	}
+	defer cleanupRunDir(t, id)
 
-	// Stdout file contains raw output
-	data, err := os.ReadFile(stdoutPath)
+	dir := filepath.Join(CaptureRoot(), id)
+
+	data, err := os.ReadFile(filepath.Join(dir, "stdout"))
 	if err != nil {
 		t.Fatalf("reading stdout capture: %v", err)
 	}
@@ -130,8 +93,7 @@ func TestCommandCaptureCreatesFiles(t *testing.T) {
 		t.Errorf("stdout capture = %q, want %q", got, "hello\n")
 	}
 
-	// Stderr file exists but is empty
-	data, err = os.ReadFile(stderrPath)
+	data, err = os.ReadFile(filepath.Join(dir, "stderr"))
 	if err != nil {
 		t.Fatalf("reading stderr capture: %v", err)
 	}
@@ -139,42 +101,94 @@ func TestCommandCaptureCreatesFiles(t *testing.T) {
 		t.Errorf("stderr capture = %q, want empty", string(data))
 	}
 
-	// Lifecycle file contains Started and Finished
-	data, err = os.ReadFile(lifecyclePath)
-	if err != nil {
-		t.Fatalf("reading lifecycle capture: %v", err)
+	if _, err := os.Stat(filepath.Join(dir, MetaFilename)); err != nil {
+		t.Errorf("meta.json missing: %v", err)
 	}
-	lifecycle := string(data)
-	if !strings.Contains(lifecycle, "Started echo hello") {
-		t.Errorf("lifecycle missing Started message: %q", lifecycle)
-	}
-	if !strings.Contains(lifecycle, "Finished with exitcode 0") {
-		t.Errorf("lifecycle missing Finished message: %q", lifecycle)
+
+	// Lifecycle file must not exist anywhere under the run dir or under
+	// $TMPDIR with the old PID-based name.
+	if _, err := os.Stat(filepath.Join(dir, "lifecycle")); !os.IsNotExist(err) {
+		t.Errorf("unexpected lifecycle file: %v", err)
 	}
 }
 
-func TestCommandCaptureSuppressesChildOutput(t *testing.T) {
+func TestCommandCaptureBriefOmitsLifecycleAndPaths(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
 
-	out, err := runCgCommand("--format", "T ", "--capture", "--", "echo", "hello")
+	out, err := runCgCommand("--capture", "--", "echo", "hello")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	defer cleanupCaptureFiles(t, out)
+	id := extractRunID(out)
+	if id == "" {
+		t.Fatalf("missing id= in output: %q", out)
+	}
+	defer cleanupRunDir(t, id)
 
-	// Child output must not appear annotated on cg's stdout
+	if strings.Contains(out, "capture.stdout=") {
+		t.Errorf("brief mode should not emit capture.stdout= path, got: %q", out)
+	}
+	if strings.Contains(out, "capture.stderr=") {
+		t.Errorf("brief mode should not emit capture.stderr= path, got: %q", out)
+	}
+	if strings.Contains(out, "capture.lifecycle=") {
+		t.Errorf("lifecycle path line should be gone, got: %q", out)
+	}
 	if strings.Contains(out, "O: hello") {
 		t.Errorf("child stdout should not appear on cg output in capture mode, got: %q", out)
 	}
+}
 
-	// Lifecycle messages must appear
-	if !strings.Contains(out, "I: Started echo hello") {
-		t.Errorf("lifecycle messages should appear on stdout, got: %q", out)
+func TestCommandCaptureVerboseEmitsPaths(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
 	}
-	if !strings.Contains(out, "I: Finished with exitcode 0") {
-		t.Errorf("finished message should appear on stdout, got: %q", out)
+
+	out, err := runCgCommand("-v", "--format", "T ", "--capture", "--", "echo", "hello")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	id := extractRunID(out)
+	if id == "" {
+		t.Fatalf("missing id= in output: %q", out)
+	}
+	defer cleanupRunDir(t, id)
+
+	if !strings.Contains(out, "T I: capture.stdout=") {
+		t.Errorf("verbose output missing capture.stdout= line, got: %q", out)
+	}
+	if !strings.Contains(out, "T I: capture.stderr=") {
+		t.Errorf("verbose output missing capture.stderr= line, got: %q", out)
+	}
+	if strings.Contains(out, "capture.lifecycle=") {
+		t.Errorf("lifecycle path line should be gone in verbose too, got: %q", out)
+	}
+}
+
+func TestCommandCaptureShortFlag(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	out, err := runCgCommand("-c", "--", "echo", "hello")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	id := extractRunID(out)
+	if id == "" {
+		t.Fatalf("missing id= in output: %q", out)
+	}
+	defer cleanupRunDir(t, id)
+
+	dir := filepath.Join(CaptureRoot(), id)
+	data, err := os.ReadFile(filepath.Join(dir, "stdout"))
+	if err != nil {
+		t.Fatalf("reading stdout capture: %v", err)
+	}
+	if got := string(data); got != "hello\n" {
+		t.Errorf("stdout capture = %q, want %q", got, "hello\n")
 	}
 }
 
@@ -183,16 +197,19 @@ func TestCommandCaptureSeparateStreams(t *testing.T) {
 		t.Skip("skipping integration test")
 	}
 
-	out, err := runCgCommand("--format", "T ", "--capture", "--", "sh", "-c", "echo out; echo err >&2")
+	out, err := runCgCommand("--capture", "--", "sh", "-c", "echo out; echo err >&2")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	defer cleanupCaptureFiles(t, out)
+	id := extractRunID(out)
+	if id == "" {
+		t.Fatalf("missing id= in output: %q", out)
+	}
+	defer cleanupRunDir(t, id)
 
-	stdoutPath := extractCapturePath(out, "capture.stdout=")
-	stderrPath := extractCapturePath(out, "capture.stderr=")
+	dir := filepath.Join(CaptureRoot(), id)
 
-	data, err := os.ReadFile(stdoutPath)
+	data, err := os.ReadFile(filepath.Join(dir, "stdout"))
 	if err != nil {
 		t.Fatalf("reading stdout capture: %v", err)
 	}
@@ -200,7 +217,7 @@ func TestCommandCaptureSeparateStreams(t *testing.T) {
 		t.Errorf("stdout capture = %q, want %q", got, "out\n")
 	}
 
-	data, err = os.ReadFile(stderrPath)
+	data, err = os.ReadFile(filepath.Join(dir, "stderr"))
 	if err != nil {
 		t.Fatalf("reading stderr capture: %v", err)
 	}
@@ -209,50 +226,49 @@ func TestCommandCaptureSeparateStreams(t *testing.T) {
 	}
 }
 
-func TestCommandCaptureLifecycleFileContents(t *testing.T) {
+func TestCommandCaptureWritesMeta(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
 
-	out, err := runCgCommand("--format", "T ", "--capture", "--", "echo", "hello")
+	out, err := runCgCommand("--capture", "--", "echo", "hello")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	defer cleanupCaptureFiles(t, out)
+	id := extractRunID(out)
+	if id == "" {
+		t.Fatalf("missing id= in output: %q", out)
+	}
+	defer cleanupRunDir(t, id)
 
-	lifecyclePath := extractCapturePath(out, "capture.lifecycle=")
-	data, err := os.ReadFile(lifecyclePath)
+	meta, err := ReadMeta(filepath.Join(CaptureRoot(), id))
 	if err != nil {
-		t.Fatalf("reading lifecycle capture: %v", err)
+		t.Fatalf("ReadMeta() error = %v", err)
 	}
-	lifecycle := string(data)
-
-	// Should contain version info
-	if !strings.Contains(lifecycle, "I: cg ") {
-		t.Errorf("lifecycle missing version info: %q", lifecycle)
+	if meta.ID != id {
+		t.Errorf("meta.ID = %q, want %q", meta.ID, id)
 	}
-
-	// Should contain prefix info
-	if !strings.Contains(lifecycle, "I: prefix=") {
-		t.Errorf("lifecycle missing prefix info: %q", lifecycle)
+	if len(meta.Command) != 2 || meta.Command[0] != "echo" || meta.Command[1] != "hello" {
+		t.Errorf("meta.Command = %v, want [echo hello]", meta.Command)
 	}
-
-	// Should contain capture path announcements
-	if !strings.Contains(lifecycle, "I: capture.stdout=") {
-		t.Errorf("lifecycle missing capture.stdout path: %q", lifecycle)
+	if meta.ExitCode != 0 {
+		t.Errorf("meta.ExitCode = %d, want 0", meta.ExitCode)
 	}
-
-	// Should contain Started and Finished
-	if !strings.Contains(lifecycle, "I: Started echo hello") {
-		t.Errorf("lifecycle missing Started: %q", lifecycle)
+	if meta.Signal != nil {
+		t.Errorf("meta.Signal = %v, want nil", meta.Signal)
 	}
-	if !strings.Contains(lifecycle, "I: Finished with exitcode 0") {
-		t.Errorf("lifecycle missing Finished: %q", lifecycle)
+	if meta.StdoutLines != 1 {
+		t.Errorf("meta.StdoutLines = %d, want 1", meta.StdoutLines)
 	}
-
-	// Should NOT contain child output
-	if strings.Contains(lifecycle, "O: hello") {
-		t.Errorf("lifecycle should not contain child output: %q", lifecycle)
+	if meta.StderrLines != 0 {
+		t.Errorf("meta.StderrLines = %d, want 0", meta.StderrLines)
+	}
+	if meta.StartedAt.IsZero() || meta.FinishedAt.IsZero() {
+		t.Errorf("meta timestamps not populated: started=%v finished=%v",
+			meta.StartedAt, meta.FinishedAt)
+	}
+	if meta.DurationMs < 0 {
+		t.Errorf("meta.DurationMs = %d, want >= 0", meta.DurationMs)
 	}
 }
 
@@ -261,40 +277,29 @@ func TestCommandCaptureEmptyStreams(t *testing.T) {
 		t.Skip("skipping integration test")
 	}
 
-	out, err := runCgCommand("--format", "T ", "--capture", "--", "true")
+	out, err := runCgCommand("--capture", "--", "true")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	defer cleanupCaptureFiles(t, out)
+	id := extractRunID(out)
+	if id == "" {
+		t.Fatalf("missing id= in output: %q", out)
+	}
+	defer cleanupRunDir(t, id)
 
-	stdoutPath := extractCapturePath(out, "capture.stdout=")
-	stderrPath := extractCapturePath(out, "capture.stderr=")
-	lifecyclePath := extractCapturePath(out, "capture.lifecycle=")
-
-	// All three files should exist
-	for _, path := range []string{stdoutPath, stderrPath, lifecyclePath} {
-		if _, err := os.Stat(path); err != nil {
-			t.Errorf("file %s should exist: %v", path, err)
+	dir := filepath.Join(CaptureRoot(), id)
+	for _, name := range []string{"stdout", "stderr", MetaFilename} {
+		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
+			t.Errorf("file %s should exist: %v", name, err)
 		}
 	}
-
-	// Stdout and stderr should be empty
-	for _, path := range []string{stdoutPath, stderrPath} {
-		data, err := os.ReadFile(path)
+	for _, name := range []string{"stdout", "stderr"} {
+		data, err := os.ReadFile(filepath.Join(dir, name))
 		if err != nil {
-			t.Fatalf("reading %s: %v", path, err)
+			t.Fatalf("reading %s: %v", name, err)
 		}
 		if len(data) != 0 {
-			t.Errorf("%s should be empty, got %q", path, string(data))
+			t.Errorf("%s should be empty, got %q", name, string(data))
 		}
-	}
-
-	// Lifecycle should still have content
-	data, err := os.ReadFile(lifecyclePath)
-	if err != nil {
-		t.Fatalf("reading lifecycle: %v", err)
-	}
-	if !strings.Contains(string(data), "Finished with exitcode 0") {
-		t.Errorf("lifecycle missing Finished message: %q", string(data))
 	}
 }

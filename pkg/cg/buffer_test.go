@@ -65,7 +65,7 @@ func TestLineBufferWriteLines(t *testing.T) {
 
 	for _, tt := range writeLinesBufferTests {
 		t.Run(tt.name, func(t *testing.T) {
-			buf := NewLineBuffer(func() string { return "P " })
+			buf := NewLineBuffer(func() string { return "P " }, false)
 
 			err := buf.WriteLines(strings.NewReader(tt.input), tt.indicator)
 			if err != nil {
@@ -168,7 +168,48 @@ func TestLineBufferFlush(t *testing.T) {
 			}
 
 			var out bytes.Buffer
-			w := NewAnnotatedWriter(&out, func() string { return "F " })
+			w := NewAnnotatedWriter(&out, func() string { return "F " }, false)
+
+			if err := lb.Flush(w); err != nil {
+				t.Fatalf("Flush() error = %v", err)
+			}
+
+			if got := out.String(); got != tt.want {
+				t.Errorf("Flush() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+var briefFlushTests = []flushTest{
+	{
+		name: "both streams, brief drops stored prefix",
+		streams: map[Indicator][]bufferedLine{
+			IndicatorOut: {
+				{prefix: "T1 ", line: "out1"},
+				{prefix: "T2 ", line: "out2"},
+			},
+			IndicatorErr: {
+				{prefix: "T3 ", line: "err1"},
+				{prefix: "T4 ", line: "tail", partial: true},
+			},
+		},
+		want: "I: --- stdout ---\nO: out1\nO: out2\nI: --- stderr ---\nE: err1\nE: tail",
+	},
+}
+
+func TestLineBufferFlushBrief(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range briefFlushTests {
+		t.Run(tt.name, func(t *testing.T) {
+			lb := &LineBuffer{
+				streams: tt.streams,
+				brief:   true,
+			}
+
+			var out bytes.Buffer
+			w := NewAnnotatedWriter(&out, func() string { return "SHOULD_NOT_APPEAR " }, true)
 
 			if err := lb.Flush(w); err != nil {
 				t.Fatalf("Flush() error = %v", err)
@@ -184,7 +225,7 @@ func TestLineBufferFlush(t *testing.T) {
 func TestLineBufferConcurrentWrite(t *testing.T) {
 	t.Parallel()
 
-	buf := NewLineBuffer(func() string { return "P " })
+	buf := NewLineBuffer(func() string { return "P " }, false)
 
 	const linesPerWriter = 100
 	var wg sync.WaitGroup
@@ -223,7 +264,7 @@ func TestCommandBufferedGroupsOutput(t *testing.T) {
 		t.Skip("skipping integration test")
 	}
 
-	out, err := runCgCommand("--format", "T ", "--buffered", "--", "sh", "-c", "echo out; echo err >&2")
+	out, err := runCgCommand("--buffered", "--", "sh", "-c", "echo out; echo err >&2")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -286,7 +327,7 @@ func TestCommandBufferedEmptyStream(t *testing.T) {
 		t.Skip("skipping integration test")
 	}
 
-	out, err := runCgCommand("--format", "T ", "--buffered", "--", "echo", "hello")
+	out, err := runCgCommand("--buffered", "--", "echo", "hello")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -307,7 +348,7 @@ func TestCommandBufferedNoOutput(t *testing.T) {
 		t.Skip("skipping integration test")
 	}
 
-	out, err := runCgCommand("--format", "T ", "--buffered", "--", "true")
+	out, err := runCgCommand("--buffered", "--", "true")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -318,7 +359,7 @@ func TestCommandBufferedNoOutput(t *testing.T) {
 	if strings.Contains(out, "--- stderr ---") {
 		t.Errorf("unexpected stderr header for silent command: %q", out)
 	}
-	if !strings.Contains(out, "Finished with exitcode 0") {
+	if !strings.Contains(out, "Finished exitcode=0 in ") {
 		t.Errorf("missing finish message: %q", out)
 	}
 }
@@ -328,7 +369,7 @@ func TestCommandBufferedExitCode(t *testing.T) {
 		t.Skip("skipping integration test")
 	}
 
-	out, err := runCgCommand("--format", "T ", "--buffered", "--", "sh", "-c", "echo before_exit; exit 42")
+	out, err := runCgCommand("--buffered", "--", "sh", "-c", "echo before_exit; exit 42")
 	if err == nil {
 		t.Fatal("expected error from exit 42")
 	}
@@ -344,7 +385,7 @@ func TestCommandBufferedExitCode(t *testing.T) {
 	if !strings.Contains(out, "O: before_exit") {
 		t.Errorf("buffered output should still be flushed, got: %q", out)
 	}
-	if !strings.Contains(out, "Finished with exitcode 42") {
+	if !strings.Contains(out, "Finished exitcode=42 in ") {
 		t.Errorf("missing finish message, got: %q", out)
 	}
 }
@@ -354,18 +395,18 @@ func TestCommandBufferedWithCapture(t *testing.T) {
 		t.Skip("skipping integration test")
 	}
 
-	out, err := runCgCommand("--format", "T ", "--buffered", "--capture", "--", "sh", "-c", "echo out; echo err >&2")
+	out, err := runCgCommand("-v", "--format", "T ", "--buffered", "--capture", "--", "sh", "-c", "echo out; echo err >&2")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	defer cleanupCaptureFiles(t, out)
-
-	// Capture files should have raw output
-	stdoutPath := extractCapturePath(out, "capture.stdout=")
-	stderrPath := extractCapturePath(out, "capture.stderr=")
-	if stdoutPath == "" || stderrPath == "" {
-		t.Fatalf("missing capture paths in output: %q", out)
+	id := extractRunID(out)
+	if id == "" {
+		t.Fatalf("missing id= in output: %q", out)
 	}
+	defer cleanupRunDir(t, id)
+
+	stdoutPath := filepath.Join(CaptureRoot(), id, "stdout")
+	stderrPath := filepath.Join(CaptureRoot(), id, "stderr")
 
 	stdoutData, err := os.ReadFile(stdoutPath)
 	if err != nil {
@@ -416,7 +457,7 @@ func TestCommandBufferedSignalFlush(t *testing.T) {
 	cmd := NewCommand()
 	cmd.SetOut(&outBuf)
 	cmd.SetErr(&outBuf)
-	cmd.SetArgs([]string{"--format", "T ", "--buffered", "--", "sh", "-c", script})
+	cmd.SetArgs([]string{"--buffered", "--", "sh", "-c", script})
 
 	done := make(chan error, 1)
 	go func() {

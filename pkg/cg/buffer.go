@@ -14,12 +14,14 @@ type bufferedLine struct {
 
 // LineBuffer accumulates child output lines in memory, grouped by indicator.
 // Lines are stored with the prefix captured at receive time so they can be
-// replayed later with their original timestamps.
+// replayed later with their original timestamps. When brief is true, the
+// per-line prefix is dropped at replay time.
 type LineBuffer struct {
 	mu      sync.Mutex
 	prefix  PrefixFunc
 	proc    LineProcessor
 	streams map[Indicator][]bufferedLine
+	brief   bool
 }
 
 // SetProcessor sets the line processor for this buffer.
@@ -28,11 +30,13 @@ func (b *LineBuffer) SetProcessor(proc LineProcessor) {
 }
 
 // NewLineBuffer creates a LineBuffer that calls prefix to obtain the prefix
-// string for each line as it arrives.
-func NewLineBuffer(prefix PrefixFunc) *LineBuffer {
+// string for each line as it arrives. When brief is true, Flush replays lines
+// without their stored prefix.
+func NewLineBuffer(prefix PrefixFunc, brief bool) *LineBuffer {
 	return &LineBuffer{
 		prefix:  prefix,
 		streams: make(map[Indicator][]bufferedLine),
+		brief:   brief,
 	}
 }
 
@@ -114,11 +118,20 @@ func (b *LineBuffer) Flush(w *AnnotatedWriter) error {
 		}
 
 		for _, bl := range lines {
-			if bl.partial {
+			switch {
+			case bl.partial && b.brief:
+				if err := w.WritePartialLine(ind, bl.line); err != nil {
+					return err
+				}
+			case bl.partial:
 				if err := w.WritePartialLineWithPrefix(bl.prefix, ind, bl.line); err != nil {
 					return err
 				}
-			} else {
+			case b.brief:
+				if err := w.WriteLine(ind, bl.line); err != nil {
+					return err
+				}
+			default:
 				if err := w.WriteLineWithPrefix(bl.prefix, ind, bl.line); err != nil {
 					return err
 				}

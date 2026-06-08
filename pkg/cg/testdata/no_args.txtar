@@ -1,0 +1,3 @@
+! exec cg
+stderr 'Usage:'
+stderr 'cg \[flags\] -- COMMAND'
