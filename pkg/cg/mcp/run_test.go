@@ -14,7 +14,7 @@ import (
 func TestHandleRunSyncSuccess(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 
-	_, out, err := handleRun(context.Background(), nil, runInput{
+	_, out, err := handleRun(context.Background(), nil, nil, false, runInput{
 		Command: []string{"echo", "hi"},
 	})
 	if err != nil {
@@ -49,7 +49,7 @@ func TestHandleRunSyncSuccess(t *testing.T) {
 func TestHandleRunNonZeroExit(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 
-	_, out, err := handleRun(context.Background(), nil, runInput{
+	_, out, err := handleRun(context.Background(), nil, nil, false, runInput{
 		Command: []string{"sh", "-c", "exit 7"},
 	})
 	if err != nil {
@@ -64,7 +64,7 @@ func TestHandleRunAsync(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 
 	wait := false
-	_, out, err := handleRun(context.Background(), nil, runInput{
+	_, out, err := handleRun(context.Background(), nil, nil, false, runInput{
 		Command: []string{"echo", "async"},
 		Wait:    &wait,
 	})
@@ -96,7 +96,7 @@ func TestHandleRunAsync(t *testing.T) {
 func TestHandleRunTimeout(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 
-	_, out, err := handleRun(context.Background(), nil, runInput{
+	_, out, err := handleRun(context.Background(), nil, nil, false, runInput{
 		Command:       []string{"sh", "-c", "echo partial; sleep 2"},
 		WaitTimeoutMs: 200,
 	})
@@ -120,7 +120,7 @@ func TestHandleRunTimeout(t *testing.T) {
 func TestHandleRunExcerptTruncated(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 
-	_, out, err := handleRun(context.Background(), nil, runInput{
+	_, out, err := handleRun(context.Background(), nil, nil, false, runInput{
 		Command:      []string{"sh", "-c", "printf 'abcdefghijklmnop'"},
 		ExcerptBytes: 4,
 	})
@@ -138,7 +138,7 @@ func TestHandleRunExcerptTruncated(t *testing.T) {
 func TestHandleRunExcerptClamped(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 
-	_, out, err := handleRun(context.Background(), nil, runInput{
+	_, out, err := handleRun(context.Background(), nil, nil, false, runInput{
 		Command:      []string{"echo", "ok"},
 		ExcerptBytes: 1 << 24, // 16 MB, way over the cap
 	})
@@ -153,7 +153,7 @@ func TestHandleRunExcerptClamped(t *testing.T) {
 func TestHandleRunEmptyCommand(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 
-	_, _, err := handleRun(context.Background(), nil, runInput{})
+	_, _, err := handleRun(context.Background(), nil, nil, false, runInput{})
 	if err == nil {
 		t.Fatalf("expected error for empty command, got nil")
 	}
@@ -162,7 +162,7 @@ func TestHandleRunEmptyCommand(t *testing.T) {
 func TestHandleRunStartError(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 
-	_, _, err := handleRun(context.Background(), nil, runInput{
+	_, _, err := handleRun(context.Background(), nil, nil, false, runInput{
 		Command: []string{"this-binary-does-not-exist-zzzz"},
 	})
 	if err == nil {
@@ -176,7 +176,7 @@ func TestHandleRunContextCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, _, err := handleRun(ctx, nil, runInput{
+	_, _, err := handleRun(ctx, nil, nil, false, runInput{
 		Command:       []string{"sh", "-c", "sleep 2"},
 		WaitTimeoutMs: 5000,
 	})
@@ -188,7 +188,7 @@ func TestHandleRunContextCancelled(t *testing.T) {
 func TestHandleRunTailOnNonZeroExit(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 
-	_, out, err := handleRun(context.Background(), nil, runInput{
+	_, out, err := handleRun(context.Background(), nil, nil, false, runInput{
 		Command:      []string{"sh", "-c", "printf 'HEAD123456TAIL'; exit 5"},
 		ExcerptBytes: 4,
 	})
@@ -209,7 +209,7 @@ func TestHandleRunTailOnNonZeroExit(t *testing.T) {
 func TestHandleRunHeadOverrideOnFailure(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 
-	_, out, err := handleRun(context.Background(), nil, runInput{
+	_, out, err := handleRun(context.Background(), nil, nil, false, runInput{
 		Command:      []string{"sh", "-c", "printf 'HEAD123456TAIL'; exit 5"},
 		ExcerptBytes: 4,
 		ExcerptFrom:  excerptFromHead,
@@ -228,7 +228,7 @@ func TestHandleRunHeadOverrideOnFailure(t *testing.T) {
 func TestHandleRunTailOverrideOnSuccess(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 
-	_, out, err := handleRun(context.Background(), nil, runInput{
+	_, out, err := handleRun(context.Background(), nil, nil, false, runInput{
 		Command:      []string{"sh", "-c", "printf 'HEAD123456TAIL'"},
 		ExcerptBytes: 4,
 		ExcerptFrom:  excerptFromTail,
@@ -247,7 +247,7 @@ func TestHandleRunTailOverrideOnSuccess(t *testing.T) {
 func TestHandleRunExcerptFromAuto(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 
-	_, out, err := handleRun(context.Background(), nil, runInput{
+	_, out, err := handleRun(context.Background(), nil, nil, false, runInput{
 		Command:     []string{"echo", "ok"},
 		ExcerptFrom: excerptFromAuto,
 	})
@@ -262,7 +262,7 @@ func TestHandleRunExcerptFromAuto(t *testing.T) {
 func TestHandleRunInvalidExcerptFrom(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 
-	_, _, err := handleRun(context.Background(), nil, runInput{
+	_, _, err := handleRun(context.Background(), nil, nil, false, runInput{
 		Command:     []string{"echo", "ok"},
 		ExcerptFrom: "middle",
 	})

@@ -6,7 +6,7 @@ import "testing"
 // and registers cg_run without panicking. AddTool panics on bad schema, so a
 // successful return is the assertion.
 func TestNewServerDoesNotPanic(t *testing.T) {
-	s := newServer("test")
+	s := newServer("test", nil)
 	if s == nil {
 		t.Fatalf("newServer returned nil")
 	}
