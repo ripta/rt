@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -14,6 +15,48 @@ import (
 
 	"github.com/ripta/rt/pkg/version"
 )
+
+// lineCountingReader wraps an io.Reader and counts '\n' bytes as they pass
+// through. The counter is intended to be read after the reader has been fully
+// drained, but uses atomic operations so callers can sample it earlier if
+// needed.
+type lineCountingReader struct {
+	r io.Reader
+	n atomic.Int64
+}
+
+func (lc *lineCountingReader) Read(p []byte) (int, error) {
+	n, err := lc.r.Read(p)
+	for _, b := range p[:n] {
+		if b == '\n' {
+			lc.n.Add(1)
+		}
+	}
+	return n, err
+}
+
+// formatDuration renders d with tiered rounding so the finish-line duration
+// stays readable at every scale.
+func formatDuration(d time.Duration) string {
+	switch {
+	case d < time.Second:
+		return d.Round(time.Millisecond).String()
+	case d < time.Minute:
+		return d.Round(10 * time.Millisecond).String()
+	default:
+		return d.Round(time.Second).String()
+	}
+}
+
+// formatFinish builds the end-of-run summary line. When signaled is true, the
+// head is rendered as signal=<sig>; otherwise exitcode=<code>.
+func formatFinish(code int, signaled bool, sig int, d time.Duration, outLines, errLines int64) string {
+	head := fmt.Sprintf("exitcode=%d", code)
+	if signaled {
+		head = fmt.Sprintf("signal=%d", sig)
+	}
+	return fmt.Sprintf("Finished %s in %s (out=%d err=%d)", head, formatDuration(d), outLines, errLines)
+}
 
 func (opts *Options) run(cmd *cobra.Command, args []string) error {
 	if err := opts.validateFlags(cmd); err != nil {
@@ -107,9 +150,10 @@ func (opts *Options) run(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("creating stderr pipe: %w", err)
 	}
 
+	start := time.Now()
 	if err := child.Start(); err != nil {
 		code := ExitCodeFromError(err)
-		_ = writeInfo(fmt.Sprintf("Finished with exitcode %d", code))
+		_ = writeInfo(formatFinish(code, false, 0, time.Since(start), 0, 0))
 		return &ExitError{Code: code}
 	}
 
@@ -162,6 +206,9 @@ func (opts *Options) run(cmd *cobra.Command, args []string) error {
 		}
 	}()
 
+	outCounter := &lineCountingReader{r: stdout}
+	errCounter := &lineCountingReader{r: stderr}
+
 	var wg sync.WaitGroup
 	wg.Add(2)
 
@@ -169,44 +216,45 @@ func (opts *Options) run(cmd *cobra.Command, args []string) error {
 	case cap != nil && buf != nil:
 		go func() {
 			defer wg.Done()
-			_ = buf.WriteLines(io.TeeReader(stdout, cap.Stdout), IndicatorOut)
+			_ = buf.WriteLines(io.TeeReader(outCounter, cap.Stdout), IndicatorOut)
 		}()
 		go func() {
 			defer wg.Done()
-			_ = buf.WriteLines(io.TeeReader(stderr, cap.Stderr), IndicatorErr)
+			_ = buf.WriteLines(io.TeeReader(errCounter, cap.Stderr), IndicatorErr)
 		}()
 	case cap != nil:
 		go func() {
 			defer wg.Done()
-			_, _ = io.Copy(cap.Stdout, stdout)
+			_, _ = io.Copy(cap.Stdout, outCounter)
 		}()
 		go func() {
 			defer wg.Done()
-			_, _ = io.Copy(cap.Stderr, stderr)
+			_, _ = io.Copy(cap.Stderr, errCounter)
 		}()
 	case buf != nil:
 		go func() {
 			defer wg.Done()
-			_ = buf.WriteLines(stdout, IndicatorOut)
+			_ = buf.WriteLines(outCounter, IndicatorOut)
 		}()
 		go func() {
 			defer wg.Done()
-			_ = buf.WriteLines(stderr, IndicatorErr)
+			_ = buf.WriteLines(errCounter, IndicatorErr)
 		}()
 	default:
 		go func() {
 			defer wg.Done()
-			_ = w.WriteLines(stdout, IndicatorOut)
+			_ = w.WriteLines(outCounter, IndicatorOut)
 		}()
 		go func() {
 			defer wg.Done()
-			_ = w.WriteLines(stderr, IndicatorErr)
+			_ = w.WriteLines(errCounter, IndicatorErr)
 		}()
 	}
 
 	wg.Wait()
 
 	waitErr := child.Wait()
+	elapsed := time.Since(start)
 	code := ExitCodeFromError(waitErr)
 
 	if buf != nil {
@@ -215,10 +263,13 @@ func (opts *Options) run(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	outLines := outCounter.n.Load()
+	errLines := errCounter.n.Load()
+
 	if ws := exitStatus(child); ws != nil && ws.Signaled() {
-		_ = writeInfo(fmt.Sprintf("Finished with signal %d", ws.Signal()))
+		_ = writeInfo(formatFinish(code, true, int(ws.Signal()), elapsed, outLines, errLines))
 	} else {
-		_ = writeInfo(fmt.Sprintf("Finished with exitcode %d", code))
+		_ = writeInfo(formatFinish(code, false, 0, elapsed, outLines, errLines))
 	}
 
 	if code != 0 {

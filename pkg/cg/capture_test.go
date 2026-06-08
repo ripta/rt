@@ -58,7 +58,7 @@ func TestCaptureWriteLifecycle(t *testing.T) {
 	if err := cap.WriteLifecycle("Started echo hello"); err != nil {
 		t.Fatalf("WriteLifecycle() error = %v", err)
 	}
-	if err := cap.WriteLifecycle("Finished with exitcode 0"); err != nil {
+	if err := cap.WriteLifecycle("Finished exitcode=0 in"); err != nil {
 		t.Fatalf("WriteLifecycle() error = %v", err)
 	}
 	cap.Close()
@@ -68,7 +68,7 @@ func TestCaptureWriteLifecycle(t *testing.T) {
 		t.Fatalf("reading lifecycle file: %v", err)
 	}
 
-	want := "T I: Started echo hello\nT I: Finished with exitcode 0\n"
+	want := "T I: Started echo hello\nT I: Finished exitcode=0 in\n"
 	if got := string(data); got != want {
 		t.Errorf("lifecycle file = %q, want %q", got, want)
 	}
@@ -148,7 +148,7 @@ func TestCommandCaptureCreatesFiles(t *testing.T) {
 	if !strings.Contains(lifecycle, "Started echo hello") {
 		t.Errorf("lifecycle missing Started message: %q", lifecycle)
 	}
-	if !strings.Contains(lifecycle, "Finished with exitcode 0") {
+	if !strings.Contains(lifecycle, "Finished exitcode=0 in") {
 		t.Errorf("lifecycle missing Finished message: %q", lifecycle)
 	}
 }
@@ -173,7 +173,7 @@ func TestCommandCaptureSuppressesChildOutput(t *testing.T) {
 	if !strings.Contains(out, "I: Started echo hello") {
 		t.Errorf("lifecycle messages should appear on stdout, got: %q", out)
 	}
-	if !strings.Contains(out, "I: Finished with exitcode 0") {
+	if !strings.Contains(out, "I: Finished exitcode=0 in") {
 		t.Errorf("finished message should appear on stdout, got: %q", out)
 	}
 }
@@ -246,7 +246,7 @@ func TestCommandCaptureLifecycleFileContents(t *testing.T) {
 	if !strings.Contains(lifecycle, "I: Started echo hello") {
 		t.Errorf("lifecycle missing Started: %q", lifecycle)
 	}
-	if !strings.Contains(lifecycle, "I: Finished with exitcode 0") {
+	if !strings.Contains(lifecycle, "I: Finished exitcode=0 in") {
 		t.Errorf("lifecycle missing Finished: %q", lifecycle)
 	}
 
@@ -294,7 +294,7 @@ func TestCommandCaptureEmptyStreams(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reading lifecycle: %v", err)
 	}
-	if !strings.Contains(string(data), "Finished with exitcode 0") {
+	if !strings.Contains(string(data), "Finished exitcode=0 in") {
 		t.Errorf("lifecycle missing Finished message: %q", string(data))
 	}
 }

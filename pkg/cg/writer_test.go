@@ -239,8 +239,8 @@ var briefWriteLineTests = []briefWriteTest{
 	{
 		name:      "info line, no prefix",
 		indicator: IndicatorInfo,
-		line:      "Finished with exitcode 0",
-		want:      "I: Finished with exitcode 0\n",
+		line:      "Finished exitcode=0 in 12ms (out=0 err=0)",
+		want:      "I: Finished exitcode=0 in 12ms (out=0 err=0)\n",
 	},
 }
 

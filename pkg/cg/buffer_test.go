@@ -359,7 +359,7 @@ func TestCommandBufferedNoOutput(t *testing.T) {
 	if strings.Contains(out, "--- stderr ---") {
 		t.Errorf("unexpected stderr header for silent command: %q", out)
 	}
-	if !strings.Contains(out, "Finished with exitcode 0") {
+	if !strings.Contains(out, "Finished exitcode=0 in ") {
 		t.Errorf("missing finish message: %q", out)
 	}
 }
@@ -385,7 +385,7 @@ func TestCommandBufferedExitCode(t *testing.T) {
 	if !strings.Contains(out, "O: before_exit") {
 		t.Errorf("buffered output should still be flushed, got: %q", out)
 	}
-	if !strings.Contains(out, "Finished with exitcode 42") {
+	if !strings.Contains(out, "Finished exitcode=42 in ") {
 		t.Errorf("missing finish message, got: %q", out)
 	}
 }
