@@ -61,10 +61,10 @@ func (g *gate) check(ctx context.Context, in runInput, el elicitor) error {
 // fails closed; otherwise it prompts for approval.
 func (g *gate) promptOrFailClosed(ctx context.Context, in runInput, el elicitor) error {
 	if bad := (&approve.Rule{}).DisallowedEnvs(in.Env); len(bad) > 0 {
-		return fmt.Errorf("cg_run refused: env override sets %s, which a prompted command cannot permit; add an allow rule with permit_unsafe_envs to .cg/approve.yaml", strings.Join(bad, ", "))
+		return fmt.Errorf("cg_run refused: env override sets %s, which a prompted command cannot permit; add an allow rule with permit_unsafe_envs to %s", strings.Join(bad, ", "), g.store.Project.Path)
 	}
 	if el == nil {
-		return failClosedError()
+		return g.failClosedError()
 	}
 
 	return g.prompt(ctx, in, el)
@@ -82,8 +82,8 @@ func refusalError(rule *approve.Rule) error {
 // failClosedError builds the error for a command that matched neither allow nor
 // deny when no interactive prompt is available. The message points at the ways
 // to permit the command.
-func failClosedError() error {
-	return fmt.Errorf("cg_run refused: no rule matched and the client cannot prompt for approval; add an allow rule to .cg/approve.yaml or start cg mcp with --blindly-allow")
+func (g *gate) failClosedError() error {
+	return fmt.Errorf("cg_run refused: no rule matched and the client cannot prompt for approval; add an allow rule to %s or start cg mcp with --blindly-allow", g.store.Project.Path)
 }
 
 // elicitationAvailable reports whether the connected client advertised the

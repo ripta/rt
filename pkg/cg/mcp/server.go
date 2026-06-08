@@ -16,7 +16,8 @@ import (
 
 // serverOptions holds the flags for `cg mcp`.
 type serverOptions struct {
-	blindlyAllow bool
+	blindlyAllow  bool
+	projectConfig string
 }
 
 // NewCommand returns the `cg mcp` cobra subcommand.
@@ -34,6 +35,8 @@ func NewCommand() *cobra.Command {
 	}
 	c.Flags().BoolVar(&opts.blindlyAllow, "blindly-allow", false,
 		"disable the cg_run approval gate for this server process (forces allow-all)")
+	c.Flags().StringVar(&opts.projectConfig, "project-config", "",
+		"project-specific approval rules file, relative to the project root (default "+approve.DefaultProjectFile+")")
 	return c
 }
 
@@ -43,7 +46,7 @@ func runServer(cmd *cobra.Command, opts *serverOptions) error {
 		v = "unknown"
 	}
 
-	store, err := approve.Load(approve.LoadOptions{})
+	store, err := approve.Load(approve.LoadOptions{ProjectFile: opts.projectConfig})
 	if err != nil {
 		return fmt.Errorf("loading approval rules: %w", err)
 	}

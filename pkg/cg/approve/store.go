@@ -6,6 +6,10 @@ import (
 	"path/filepath"
 )
 
+// DefaultProjectFile is the project rules file path, relative to the project
+// root, used when LoadOptions.ProjectFile is empty.
+const DefaultProjectFile = ".cg.yaml"
+
 // LoadOptions parameterizes layer resolution so callers and tests can inject
 // paths instead of touching the real home directory or process environment. A
 // zero value resolves to the default global and project locations.
@@ -13,10 +17,13 @@ type LoadOptions struct {
 	// GlobalPath is the user-global rules file. Empty resolves to
 	// ~/.config/cg/approve.yaml.
 	GlobalPath string
-	// ProjectRoot is the directory whose .cg/approve.yaml is the project layer.
+	// ProjectRoot is the directory the project rules file is resolved against.
 	// Empty resolves to CLAUDE_PROJECT_DIR, falling back to the current
 	// directory.
 	ProjectRoot string
+	// ProjectFile is the project rules file path, relative to ProjectRoot.
+	// Empty resolves to DefaultProjectFile.
+	ProjectFile string
 }
 
 // DefaultGlobalPath returns ~/.config/cg/approve.yaml. The path is built from
@@ -46,9 +53,14 @@ func DefaultProjectRoot() (string, error) {
 	return cwd, nil
 }
 
-// ProjectPath returns the project rules file for a project root.
-func ProjectPath(root string) string {
-	return filepath.Join(root, ".cg", "approve.yaml")
+// ProjectPath returns the project rules file for a project root. rel is the
+// file path relative to root; an empty rel resolves to DefaultProjectFile.
+func ProjectPath(root, rel string) string {
+	if rel == "" {
+		rel = DefaultProjectFile
+	}
+
+	return filepath.Join(root, rel)
 }
 
 // Load reads the global and project layers, merges them into a frozen ruleset,
@@ -78,7 +90,7 @@ func Load(opts LoadOptions) (*Store, error) {
 		return nil, err
 	}
 
-	project, err := loadLayer(ProjectPath(projectRoot))
+	project, err := loadLayer(ProjectPath(projectRoot, opts.ProjectFile))
 	if err != nil {
 		return nil, err
 	}

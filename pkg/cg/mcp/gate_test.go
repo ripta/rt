@@ -24,12 +24,8 @@ func newTestGateAt(t *testing.T, root, projectYAML string, blindly bool) *gate {
 	t.Helper()
 
 	if projectYAML != "" {
-		dir := filepath.Join(root, ".cg")
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			t.Fatalf("mkdir: %v", err)
-		}
-		if err := os.WriteFile(filepath.Join(dir, "approve.yaml"), []byte(projectYAML), 0o644); err != nil {
-			t.Fatalf("write approve.yaml: %v", err)
+		if err := os.WriteFile(filepath.Join(root, ".cg.yaml"), []byte(projectYAML), 0o644); err != nil {
+			t.Fatalf("write .cg.yaml: %v", err)
 		}
 	}
 

@@ -18,16 +18,12 @@ func writeGlobal(t *testing.T, content string) string {
 	return path
 }
 
-// writeProject writes a project layer file under <root>/.cg/approve.yaml and
-// returns the project root.
+// writeProject writes a project layer file under <root>/.cg.yaml and returns
+// the project root.
 func writeProject(t *testing.T, content string) string {
 	t.Helper()
 	root := t.TempDir()
-	dir := filepath.Join(root, ".cg")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatalf("creating .cg dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "approve.yaml"), []byte(content), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(root, ".cg.yaml"), []byte(content), 0o600); err != nil {
 		t.Fatalf("writing project file: %v", err)
 	}
 

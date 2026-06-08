@@ -65,7 +65,7 @@ func TestAppendCreatesProjectFile(t *testing.T) {
 		t.Fatalf("AppendProjectAllowPrefix: %v", err)
 	}
 
-	raw, err := os.ReadFile(ProjectPath(root))
+	raw, err := os.ReadFile(ProjectPath(root, ""))
 	if err != nil {
 		t.Fatalf("reading written file: %v", err)
 	}
@@ -112,7 +112,7 @@ func TestAppendPreservesCommentsAndQuotesTokens(t *testing.T) {
 		t.Fatalf("AppendProjectAllowPrefix: %v", err)
 	}
 
-	raw, err := os.ReadFile(ProjectPath(root))
+	raw, err := os.ReadFile(ProjectPath(root, ""))
 	if err != nil {
 		t.Fatalf("reading written file: %v", err)
 	}
@@ -157,7 +157,7 @@ func TestCheckProjectDivergence(t *testing.T) {
 	}
 
 	// Rewrite the file out of band.
-	if err := os.WriteFile(ProjectPath(root), []byte(content+"  - prefix: [go]\n"), 0o600); err != nil {
+	if err := os.WriteFile(ProjectPath(root, ""), []byte(content+"  - prefix: [go]\n"), 0o600); err != nil {
 		t.Fatalf("rewrite: %v", err)
 	}
 	changed, _, err = s.CheckProjectDivergence()
@@ -200,7 +200,7 @@ func TestReloadMergeUnionsRules(t *testing.T) {
 
 	// Simulate a hand-edit on disk that adds a different rule and drops nothing.
 	disk := "version: 1\nallow:\n  - prefix: [make]\n  - prefix: [npm, ci]\n"
-	if err := os.WriteFile(ProjectPath(root), []byte(disk), 0o600); err != nil {
+	if err := os.WriteFile(ProjectPath(root, ""), []byte(disk), 0o600); err != nil {
 		t.Fatalf("hand edit: %v", err)
 	}
 
@@ -231,7 +231,7 @@ func TestOverwriteDropsDiskChanges(t *testing.T) {
 	s := loadProject(t, root)
 
 	// Hand-edit on disk adds a rule cg's in-memory view does not have.
-	if err := os.WriteFile(ProjectPath(root), []byte("version: 1\nallow:\n  - prefix: [make]\n  - prefix: [npm, ci]\n"), 0o600); err != nil {
+	if err := os.WriteFile(ProjectPath(root, ""), []byte("version: 1\nallow:\n  - prefix: [make]\n  - prefix: [npm, ci]\n"), 0o600); err != nil {
 		t.Fatalf("hand edit: %v", err)
 	}
 

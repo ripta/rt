@@ -32,7 +32,7 @@ func accept(content map[string]any) *mcpsdk.ElicitResult {
 }
 
 func projectFile(root string) string {
-	return filepath.Join(root, ".cg", "approve.yaml")
+	return filepath.Join(root, ".cg.yaml")
 }
 
 func TestPromptAcceptRunsWithoutRemember(t *testing.T) {
@@ -232,10 +232,11 @@ func TestPromptRememberWriteErrorStillRuns(t *testing.T) {
 
 	rootDir := t.TempDir()
 	g := newTestGateAt(t, rootDir, "", false)
-	// Force a persistence failure by making .cg a file, so the project path is
-	// unreachable. The command must still run, and a diagnostic must be emitted.
-	if err := os.WriteFile(filepath.Join(rootDir, ".cg"), []byte("not a dir"), 0o600); err != nil {
-		t.Fatalf("seed .cg as file: %v", err)
+	// Force a persistence failure by making the project path a directory, so the
+	// atomic rename onto it fails. The command must still run, and a diagnostic
+	// must be emitted.
+	if err := os.Mkdir(projectFile(rootDir), 0o755); err != nil {
+		t.Fatalf("seed project path as dir: %v", err)
 	}
 
 	el := &fakeElicitor{results: []*mcpsdk.ElicitResult{

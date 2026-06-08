@@ -36,7 +36,7 @@ func (g *gate) prompt(ctx context.Context, in runInput, el elicitor) error {
 	suggestion := approve.SuggestPrefix(in.Command)
 	res, err := el.Elicit(ctx, &mcpsdk.ElicitParams{
 		Message:         approvalMessage(in),
-		RequestedSchema: approvalSchema(suggestion),
+		RequestedSchema: approvalSchema(suggestion, g.store.Project.Path),
 	})
 	if err != nil {
 		return fmt.Errorf("cg_run refused: approval prompt failed: %w", err)
@@ -93,7 +93,7 @@ func (g *gate) resolveDivergence(ctx context.Context, current []byte, el elicito
 	}
 
 	res, err := el.Elicit(ctx, &mcpsdk.ElicitParams{
-		Message:         divergenceMessage(g.store.Project.Snapshot, current),
+		Message:         divergenceMessage(g.store.Project.Snapshot, current, g.store.Project.Path),
 		RequestedSchema: divergenceSchema(),
 	})
 	if err != nil {
@@ -126,12 +126,12 @@ func approvalMessage(in runInput) string {
 
 // approvalSchema builds the elicitation form: a remember checkbox and an
 // editable rule field pre-filled with the suggested prefix as a YAML flow
-// sequence.
-func approvalSchema(suggestion []string) map[string]any {
+// sequence. path is the project rules file the remembered rule is saved to.
+func approvalSchema(suggestion []string, path string) map[string]any {
 	return obj(map[string]any{
 		"remember": map[string]any{
 			"type": "boolean", "title": "Remember this command",
-			"description": "save an allow rule to .cg/approve.yaml so it is not asked again",
+			"description": fmt.Sprintf("save an allow rule to %s so it is not asked again", path),
 			"default":     false,
 		},
 		"rule": map[string]any{
@@ -143,8 +143,9 @@ func approvalSchema(suggestion []string) map[string]any {
 }
 
 // divergenceMessage renders the second prompt's body with a unified diff of the
-// project file as loaded versus its current on-disk content.
-func divergenceMessage(snapshot, current []byte) string {
+// project file as loaded versus its current on-disk content. path is the project
+// rules file the diff describes.
+func divergenceMessage(snapshot, current []byte, path string) string {
 	diff, err := difflib.GetUnifiedDiffString(difflib.UnifiedDiff{
 		A:        difflib.SplitLines(string(snapshot)),
 		B:        difflib.SplitLines(string(current)),
@@ -159,7 +160,7 @@ func divergenceMessage(snapshot, current []byte) string {
 		diff = diff[:maxDiffBytes] + "\n... (diff truncated)"
 	}
 
-	return fmt.Sprintf(".cg/approve.yaml changed on disk since it was loaded. How should the remembered rule be saved?\n\n%s", diff)
+	return fmt.Sprintf("%s changed on disk since it was loaded. How should the remembered rule be saved?\n\n%s", path, diff)
 }
 
 // divergenceSchema builds the titled-enum form for reconciling an on-disk
