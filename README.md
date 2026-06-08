@@ -211,7 +211,7 @@ The server registers seven tools:
 
 | Tool | Purpose |
 |------|---------|
-| `cg_run` | Run a command with capture and return metadata plus head excerpts. |
+| `cg_run` | Run a command with capture and return metadata plus head- or tail-window excerpts. |
 | `cg_list` | List recent capture runs, most-recent-first by mtime. |
 | `cg_meta` | Return the `meta.json` blob for a finished run. |
 | `cg_paths` | Return absolute paths for a run's `stdout`, `stderr`, `meta.json`. |
@@ -238,7 +238,8 @@ capture continues on disk.
 | `env` | `object` | server env | environment overrides, merged onto the server's env. |
 | `wait` | `bool` | `true` | block until exit or timeout. |
 | `wait_timeout_ms` | `int` | `60000` | how long to wait before returning `timed_out: true`. |
-| `excerpt_bytes` | `int` | `4096` | per-stream head-excerpt cap; max `16384`. |
+| `excerpt_bytes` | `int` | `4096` | per-stream excerpt cap; max `16384`. |
+| `excerpt_from` | `string` | `auto` | excerpt window: `auto` picks head on success, tail on non-zero exit / signal / timeout; `head` or `tail` forces the window. |
 
 **Outputs**
 
@@ -252,8 +253,9 @@ capture continues on disk.
 | `duration_ms` | `int?` | Wall-clock run duration; absent if timed out. |
 | `stdout_lines` | `int?` | Total stdout lines; absent if timed out. |
 | `stderr_lines` | `int?` | Total stderr lines; absent if timed out. |
-| `stdout_excerpt` | `string` | First `excerpt_bytes` of stdout. |
-| `stderr_excerpt` | `string` | First `excerpt_bytes` of stderr. |
+| `stdout_excerpt` | `string` | `excerpt_bytes` from stdout; window per `excerpt_from`. |
+| `stderr_excerpt` | `string` | `excerpt_bytes` from stderr; window per `excerpt_from`. |
+| `excerpt_from` | `string` | Window that was used: `head` or `tail`. Omitted when no excerpts (e.g., `wait: false`). |
 | `truncated` | `bool` | Either stream had more than `excerpt_bytes`. |
 
 #### `cg_list`

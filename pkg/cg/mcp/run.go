@@ -18,6 +18,10 @@ const (
 	defaultWaitTimeoutMs = 60000
 	defaultExcerptBytes  = 4096
 	maxExcerptBytes      = 16384
+
+	excerptFromAuto = "auto"
+	excerptFromHead = "head"
+	excerptFromTail = "tail"
 )
 
 // runInput is the argument shape for `cg_run`.
@@ -27,7 +31,8 @@ type runInput struct {
 	Env           map[string]string `json:"env,omitempty" jsonschema:"environment overrides; merged onto the server's env"`
 	Wait          *bool             `json:"wait,omitempty" jsonschema:"block until the child exits or wait_timeout_ms elapses (default true)"`
 	WaitTimeoutMs int               `json:"wait_timeout_ms,omitempty" jsonschema:"how long to wait before returning timed_out=true (default 60000)"`
-	ExcerptBytes  int               `json:"excerpt_bytes,omitempty" jsonschema:"per-stream head-excerpt cap in bytes (default 4096, max 16384)"`
+	ExcerptBytes  int               `json:"excerpt_bytes,omitempty" jsonschema:"per-stream excerpt cap in bytes (default 4096, max 16384)"`
+	ExcerptFrom   string            `json:"excerpt_from,omitempty" jsonschema:"excerpt window: \"auto\" (default) picks head on success and tail on non-zero exit / signal / timeout; \"head\" or \"tail\" forces the window"`
 }
 
 // runOutput is the result shape for `cg_run`.
@@ -42,6 +47,7 @@ type runOutput struct {
 	StderrLines   *int64 `json:"stderr_lines,omitempty"`
 	StdoutExcerpt string `json:"stdout_excerpt"`
 	StderrExcerpt string `json:"stderr_excerpt"`
+	ExcerptFrom   string `json:"excerpt_from,omitempty"`
 	Truncated     bool   `json:"truncated"`
 }
 
@@ -65,6 +71,12 @@ func handleRun(ctx context.Context, reg *runRegistry, in runInput) (*mcpsdk.Call
 	}
 	if excerpt > maxExcerptBytes {
 		excerpt = maxExcerptBytes
+	}
+
+	switch in.ExcerptFrom {
+	case "", excerptFromAuto, excerptFromHead, excerptFromTail:
+	default:
+		return nil, runOutput{}, fmt.Errorf("invalid excerpt_from: %q (want %q, %q, or %q)", in.ExcerptFrom, excerptFromHead, excerptFromTail, excerptFromAuto)
 	}
 
 	wait := true
@@ -94,9 +106,9 @@ func handleRun(ctx context.Context, reg *runRegistry, in runInput) (*mcpsdk.Call
 
 	select {
 	case <-run.Done:
-		return nil, finishedOutput(run, excerpt), nil
+		return nil, finishedOutput(run, excerpt, in.ExcerptFrom), nil
 	case <-timer.C:
-		return nil, timedOutOutput(run, excerpt), nil
+		return nil, timedOutOutput(run, excerpt, in.ExcerptFrom), nil
 	case <-ctx.Done():
 		return nil, runOutput{}, ctx.Err()
 	}
@@ -104,9 +116,10 @@ func handleRun(ctx context.Context, reg *runRegistry, in runInput) (*mcpsdk.Call
 
 // finishedOutput builds the result for a fully completed run, reading
 // meta.json to fill exit/signal/duration/line-count fields.
-func finishedOutput(run *cg.CaptureRun, excerpt int) runOutput {
+func finishedOutput(run *cg.CaptureRun, excerpt int, excerptFrom string) runOutput {
 	out := runOutput{ID: run.ID}
 
+	failed := false
 	if meta, err := cg.ReadMeta(run.Dir); err == nil {
 		ec := meta.ExitCode
 		dur := meta.DurationMs
@@ -119,13 +132,19 @@ func finishedOutput(run *cg.CaptureRun, excerpt int) runOutput {
 		if meta.Signal != nil {
 			sig := *meta.Signal
 			out.Signal = &sig
+			failed = true
+		}
+		if ec != 0 {
+			failed = true
 		}
 	}
 
-	stdout, outMore, _ := readExcerpt(filepath.Join(run.Dir, "stdout"), excerpt)
-	stderr, errMore, _ := readExcerpt(filepath.Join(run.Dir, "stderr"), excerpt)
+	window := resolveExcerptWindow(excerptFrom, failed)
+	stdout, outMore, _ := readWindow(filepath.Join(run.Dir, "stdout"), excerpt, window)
+	stderr, errMore, _ := readWindow(filepath.Join(run.Dir, "stderr"), excerpt, window)
 	out.StdoutExcerpt = stdout
 	out.StderrExcerpt = stderr
+	out.ExcerptFrom = window
 	out.Truncated = outMore || errMore
 	return out
 }
@@ -133,16 +152,39 @@ func finishedOutput(run *cg.CaptureRun, excerpt int) runOutput {
 // timedOutOutput builds the result for a run still in flight when the wait
 // timeout fires. The child is left alone; capture continues on disk. The
 // caller can use cg_meta / cg_stdout to check on it later.
-func timedOutOutput(run *cg.CaptureRun, excerpt int) runOutput {
-	stdout, outMore, _ := readExcerpt(filepath.Join(run.Dir, "stdout"), excerpt)
-	stderr, errMore, _ := readExcerpt(filepath.Join(run.Dir, "stderr"), excerpt)
+func timedOutOutput(run *cg.CaptureRun, excerpt int, excerptFrom string) runOutput {
+	window := resolveExcerptWindow(excerptFrom, true)
+	stdout, outMore, _ := readWindow(filepath.Join(run.Dir, "stdout"), excerpt, window)
+	stderr, errMore, _ := readWindow(filepath.Join(run.Dir, "stderr"), excerpt, window)
 	return runOutput{
 		ID:            run.ID,
 		TimedOut:      true,
 		StdoutExcerpt: stdout,
 		StderrExcerpt: stderr,
+		ExcerptFrom:   window,
 		Truncated:     outMore || errMore,
 	}
+}
+
+// resolveExcerptWindow maps the user input plus the outcome onto a concrete
+// window. "auto" (the default) picks head on success and tail on failure;
+// explicit "head"/"tail" pass through unchanged.
+func resolveExcerptWindow(from string, failed bool) string {
+	if from == "" || from == excerptFromAuto {
+		if failed {
+			return excerptFromTail
+		}
+		return excerptFromHead
+	}
+	return from
+}
+
+// readWindow dispatches to the head or tail reader based on window.
+func readWindow(path string, limit int, window string) (string, bool, error) {
+	if window == excerptFromTail {
+		return readTailExcerpt(path, limit)
+	}
+	return readExcerpt(path, limit)
 }
 
 // readExcerpt reads up to limit bytes from the head of path. hasMore reports
@@ -170,4 +212,37 @@ func readExcerpt(path string, limit int) (content string, hasMore bool, err erro
 	default:
 		return string(buf[:n]), false, err
 	}
+}
+
+// readTailExcerpt reads up to limit bytes from the tail of path. hasMore
+// reports whether the file is larger than the returned window.
+func readTailExcerpt(path string, limit int) (content string, hasMore bool, err error) {
+	f, err := os.Open(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", false, nil
+		}
+		return "", false, err
+	}
+	defer f.Close()
+
+	info, err := f.Stat()
+	if err != nil {
+		return "", false, err
+	}
+	size := info.Size()
+	n := int64(limit)
+	if n > size {
+		n = size
+	}
+	start := size - n
+	if _, err := f.Seek(start, io.SeekStart); err != nil {
+		return "", false, err
+	}
+	buf := make([]byte, n)
+	read, err := io.ReadFull(f, buf)
+	if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) && !errors.Is(err, io.EOF) {
+		return string(buf[:read]), false, err
+	}
+	return string(buf[:read]), start > 0, nil
 }

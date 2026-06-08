@@ -41,6 +41,9 @@ func TestHandleRunSyncSuccess(t *testing.T) {
 	if out.StdoutLines == nil || *out.StdoutLines != 1 {
 		t.Errorf("StdoutLines = %v, want 1", out.StdoutLines)
 	}
+	if out.ExcerptFrom != excerptFromHead {
+		t.Errorf("ExcerptFrom = %q, want %q", out.ExcerptFrom, excerptFromHead)
+	}
 }
 
 func TestHandleRunNonZeroExit(t *testing.T) {
@@ -109,6 +112,9 @@ func TestHandleRunTimeout(t *testing.T) {
 	if !strings.Contains(out.StdoutExcerpt, "partial") {
 		t.Errorf("StdoutExcerpt = %q, want to contain %q", out.StdoutExcerpt, "partial")
 	}
+	if out.ExcerptFrom != excerptFromTail {
+		t.Errorf("ExcerptFrom = %q, want %q", out.ExcerptFrom, excerptFromTail)
+	}
 }
 
 func TestHandleRunExcerptTruncated(t *testing.T) {
@@ -176,5 +182,91 @@ func TestHandleRunContextCancelled(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatalf("expected ctx.Err(), got nil")
+	}
+}
+
+func TestHandleRunTailOnNonZeroExit(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+
+	_, out, err := handleRun(context.Background(), nil, runInput{
+		Command:      []string{"sh", "-c", "printf 'HEAD123456TAIL'; exit 5"},
+		ExcerptBytes: 4,
+	})
+	if err != nil {
+		t.Fatalf("handleRun: %v", err)
+	}
+	if out.ExcerptFrom != excerptFromTail {
+		t.Errorf("ExcerptFrom = %q, want %q", out.ExcerptFrom, excerptFromTail)
+	}
+	if out.StdoutExcerpt != "TAIL" {
+		t.Errorf("StdoutExcerpt = %q, want %q", out.StdoutExcerpt, "TAIL")
+	}
+	if !out.Truncated {
+		t.Errorf("Truncated = false, want true")
+	}
+}
+
+func TestHandleRunHeadOverrideOnFailure(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+
+	_, out, err := handleRun(context.Background(), nil, runInput{
+		Command:      []string{"sh", "-c", "printf 'HEAD123456TAIL'; exit 5"},
+		ExcerptBytes: 4,
+		ExcerptFrom:  excerptFromHead,
+	})
+	if err != nil {
+		t.Fatalf("handleRun: %v", err)
+	}
+	if out.ExcerptFrom != excerptFromHead {
+		t.Errorf("ExcerptFrom = %q, want %q", out.ExcerptFrom, excerptFromHead)
+	}
+	if out.StdoutExcerpt != "HEAD" {
+		t.Errorf("StdoutExcerpt = %q, want %q", out.StdoutExcerpt, "HEAD")
+	}
+}
+
+func TestHandleRunTailOverrideOnSuccess(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+
+	_, out, err := handleRun(context.Background(), nil, runInput{
+		Command:      []string{"sh", "-c", "printf 'HEAD123456TAIL'"},
+		ExcerptBytes: 4,
+		ExcerptFrom:  excerptFromTail,
+	})
+	if err != nil {
+		t.Fatalf("handleRun: %v", err)
+	}
+	if out.ExcerptFrom != excerptFromTail {
+		t.Errorf("ExcerptFrom = %q, want %q", out.ExcerptFrom, excerptFromTail)
+	}
+	if out.StdoutExcerpt != "TAIL" {
+		t.Errorf("StdoutExcerpt = %q, want %q", out.StdoutExcerpt, "TAIL")
+	}
+}
+
+func TestHandleRunExcerptFromAuto(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+
+	_, out, err := handleRun(context.Background(), nil, runInput{
+		Command:     []string{"echo", "ok"},
+		ExcerptFrom: excerptFromAuto,
+	})
+	if err != nil {
+		t.Fatalf("handleRun: %v", err)
+	}
+	if out.ExcerptFrom != excerptFromHead {
+		t.Errorf("ExcerptFrom = %q, want %q", out.ExcerptFrom, excerptFromHead)
+	}
+}
+
+func TestHandleRunInvalidExcerptFrom(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+
+	_, _, err := handleRun(context.Background(), nil, runInput{
+		Command:     []string{"echo", "ok"},
+		ExcerptFrom: "middle",
+	})
+	if err == nil {
+		t.Fatalf("expected error for invalid excerpt_from, got nil")
 	}
 }
