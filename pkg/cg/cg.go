@@ -51,6 +51,7 @@ func NewCommand() *cobra.Command {
 	c.AddCommand(NewErrCommand())
 	c.AddCommand(NewPathsCommand())
 	c.AddCommand(NewLsCommand())
+	c.AddCommand(NewPruneCommand())
 
 	return c
 }

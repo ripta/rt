@@ -1,0 +1,49 @@
+env TMPDIR=$WORK
+mkdir $WORK/cg/AAAAAA
+mkdir $WORK/cg/BBBBBB
+cp meta_a.json $WORK/cg/AAAAAA/meta.json
+cp meta_b.json $WORK/cg/BBBBBB/meta.json
+cp empty $WORK/cg/AAAAAA/stdout
+cp empty $WORK/cg/AAAAAA/stderr
+cp empty $WORK/cg/BBBBBB/stdout
+cp empty $WORK/cg/BBBBBB/stderr
+
+# Stray non-run entries that prune must skip.
+mkdir $WORK/cg/lowercase
+cp empty $WORK/cg/notes.txt
+
+# Crockford-shaped directory without meta.json is an incomplete run; prune
+# should leave it alone.
+mkdir $WORK/cg/INCOMP
+
+# --dry-run with --keep 0 prints both run IDs but removes nothing.
+exec cg prune --keep 0 --dry-run
+stdout '^AAAAAA$'
+stdout '^BBBBBB$'
+exists $WORK/cg/AAAAAA
+exists $WORK/cg/BBBBBB
+
+# Real prune with --keep 0 removes the valid runs; stray and incomplete entries
+# survive.
+exec cg prune --keep 0
+stdout '^AAAAAA$'
+stdout '^BBBBBB$'
+! exists $WORK/cg/AAAAAA
+! exists $WORK/cg/BBBBBB
+exists $WORK/cg/lowercase
+exists $WORK/cg/notes.txt
+exists $WORK/cg/INCOMP
+
+# --keep and --older-than together is a usage error.
+! exec cg prune --keep 1 --older-than 1h
+stderr 'mutually exclusive'
+
+# --older-than rejects garbage.
+! exec cg prune --older-than garbage
+stderr 'invalid --older-than'
+
+-- meta_a.json --
+{"id":"AAAAAA","command":["echo","a"],"started_at":"2026-06-06T19:25:06.001Z","finished_at":"2026-06-06T19:25:06.013Z","duration_ms":12,"exit_code":0,"signal":null,"stdout_lines":1,"stderr_lines":0}
+-- meta_b.json --
+{"id":"BBBBBB","command":["echo","b"],"started_at":"2026-06-06T19:25:06.001Z","finished_at":"2026-06-06T19:25:06.013Z","duration_ms":12,"exit_code":0,"signal":null,"stdout_lines":1,"stderr_lines":0}
+-- empty --

@@ -47,9 +47,10 @@ Pull requests welcome, though you should probably check first before sinking any
 `cg`
 ----
 
-Run a command and annotate each line of its stdout and stderr with a timestamp
-and stream indicator (`O` for stdout, `E` for stderr, `I` for cg's own
-lifecycle messages).
+Run a command and annotate each line of its stdout and stderr with a stream
+indicator (`O` for stdout, `E` for stderr, `I` for cg's own lifecycle
+messages). At the end of the run, print a one-line summary with the exit
+code, wall duration, and per-stream line counts.
 
 Acts like the `annotate-output` script; `cg` is short for command guard.
 
@@ -61,53 +62,122 @@ Basic usage:
 
 ```
 ❯ cg -- echo hello
-19:02:59 I: cg v0.1.0
-19:02:59 I: prefix="15:04:05 "
-19:02:59 I: Started echo hello
-19:02:59 O: hello
-19:02:59 I: Finished with exitcode 0
+O: hello
+I: Finished exitcode=0 in 2ms (out=1 err=0)
 ```
 
 Stdout and stderr are distinguished:
 
 ```
 ❯ cg -- sh -c 'echo out; echo err >&2'
-19:03:04 I: cg v0.1.0
-19:03:04 I: prefix="15:04:05 "
-19:03:04 I: Started sh -c 'echo out; echo err >&2'
-19:03:04 O: out
-19:03:04 E: err
-19:03:04 I: Finished with exitcode 0
+O: out
+E: err
+I: Finished exitcode=0 in 3ms (out=1 err=1)
 ```
 
 The child's exit code is propagated:
 
 ```
 ❯ cg -- sh -c 'exit 42'; echo $?
-19:20:35 I: cg v0.1.0
-19:20:35 I: prefix="15:04:05 "
-19:20:35 I: Started sh -c 'exit 42'
-19:20:35 I: Finished with exitcode 42
+I: Finished exitcode=42 in 2ms (out=0 err=0)
 42
 ```
 
-Use `--format` to change the timestamp prefix. It takes the golang
-`time.Format` layout:
+If the child is killed by a signal, the summary reports the signal number
+instead of an exit code:
 
 ```
-❯ cg --format '2006-01-02T15:04:05 ' -- echo hello
+❯ cg -- sh -c 'kill -TERM $$'
+I: Finished signal=15 in 2ms (out=0 err=0)
+```
+
+SIGINT and SIGTERM are forwarded to the child process.
+
+Verbose mode (`-v` / `--verbose`) restores the older preamble — version line,
+prefix echo, `Started` line — and prefixes every output line with a
+timestamp:
+
+```
+❯ cg -v -- echo hello
+19:02:59 I: cg v0.1.0
+19:02:59 I: prefix="15:04:05 "
+19:02:59 I: Started echo hello
+19:02:59 O: hello
+19:02:59 I: Finished exitcode=0 in 2ms (out=1 err=0)
+```
+
+The verbose timestamp format follows the Go `time.Format` layout and is
+customised with `--format`:
+
+```
+❯ cg -v --format '2006-01-02T15:04:05 ' -- echo hello
 2026-02-22T19:05:00 I: cg v0.1.0
 2026-02-22T19:05:00 I: prefix="2006-01-02T15:04:05 "
 2026-02-22T19:05:00 I: Started echo hello
 2026-02-22T19:05:00 O: hello
-2026-02-22T19:05:00 I: Finished with exitcode 0
+2026-02-22T19:05:00 I: Finished exitcode=0 in 2ms (out=1 err=0)
 ```
 
-Signals SIGINT and SIGTERM are forwarded to the child process.
+### Capturing output
 
-`cg` also supports `--capture` to capture the child's stdout and stderr into
-separate files, and `--buffered` to buffer the child's output and print it all
-at once when the child finishes, instead of streaming it in real time.
+`-c` / `--capture` writes the child's stdout and stderr to files under
+`$TMPDIR/cg/<ID>/` and appends a short run ID to the summary line. The ID is
+6 characters of Crockford base-32 (no `I`, `L`, `O`, or `U`), regenerated on
+collision.
+
+```
+❯ cg -c -- sh -c 'echo out; echo err >&2'
+I: Finished exitcode=0 in 3ms (out=1 err=1) id=Q3F9K2
+```
+
+Each run directory contains `stdout`, `stderr`, and a `meta.json` written
+atomically at end-of-run. Resolution subcommands let downstream tooling
+thread the ID through follow-up calls without scraping paths:
+
+```
+❯ cg out Q3F9K2
+/tmp/cg/Q3F9K2/stdout
+
+❯ cg paths Q3F9K2
+/tmp/cg/Q3F9K2/stdout
+/tmp/cg/Q3F9K2/stderr
+
+❯ rg -i FOO $(cg out Q3F9K2)
+```
+
+`cg ls` lists recent runs, most-recent-first by mtime, one row per run:
+
+```
+❯ cg ls
+Q3F9K2  exit=0   3ms     sh -c 'echo out; echo err >&2'
+M7P4QX  exit=42  2ms     sh -c 'exit 42'
+```
+
+`cg ls -n N` overrides the default cap of 20.
+
+Capture itself never deletes anything. `cg prune` is the explicit cleanup
+hook:
+
+```
+❯ cg prune                  # keep the 50 most recent by mtime
+❯ cg prune --keep 10        # keep the 10 most recent
+❯ cg prune --older-than 7d  # evict runs older than seven days
+❯ cg prune --dry-run        # print what would be removed, change nothing
+```
+
+`--keep` and `--older-than` are mutually exclusive. `--older-than` accepts
+the Go `time.ParseDuration` grammar (`90m`, `1h30m`, `2h`) plus convenience
+suffixes `Nd` (days) and `Nw` (weeks). Stray non-run entries and incomplete
+runs (no `meta.json`) under `$TMPDIR/cg/` are skipped.
+
+### Other flags
+
+`--buffered` defers the child's output until the command finishes, grouping
+by stream instead of streaming in real time.
+
+`--log-parse json|logfmt` reformats structured child log lines; see
+`cg --help` for the message-key, timestamp-key, timestamp-format, and field
+selectors.
 
 
 `enc`
