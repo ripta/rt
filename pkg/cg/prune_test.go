@@ -9,14 +9,14 @@ import (
 	"time"
 )
 
-type parsePruneDurationTest struct {
+type parseDurationTest struct {
 	name    string
 	in      string
 	want    time.Duration
 	wantErr bool
 }
 
-var parsePruneDurationTests = []parsePruneDurationTest{
+var parseDurationTests = []parseDurationTest{
 	{name: "days", in: "7d", want: 7 * 24 * time.Hour},
 	{name: "single day", in: "1d", want: 24 * time.Hour},
 	{name: "weeks", in: "2w", want: 14 * 24 * time.Hour},
@@ -34,20 +34,20 @@ var parsePruneDurationTests = []parsePruneDurationTest{
 func TestParsePruneDuration(t *testing.T) {
 	t.Parallel()
 
-	for _, tt := range parsePruneDurationTests {
+	for _, tt := range parseDurationTests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := parsePruneDuration(tt.in)
+			got, err := ParsePruneDuration(tt.in)
 			if tt.wantErr {
 				if err == nil {
-					t.Errorf("parsePruneDuration(%q) = %v, want error", tt.in, got)
+					t.Errorf("ParsePruneDuration(%q) = %v, want error", tt.in, got)
 				}
 				return
 			}
 			if err != nil {
-				t.Fatalf("parsePruneDuration(%q) error = %v", tt.in, err)
+				t.Fatalf("ParsePruneDuration(%q) error = %v", tt.in, err)
 			}
 			if got != tt.want {
-				t.Errorf("parsePruneDuration(%q) = %v, want %v", tt.in, got, tt.want)
+				t.Errorf("ParsePruneDuration(%q) = %v, want %v", tt.in, got, tt.want)
 			}
 		})
 	}

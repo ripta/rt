@@ -38,11 +38,11 @@ func NewPruneCommand() *cobra.Command {
 	return c
 }
 
-// parsePruneDuration parses a duration string, accepting the Go
+// ParsePruneDuration parses a duration string, accepting the Go
 // time.ParseDuration grammar plus single-unit Nd (days) and Nw (weeks)
 // suffixes. Mixed forms like "7d12h" are not supported; they fall through to
 // time.ParseDuration and error.
-func parsePruneDuration(s string) (time.Duration, error) {
+func ParsePruneDuration(s string) (time.Duration, error) {
 	if s == "" {
 		return 0, fmt.Errorf("empty duration")
 	}
@@ -65,6 +65,22 @@ func parsePruneDuration(s string) (time.Duration, error) {
 	return time.ParseDuration(s)
 }
 
+// PruneOptions controls which capture runs PruneRuns considers for eviction
+// and whether the removal is actually performed.
+type PruneOptions struct {
+	// Keep is the number of most-recent (by mtime) runs to retain. Ignored
+	// when UseOlderThan is true.
+	Keep int
+	// OlderThan, when UseOlderThan is true, evicts runs whose mtime is
+	// before now-OlderThan.
+	OlderThan time.Duration
+	// UseOlderThan selects age-based eviction over count-based.
+	UseOlderThan bool
+	// DryRun returns the list of IDs that would be removed without
+	// touching the filesystem.
+	DryRun bool
+}
+
 // pruneCandidate is a single run dir under consideration for eviction.
 type pruneCandidate struct {
 	id    string
@@ -72,30 +88,17 @@ type pruneCandidate struct {
 	mtime time.Time
 }
 
-func (opts *pruneOptions) run(cmd *cobra.Command, args []string) error {
-	keepSet := cmd.Flags().Changed("keep")
-	if keepSet && opts.OlderThan != "" {
-		fmt.Fprintln(cmd.ErrOrStderr(), "--keep and --older-than are mutually exclusive")
-		return &ExitError{Code: 2}
-	}
-
-	var olderThan time.Duration
-	if opts.OlderThan != "" {
-		d, err := parsePruneDuration(opts.OlderThan)
-		if err != nil {
-			fmt.Fprintf(cmd.ErrOrStderr(), "invalid --older-than: %v\n", err)
-			return &ExitError{Code: 2}
-		}
-		olderThan = d
-	}
-
+// PruneRuns evicts capture runs from CaptureRoot() per opts. It returns the
+// IDs that were removed (or, under DryRun, would have been removed) in
+// eviction order. A missing CaptureRoot is not an error.
+func PruneRuns(opts PruneOptions) ([]string, error) {
 	root := CaptureRoot()
 	entries, err := os.ReadDir(root)
 	if errors.Is(err, fs.ErrNotExist) {
-		return nil
+		return []string{}, nil
 	}
 	if err != nil {
-		return fmt.Errorf("reading capture root: %w", err)
+		return nil, fmt.Errorf("reading capture root: %w", err)
 	}
 
 	candidates := make([]pruneCandidate, 0, len(entries))
@@ -120,8 +123,8 @@ func (opts *pruneOptions) run(cmd *cobra.Command, args []string) error {
 	})
 
 	var toRemove []pruneCandidate
-	if opts.OlderThan != "" {
-		cutoff := time.Now().Add(-olderThan)
+	if opts.UseOlderThan {
+		cutoff := time.Now().Add(-opts.OlderThan)
 		for _, c := range candidates {
 			if c.mtime.Before(cutoff) {
 				toRemove = append(toRemove, c)
@@ -131,14 +134,40 @@ func (opts *pruneOptions) run(cmd *cobra.Command, args []string) error {
 		toRemove = candidates[opts.Keep:]
 	}
 
-	out := cmd.OutOrStdout()
+	removed := make([]string, 0, len(toRemove))
 	for _, c := range toRemove {
 		if !opts.DryRun {
 			if err := os.RemoveAll(c.dir); err != nil {
-				return fmt.Errorf("removing %s: %w", c.dir, err)
+				return removed, fmt.Errorf("removing %s: %w", c.dir, err)
 			}
 		}
-		fmt.Fprintln(out, c.id)
+		removed = append(removed, c.id)
 	}
-	return nil
+	return removed, nil
+}
+
+func (opts *pruneOptions) run(cmd *cobra.Command, args []string) error {
+	keepSet := cmd.Flags().Changed("keep")
+	if keepSet && opts.OlderThan != "" {
+		fmt.Fprintln(cmd.ErrOrStderr(), "--keep and --older-than are mutually exclusive")
+		return &ExitError{Code: 2}
+	}
+
+	pruneOpts := PruneOptions{Keep: opts.Keep, DryRun: opts.DryRun}
+	if opts.OlderThan != "" {
+		d, err := ParsePruneDuration(opts.OlderThan)
+		if err != nil {
+			fmt.Fprintf(cmd.ErrOrStderr(), "invalid --older-than: %v\n", err)
+			return &ExitError{Code: 2}
+		}
+		pruneOpts.UseOlderThan = true
+		pruneOpts.OlderThan = d
+	}
+
+	removed, err := PruneRuns(pruneOpts)
+	out := cmd.OutOrStdout()
+	for _, id := range removed {
+		fmt.Fprintln(out, id)
+	}
+	return err
 }

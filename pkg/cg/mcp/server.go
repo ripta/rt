@@ -41,5 +41,6 @@ func newServer(v string) *mcpsdk.Server {
 	registerMeta(s)
 	registerPaths(s)
 	registerStreams(s)
+	registerPrune(s)
 	return s
 }
