@@ -13,6 +13,14 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// ErrUnknownRunID is returned by LookupRunDir when id is malformed or the run
+// directory does not exist under CaptureRoot.
+var ErrUnknownRunID = errors.New("unknown run id")
+
+// ErrIncompleteRun is returned by LookupRunDir when the run directory exists
+// but meta.json is missing, i.e. the capture started but has not finished.
+var ErrIncompleteRun = errors.New("incomplete run")
+
 // isValidRunID reports whether id has the right shape for a capture run ID:
 // the Crockford base-32 alphabet, exactly runIDLen characters.
 func isValidRunID(id string) bool {
@@ -27,32 +35,54 @@ func isValidRunID(id string) bool {
 	return true
 }
 
-// resolveRunDir locates the per-run capture directory for id. It reports an
-// ExitError with code 1 paired with a single-line stderr message for unknown
-// IDs and for runs whose meta.json is missing or unreadable.
-func resolveRunDir(cmd *cobra.Command, id string) (string, error) {
+// LookupRunDir resolves the per-run capture directory for id under
+// CaptureRoot. It returns ErrUnknownRunID for malformed IDs and absent
+// directories, and ErrIncompleteRun when the directory exists but meta.json
+// is not present. The returned directory is always the joined path, even on
+// error, so callers can decide whether to surface it (for example, when a
+// caller wants to peek at an in-flight run's stdout).
+func LookupRunDir(id string) (string, error) {
 	dir := filepath.Join(CaptureRoot(), id)
 
 	if !isValidRunID(id) {
-		fmt.Fprintf(cmd.ErrOrStderr(), "unknown run id: %s\n", id)
-		return "", &ExitError{Code: 1}
+		return dir, ErrUnknownRunID
 	}
 
 	info, err := os.Stat(dir)
 	if errors.Is(err, fs.ErrNotExist) || (err == nil && !info.IsDir()) {
-		fmt.Fprintf(cmd.ErrOrStderr(), "unknown run id: %s\n", id)
-		return "", &ExitError{Code: 1}
+		return dir, ErrUnknownRunID
 	}
 	if err != nil {
-		return "", fmt.Errorf("stat run dir: %w", err)
+		return dir, fmt.Errorf("stat run dir: %w", err)
 	}
 
 	if _, err := os.Stat(filepath.Join(dir, MetaFilename)); err != nil {
-		fmt.Fprintf(cmd.ErrOrStderr(), "incomplete run: %s (missing meta.json)\n", id)
-		return "", &ExitError{Code: 1}
+		if errors.Is(err, fs.ErrNotExist) {
+			return dir, ErrIncompleteRun
+		}
+		return dir, fmt.Errorf("stat meta.json: %w", err)
 	}
 
 	return dir, nil
+}
+
+// resolveRunDir is the shell-side wrapper around LookupRunDir. It prints a
+// single-line diagnostic to stderr for known sentinel errors and surfaces an
+// ExitError{Code:1} so the cobra root maps it onto exit status 1.
+func resolveRunDir(cmd *cobra.Command, id string) (string, error) {
+	dir, err := LookupRunDir(id)
+	if err == nil {
+		return dir, nil
+	}
+	if errors.Is(err, ErrUnknownRunID) {
+		fmt.Fprintf(cmd.ErrOrStderr(), "unknown run id: %s\n", id)
+		return "", &ExitError{Code: 1}
+	}
+	if errors.Is(err, ErrIncompleteRun) {
+		fmt.Fprintf(cmd.ErrOrStderr(), "incomplete run: %s (missing meta.json)\n", id)
+		return "", &ExitError{Code: 1}
+	}
+	return "", err
 }
 
 // NewOutCommand returns the `cg out <ID>` subcommand. It prints the absolute

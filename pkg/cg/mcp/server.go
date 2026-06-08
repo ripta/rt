@@ -37,5 +37,9 @@ func runServer(cmd *cobra.Command, _ []string) error {
 func newServer(v string) *mcpsdk.Server {
 	s := mcpsdk.NewServer(&mcpsdk.Implementation{Name: "cg", Version: v}, nil)
 	registerRun(s)
+	registerList(s)
+	registerMeta(s)
+	registerPaths(s)
+	registerStreams(s)
 	return s
 }
