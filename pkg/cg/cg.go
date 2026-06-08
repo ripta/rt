@@ -47,6 +47,11 @@ func NewCommand() *cobra.Command {
 	c.Flags().StringVar(&opts.LogTSFmt, "log-timestamp-format", "", "timestamp format: rfc3339, unix-s, unix-ms (empty for auto-detect)")
 	c.Flags().StringVar(&opts.LogFields, "log-fields", "", "comma-separated JSON keys to append, or \"*\" for all")
 
+	c.AddCommand(NewOutCommand())
+	c.AddCommand(NewErrCommand())
+	c.AddCommand(NewPathsCommand())
+	c.AddCommand(NewLsCommand())
+
 	return c
 }
 
