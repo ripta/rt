@@ -399,14 +399,14 @@ func TestCommandBufferedWithCapture(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	defer cleanupCaptureFiles(t, out)
-
-	// Capture files should have raw output
-	stdoutPath := extractCapturePath(out, "capture.stdout=")
-	stderrPath := extractCapturePath(out, "capture.stderr=")
-	if stdoutPath == "" || stderrPath == "" {
-		t.Fatalf("missing capture paths in output: %q", out)
+	id := extractRunID(out)
+	if id == "" {
+		t.Fatalf("missing id= in output: %q", out)
 	}
+	defer cleanupRunDir(t, id)
+
+	stdoutPath := filepath.Join(CaptureRoot(), id, "stdout")
+	stderrPath := filepath.Join(CaptureRoot(), id, "stderr")
 
 	stdoutData, err := os.ReadFile(stdoutPath)
 	if err != nil {

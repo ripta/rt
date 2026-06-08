@@ -49,13 +49,18 @@ func formatDuration(d time.Duration) string {
 }
 
 // formatFinish builds the end-of-run summary line. When signaled is true, the
-// head is rendered as signal=<sig>; otherwise exitcode=<code>.
-func formatFinish(code int, signaled bool, sig int, d time.Duration, outLines, errLines int64) string {
+// head is rendered as signal=<sig>; otherwise exitcode=<code>. A non-empty id
+// is appended as ` id=<ID>` for runs that produced a capture.
+func formatFinish(code int, signaled bool, sig int, d time.Duration, outLines, errLines int64, id string) string {
 	head := fmt.Sprintf("exitcode=%d", code)
 	if signaled {
 		head = fmt.Sprintf("signal=%d", sig)
 	}
-	return fmt.Sprintf("Finished %s in %s (out=%d err=%d)", head, formatDuration(d), outLines, errLines)
+	line := fmt.Sprintf("Finished %s in %s (out=%d err=%d)", head, formatDuration(d), outLines, errLines)
+	if id != "" {
+		line += " id=" + id
+	}
+	return line
 }
 
 func (opts *Options) run(cmd *cobra.Command, args []string) error {
@@ -97,17 +102,8 @@ func (opts *Options) run(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// writeInfo writes a lifecycle message to the annotated writer and
-	// optionally buffers it for later replay to the capture lifecycle file.
-	var preCaptureMsgs []string
 	writeInfo := func(msg string) error {
-		if err := w.WriteLine(IndicatorInfo, msg); err != nil {
-			return err
-		}
-		if opts.Capture {
-			preCaptureMsgs = append(preCaptureMsgs, msg)
-		}
-		return nil
+		return w.WriteLine(IndicatorInfo, msg)
 	}
 
 	if opts.Verbose {
@@ -153,13 +149,13 @@ func (opts *Options) run(cmd *cobra.Command, args []string) error {
 	start := time.Now()
 	if err := child.Start(); err != nil {
 		code := ExitCodeFromError(err)
-		_ = writeInfo(formatFinish(code, false, 0, time.Since(start), 0, 0))
+		_ = writeInfo(formatFinish(code, false, 0, time.Since(start), 0, 0, ""))
 		return &ExitError{Code: code}
 	}
 
 	var cap *Capture
 	if opts.Capture {
-		cap, err = NewCapture(child.Process.Pid, prefix)
+		cap, err = NewCapture()
 		if err != nil {
 			_ = child.Process.Kill()
 			_, _ = child.Process.Wait()
@@ -167,28 +163,13 @@ func (opts *Options) run(cmd *cobra.Command, args []string) error {
 		}
 		defer cap.Close()
 
-		for _, msg := range preCaptureMsgs {
-			if err := cap.WriteLifecycle(msg); err != nil {
-				return fmt.Errorf("writing buffered lifecycle: %w", err)
+		if opts.Verbose {
+			if err := writeInfo(fmt.Sprintf("capture.stdout=%s", cap.Stdout.Name())); err != nil {
+				return fmt.Errorf("writing capture stdout path: %w", err)
 			}
-		}
-
-		// Rebind writeInfo to write to both destinations
-		writeInfo = func(msg string) error {
-			if err := w.WriteLine(IndicatorInfo, msg); err != nil {
-				return err
+			if err := writeInfo(fmt.Sprintf("capture.stderr=%s", cap.Stderr.Name())); err != nil {
+				return fmt.Errorf("writing capture stderr path: %w", err)
 			}
-			return cap.WriteLifecycle(msg)
-		}
-
-		if err := writeInfo(fmt.Sprintf("capture.stdout=%s", cap.Stdout.Name())); err != nil {
-			return fmt.Errorf("writing capture stdout path: %w", err)
-		}
-		if err := writeInfo(fmt.Sprintf("capture.stderr=%s", cap.Stderr.Name())); err != nil {
-			return fmt.Errorf("writing capture stderr path: %w", err)
-		}
-		if err := writeInfo(fmt.Sprintf("capture.lifecycle=%s", cap.Lifecycle.Name())); err != nil {
-			return fmt.Errorf("writing capture lifecycle path: %w", err)
 		}
 	}
 
@@ -266,10 +247,36 @@ func (opts *Options) run(cmd *cobra.Command, args []string) error {
 	outLines := outCounter.n.Load()
 	errLines := errCounter.n.Load()
 
-	if ws := exitStatus(child); ws != nil && ws.Signaled() {
-		_ = writeInfo(formatFinish(code, true, int(ws.Signal()), elapsed, outLines, errLines))
-	} else {
-		_ = writeInfo(formatFinish(code, false, 0, elapsed, outLines, errLines))
+	id := ""
+	if cap != nil {
+		id = cap.ID
+	}
+
+	ws := exitStatus(child)
+	signaled := ws != nil && ws.Signaled()
+	var sig int
+	if signaled {
+		sig = int(ws.Signal())
+	}
+	_ = writeInfo(formatFinish(code, signaled, sig, elapsed, outLines, errLines, id))
+
+	if cap != nil {
+		meta := &Meta{
+			ID:          cap.ID,
+			Command:     args,
+			StartedAt:   start.UTC(),
+			FinishedAt:  start.Add(elapsed).UTC(),
+			DurationMs:  elapsed.Milliseconds(),
+			ExitCode:    code,
+			StdoutLines: outLines,
+			StderrLines: errLines,
+		}
+		if signaled {
+			meta.Signal = &sig
+		}
+		if err := WriteMeta(cap.Dir, meta); err != nil {
+			_ = writeInfo(fmt.Sprintf("meta.json write failed: %s", err))
+		}
 	}
 
 	if code != 0 {

@@ -1,6 +1,7 @@
+env TMPDIR=$WORK
 exec cg -v --format 'T ' --capture -- echo hello
 stdout 'T I: capture\.stdout='
 stdout 'T I: capture\.stderr='
-stdout 'T I: capture\.lifecycle='
+! stdout 'T I: capture\.lifecycle='
 ! stdout 'T O: hello'
-stdout 'T I: Finished exitcode=0 in [0-9.]+(ns|us|µs|ms|s) \(out=1 err=0\)'
+stdout 'T I: Finished exitcode=0 in [0-9.]+(ns|us|µs|ms|s) \(out=1 err=0\) id=[0-9A-HJKMNP-TV-Z]{6}$'

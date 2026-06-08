@@ -39,7 +39,7 @@ func NewCommand() *cobra.Command {
 
 	c.Flags().StringVar(&opts.Format, "format", DefaultFormat, "time prefix format (Go time.Format layout); only applies in --verbose mode")
 	c.Flags().BoolVarP(&opts.Verbose, "verbose", "v", false, "restore the rich preamble and per-line timestamp prefix")
-	c.Flags().BoolVar(&opts.Capture, "capture", false, "capture child output to temporary files")
+	c.Flags().BoolVarP(&opts.Capture, "capture", "c", false, "capture child output to temporary files")
 	c.Flags().BoolVar(&opts.Buffered, "buffered", false, "defer child output until command finishes, grouped by stream")
 	c.Flags().StringVar(&opts.LogParse, "log-parse", "", "log line parser (\"json\", \"logfmt\")")
 	c.Flags().StringVar(&opts.LogMsgKey, "log-message-key", "message", "JSON key for the log message")

@@ -524,14 +524,15 @@ func TestFormatDuration(t *testing.T) {
 }
 
 type formatFinishTest struct {
-	name      string
-	code      int
-	signaled  bool
-	sig       int
-	dur       time.Duration
-	outLines  int64
-	errLines  int64
-	want      string
+	name     string
+	code     int
+	signaled bool
+	sig      int
+	dur      time.Duration
+	outLines int64
+	errLines int64
+	id       string
+	want     string
 }
 
 var formatFinishTests = []formatFinishTest{
@@ -553,6 +554,18 @@ var formatFinishTests = []formatFinishTest{
 		dur: 5 * time.Millisecond, outLines: 1, errLines: 0,
 		want: "Finished signal=15 in 5ms (out=1 err=0)",
 	},
+	{
+		name: "with id",
+		code: 0, signaled: false, sig: 0,
+		dur: 12 * time.Millisecond, outLines: 1, errLines: 0, id: "Q3F9K2",
+		want: "Finished exitcode=0 in 12ms (out=1 err=0) id=Q3F9K2",
+	},
+	{
+		name: "signaled with id",
+		code: -1, signaled: true, sig: 15,
+		dur: 5 * time.Millisecond, outLines: 1, errLines: 0, id: "ABC123",
+		want: "Finished signal=15 in 5ms (out=1 err=0) id=ABC123",
+	},
 }
 
 func TestFormatFinish(t *testing.T) {
@@ -560,7 +573,7 @@ func TestFormatFinish(t *testing.T) {
 
 	for _, tt := range formatFinishTests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := formatFinish(tt.code, tt.signaled, tt.sig, tt.dur, tt.outLines, tt.errLines)
+			got := formatFinish(tt.code, tt.signaled, tt.sig, tt.dur, tt.outLines, tt.errLines, tt.id)
 			if got != tt.want {
 				t.Errorf("formatFinish() = %q, want %q", got, tt.want)
 			}
