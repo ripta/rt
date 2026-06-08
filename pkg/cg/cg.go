@@ -33,7 +33,6 @@ func NewCommand() *cobra.Command {
 		SilenceErrors: true,
 		SilenceUsage:  true,
 
-		Args: cobra.MinimumNArgs(1),
 		RunE: opts.run,
 	}
 

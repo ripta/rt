@@ -64,6 +64,11 @@ func formatFinish(code int, signaled bool, sig int, d time.Duration, outLines, e
 }
 
 func (opts *Options) run(cmd *cobra.Command, args []string) error {
+	if len(args) == 0 {
+		_ = cmd.Usage()
+		return &ExitError{Code: 2}
+	}
+
 	if err := opts.validateFlags(cmd); err != nil {
 		fmt.Fprintln(cmd.ErrOrStderr(), err)
 		return &ExitError{Code: 2}
