@@ -57,6 +57,8 @@ func RunCapture(args []string, cwd string, env map[string]string) (*CaptureRun, 
 		return nil, fmt.Errorf("starting child: %w", err)
 	}
 
+	_ = WritePidFile(cap.Dir, child.Process.Pid)
+
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -79,6 +81,7 @@ func RunCapture(args []string, cwd string, env map[string]string) (*CaptureRun, 
 			meta.Signal = &sig
 		}
 		_ = WriteMeta(cap.Dir, meta)
+		RemovePidFile(cap.Dir)
 	}()
 
 	return &CaptureRun{ID: cap.ID, Dir: cap.Dir, Done: done}, nil

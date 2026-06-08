@@ -41,6 +41,7 @@ func newServer(v string) *mcpsdk.Server {
 	registerList(s)
 	registerMeta(s)
 	registerWait(s, reg)
+	registerCancel(s, reg)
 	registerPaths(s)
 	registerStreams(s)
 	registerPrune(s)

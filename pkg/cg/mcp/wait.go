@@ -53,19 +53,36 @@ func handleWait(ctx context.Context, reg *runRegistry, in waitInput) (*mcpsdk.Ca
 		return nil, waitOutput{}, err
 	}
 
-	timer := time.NewTimer(time.Duration(timeoutMs) * time.Millisecond)
+	finished, werr := awaitFinish(ctx, reg, in.ID, time.Duration(timeoutMs)*time.Millisecond)
+	if werr != nil {
+		return nil, waitOutput{}, werr
+	}
+	if !finished {
+		return nil, waitOutput{ID: in.ID, Finished: false}, nil
+	}
+	out, ferr := finishedWaitOutput(in.ID, dir)
+	return nil, out, ferr
+}
+
+// awaitFinish blocks until the run identified by id finishes, the timeout
+// elapses, or ctx is cancelled. It mirrors the two-path strategy cg_wait and
+// cg_cancel both need: the registry Done channel when this server started the
+// run, and filesystem polling otherwise. The caller must have already
+// confirmed the run is in flight; awaitFinish only watches for the transition
+// to finished. A false return with a nil error means the timeout fired.
+func awaitFinish(ctx context.Context, reg *runRegistry, id string, timeout time.Duration) (bool, error) {
+	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 
 	if reg != nil {
-		if done, ok := reg.Done(in.ID); ok {
+		if done, ok := reg.Done(id); ok {
 			select {
 			case <-done:
-				out, ferr := finishedWaitOutput(in.ID, dir)
-				return nil, out, ferr
+				return true, nil
 			case <-timer.C:
-				return nil, waitOutput{ID: in.ID, Finished: false}, nil
+				return false, nil
 			case <-ctx.Done():
-				return nil, waitOutput{}, ctx.Err()
+				return false, ctx.Err()
 			}
 		}
 	}
@@ -75,20 +92,19 @@ func handleWait(ctx context.Context, reg *runRegistry, in waitInput) (*mcpsdk.Ca
 	for {
 		select {
 		case <-timer.C:
-			return nil, waitOutput{ID: in.ID, Finished: false}, nil
+			return false, nil
 		case <-ctx.Done():
-			return nil, waitOutput{}, ctx.Err()
+			return false, ctx.Err()
 		case <-ticker.C:
-			d, e := cg.LookupRunDir(in.ID)
+			_, e := cg.LookupRunDir(id)
 			if e == nil {
-				out, ferr := finishedWaitOutput(in.ID, d)
-				return nil, out, ferr
+				return true, nil
+			}
+			if errors.Is(e, cg.ErrUnknownRunID) {
+				return false, fmt.Errorf("unknown run id: %s", id)
 			}
 			if !errors.Is(e, cg.ErrIncompleteRun) {
-				if errors.Is(e, cg.ErrUnknownRunID) {
-					return nil, waitOutput{}, fmt.Errorf("unknown run id: %s", in.ID)
-				}
-				return nil, waitOutput{}, e
+				return false, e
 			}
 		}
 	}
