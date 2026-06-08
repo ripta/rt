@@ -207,16 +207,19 @@ Register the server with Claude Code by adding a `cg` entry under
 Any MCP host that speaks the stdio transport launches the server the same
 way: spawn `cg mcp` and exchange MCP messages over its stdin and stdout.
 
-The server registers seven tools:
+The server registers ten tools:
 
 | Tool | Purpose |
 |------|---------|
 | `cg_run` | Run a command with capture and return metadata plus head- or tail-window excerpts. |
 | `cg_list` | List recent capture runs, most-recent-first by mtime. |
-| `cg_meta` | Return the `meta.json` blob for a finished run. |
+| `cg_meta` | Return the run state and `meta.json` fields for a run. |
+| `cg_wait` | Block until a run finishes or a timeout elapses. |
+| `cg_cancel` | Signal a run's process group, with optional escalation. |
 | `cg_paths` | Return absolute paths for a run's `stdout`, `stderr`, `meta.json`. |
 | `cg_stdout` | Fetch captured stdout for a run, with byte limits and head/tail windowing. |
 | `cg_stderr` | Fetch captured stderr for a run, with byte limits and head/tail windowing. |
+| `cg_grep` | Search a run's captured output and return matching lines. |
 | `cg_prune` | Evict capture runs by count (`keep`) or age (`older_than`). |
 
 Unknown IDs and malformed inputs surface as MCP tool errors. A child
@@ -285,8 +288,10 @@ synthesized from the run directory's mtime.
 
 #### `cg_meta`
 
-Return the `meta.json` blob for a finished run. In-flight runs (no
-`meta.json` yet) produce a tool error; poll until the run finishes.
+Return a run's state and `meta.json` fields. An in-flight run (no
+`meta.json` yet) returns `{id, state: "running"}` with no error; a finished
+run returns `state: "finished"` plus all meta fields. An unknown ID is a
+tool error.
 
 **Inputs**
 
@@ -299,14 +304,63 @@ Return the `meta.json` blob for a finished run. In-flight runs (no
 | Field | Type | Notes |
 |-------|------|-------|
 | `id` | `string` | Run ID. |
-| `command` | `string[]` | argv that was executed. |
-| `started_at` | `string` | RFC 3339 timestamp. |
-| `finished_at` | `string` | RFC 3339 timestamp. |
-| `duration_ms` | `int` | Wall-clock duration. |
-| `exit_code` | `int` | Child exit code. |
+| `state` | `string` | `"running"` or `"finished"`. |
+| `command` | `string[]` | argv that was executed; finished runs only. |
+| `started_at` | `string` | RFC 3339 timestamp; finished runs only. |
+| `finished_at` | `string` | RFC 3339 timestamp; finished runs only. |
+| `duration_ms` | `int` | Wall-clock duration; finished runs only. |
+| `exit_code` | `int` | Child exit code; finished runs only. |
 | `signal` | `int?` | Signal that killed the child, if any. |
-| `stdout_lines` | `int` | Total stdout lines. |
-| `stderr_lines` | `int` | Total stderr lines. |
+| `stdout_lines` | `int` | Total stdout lines; finished runs only. |
+| `stderr_lines` | `int` | Total stderr lines; finished runs only. |
+
+#### `cg_wait`
+
+Block until a run finishes or `timeout_ms` elapses. Uses the in-process
+`Done` channel for runs this server started and falls back to filesystem
+polling otherwise. An unknown ID is a tool error.
+
+**Inputs**
+
+| Field | Type | Default | Notes |
+|-------|------|---------|-------|
+| `id` | `string` | required | capture run ID. |
+| `timeout_ms` | `int` | `60000` | how long to block before returning `finished: false`. |
+
+**Outputs**
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `id` | `string` | Run ID. |
+| `finished` | `bool` | `true` if the run completed before the timeout. |
+| meta fields | — | When `finished`, the same fields as `cg_meta`. |
+
+#### `cg_cancel`
+
+Send a signal to a run's process group. An already-finished run returns
+`{signaled: false}` without error; an unknown ID is a tool error. With
+`escalate_after_ms > 0`, the server sends the initial signal, waits up to
+the deadline, and sends `escalate_signal` if the child is still running.
+
+**Inputs**
+
+| Field | Type | Default | Notes |
+|-------|------|---------|-------|
+| `id` | `string` | required | capture run ID. |
+| `signal` | `string`/`int` | `SIGTERM` | initial signal; `SIGTERM`, `SIGINT`, `SIGKILL`, or numeric. |
+| `escalate_after_ms` | `int` | `0` | wait this long, then escalate; `0` disables escalation. |
+| `escalate_signal` | `string`/`int` | `SIGKILL` | signal sent on escalation. |
+
+**Outputs**
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `id` | `string` | Run ID. |
+| `signaled` | `bool` | Whether the initial signal was sent. |
+| `signal` | `int` | Numeric value of the initial signal. |
+| `escalated` | `bool` | Whether `escalate_signal` was sent. |
+| `escalate_signal` | `int?` | Numeric escalation signal; present only when escalated. |
+| `finished` | `bool` | Whether the child had exited by the time the call returned. |
 
 #### `cg_paths`
 
@@ -357,6 +411,37 @@ base64 for known binary streams.
 | `returned_bytes` | `int` | Length of `content` in bytes. |
 | `truncated` | `bool` | More data exists beyond the returned window. |
 | `clamped` | `bool` | `max_bytes` was reduced to the 1 MiB ceiling. |
+
+#### `cg_grep`
+
+Search a run's captured output line by line and return matching lines.
+Supply exactly one of `text` (fixed substring) or `pattern` (RE2 regex).
+Searches both streams by default. Works for in-flight runs. A line with
+invalid UTF-8 is base64-encoded and tagged `content_encoding: "base64"`.
+
+**Inputs**
+
+| Field | Type | Default | Notes |
+|-------|------|---------|-------|
+| `id` | `string` | required | capture run ID. |
+| `text` | `string` | — | fixed-string substring; mutually exclusive with `pattern`. |
+| `pattern` | `string` | — | RE2 regex; mutually exclusive with `text`. |
+| `streams` | `string` | `all` | which streams to search: `all`, `stdout`, or `stderr`. |
+| `case_insensitive` | `bool` | `false` | fold case when matching. |
+| `invert_match` | `bool` | `false` | return lines that do NOT match. |
+| `max_matches` | `int` | `1000` | cap on returned matches; max `10000`. |
+
+**Outputs**
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `matches` | `object[]` | One entry per matching line; see fields below. |
+| `match_count` | `int` | Number of returned matches. |
+| `truncated` | `bool` | `max_matches` was hit before the streams were fully scanned. |
+
+Each `matches[]` entry has `stream` (`"stdout"` or `"stderr"`),
+`line_number` (1-based, per stream), `line`, and `content_encoding`
+(omitted for UTF-8 lines, `"base64"` when the line is base64-encoded).
 
 #### `cg_prune`
 
