@@ -7,8 +7,20 @@ import (
 )
 
 // DefaultProjectFile is the project rules file path, relative to the project
-// root, used when LoadOptions.ProjectFile is empty.
+// root, that takes priority when no candidate is configured. It is also the
+// write target when no candidate exists on disk.
 const DefaultProjectFile = ".cg.yaml"
+
+// DefaultProjectFiles returns the project rules file paths searched, in priority
+// order, when LoadOptions.ProjectFiles is empty. The legacy .cg/approve.yaml is
+// kept as a fallback so existing checkouts keep working.
+func DefaultProjectFiles() []string {
+	return []string{
+		DefaultProjectFile,
+		".cg/approve.yaml",
+		".claude/cg.yaml",
+	}
+}
 
 // LoadOptions parameterizes layer resolution so callers and tests can inject
 // paths instead of touching the real home directory or process environment. A
@@ -21,9 +33,10 @@ type LoadOptions struct {
 	// Empty resolves to CLAUDE_PROJECT_DIR, falling back to the current
 	// directory.
 	ProjectRoot string
-	// ProjectFile is the project rules file path, relative to ProjectRoot.
-	// Empty resolves to DefaultProjectFile.
-	ProjectFile string
+	// ProjectFiles lists candidate project rules file paths, relative to
+	// ProjectRoot, in preference order. The first path that exists is loaded as
+	// the project layer. An empty list resolves to DefaultProjectFiles.
+	ProjectFiles []string
 }
 
 // DefaultGlobalPath returns ~/.config/cg/approve.yaml. The path is built from
@@ -63,6 +76,27 @@ func ProjectPath(root, rel string) string {
 	return filepath.Join(root, rel)
 }
 
+// resolveProjectPath picks the effective project rules file from rels, each
+// relative to root, in preference order: the first path that exists wins. A
+// path is skipped only when it is genuinely absent, so an unreadable file is
+// still chosen and surfaces its error at load. When none exist, the first listed
+// path is the write target so a remembered rule lands at the operator's
+// preferred location. An empty list resolves to DefaultProjectFiles.
+func resolveProjectPath(root string, rels []string) string {
+	if len(rels) == 0 {
+		rels = DefaultProjectFiles()
+	}
+
+	for _, rel := range rels {
+		p := ProjectPath(root, rel)
+		if _, err := os.Stat(p); err == nil || !os.IsNotExist(err) {
+			return p
+		}
+	}
+
+	return ProjectPath(root, rels[0])
+}
+
 // Load reads the global and project layers, merges them into a frozen ruleset,
 // and returns the store. A missing layer file is not an error; it is treated as
 // an empty layer. A present file that fails to parse or validate fails the load.
@@ -90,7 +124,7 @@ func Load(opts LoadOptions) (*Store, error) {
 		return nil, err
 	}
 
-	project, err := loadLayer(ProjectPath(projectRoot, opts.ProjectFile))
+	project, err := loadLayer(resolveProjectPath(projectRoot, opts.ProjectFiles))
 	if err != nil {
 		return nil, err
 	}

@@ -6,6 +6,7 @@ package mcp
 
 import (
 	"fmt"
+	"strings"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/spf13/cobra"
@@ -17,7 +18,7 @@ import (
 // serverOptions holds the flags for `cg mcp`.
 type serverOptions struct {
 	blindlyAllow  bool
-	projectConfig string
+	projectConfig []string
 }
 
 // NewCommand returns the `cg mcp` cobra subcommand.
@@ -35,8 +36,8 @@ func NewCommand() *cobra.Command {
 	}
 	c.Flags().BoolVar(&opts.blindlyAllow, "blindly-allow", false,
 		"disable the cg_run approval gate for this server process (forces allow-all)")
-	c.Flags().StringVar(&opts.projectConfig, "project-config", "",
-		"project-specific approval rules file, relative to the project root (default "+approve.DefaultProjectFile+")")
+	c.Flags().StringSliceVar(&opts.projectConfig, "project-config", nil,
+		"project-specific approval rules files, relative to the project root, tried in order (first existing wins; default "+strings.Join(approve.DefaultProjectFiles(), ", ")+")")
 	return c
 }
 
@@ -46,7 +47,7 @@ func runServer(cmd *cobra.Command, opts *serverOptions) error {
 		v = "unknown"
 	}
 
-	store, err := approve.Load(approve.LoadOptions{ProjectFile: opts.projectConfig})
+	store, err := approve.Load(approve.LoadOptions{ProjectFiles: opts.projectConfig})
 	if err != nil {
 		return fmt.Errorf("loading approval rules: %w", err)
 	}

@@ -103,6 +103,88 @@ func TestLoadProjectOnly(t *testing.T) {
 	}
 }
 
+func TestLoadProjectFilesFirstExistingWins(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	dir := filepath.Join(root, ".cg")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("creating .cg dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "approve.yaml"), []byte("version: 1\nallow:\n  - prefix: [make]\n"), 0o600); err != nil {
+		t.Fatalf("writing legacy project file: %v", err)
+	}
+
+	// The preferred .cg.yaml is absent, so the legacy path is loaded instead.
+	s, err := Load(LoadOptions{
+		GlobalPath:   filepath.Join(t.TempDir(), "nope.yaml"),
+		ProjectRoot:  root,
+		ProjectFiles: []string{".cg.yaml", ".cg/approve.yaml"},
+	})
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+
+	if !s.Project.Present {
+		t.Errorf("project layer should be present")
+	}
+	if want := filepath.Join(root, ".cg", "approve.yaml"); s.Project.Path != want {
+		t.Errorf("Project.Path = %q, want %q", s.Project.Path, want)
+	}
+}
+
+func TestLoadDefaultFilesFallBackToLegacy(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	dir := filepath.Join(root, ".cg")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("creating .cg dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "approve.yaml"), []byte("version: 1\nallow:\n  - prefix: [make]\n"), 0o600); err != nil {
+		t.Fatalf("writing legacy project file: %v", err)
+	}
+
+	// No ProjectFiles configured, so the default list finds the legacy file when
+	// the preferred .cg.yaml is absent.
+	s, err := Load(LoadOptions{
+		GlobalPath:  filepath.Join(t.TempDir(), "nope.yaml"),
+		ProjectRoot: root,
+	})
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+
+	if !s.Project.Present {
+		t.Errorf("project layer should be present")
+	}
+	if want := filepath.Join(root, ".cg", "approve.yaml"); s.Project.Path != want {
+		t.Errorf("Project.Path = %q, want %q", s.Project.Path, want)
+	}
+}
+
+func TestLoadProjectFilesNoneExistWritesFirst(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	s, err := Load(LoadOptions{
+		GlobalPath:   filepath.Join(t.TempDir(), "nope.yaml"),
+		ProjectRoot:  root,
+		ProjectFiles: []string{".cg.yaml", ".cg/approve.yaml"},
+	})
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+
+	if s.Project.Present {
+		t.Errorf("project layer should be absent when no candidate exists")
+	}
+	// With nothing on disk, the first listed path is the write target.
+	if want := filepath.Join(root, ".cg.yaml"); s.Project.Path != want {
+		t.Errorf("Project.Path = %q, want first listed %q", s.Project.Path, want)
+	}
+}
+
 func TestLoadProjectModeOverridesGlobal(t *testing.T) {
 	t.Parallel()
 
