@@ -133,7 +133,7 @@ func (opts *Options) run(cmd *cobra.Command, args []string) error {
 	}
 
 	if opts.Verbose {
-		if err := writeInfo(fmt.Sprintf("Started %s", escapeArgs(args))); err != nil {
+		if err := writeInfo(fmt.Sprintf("Started %s", EscapeArgs(args))); err != nil {
 			return fmt.Errorf("writing start info: %w", err)
 		}
 	}

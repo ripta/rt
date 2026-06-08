@@ -141,9 +141,9 @@ func TestEscapeArgs(t *testing.T) {
 
 	for _, tt := range escapeArgsTests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := escapeArgs(tt.args)
+			got := EscapeArgs(tt.args)
 			if got != tt.want {
-				t.Errorf("escapeArgs() = %q, want %q", got, tt.want)
+				t.Errorf("EscapeArgs() = %q, want %q", got, tt.want)
 			}
 		})
 	}

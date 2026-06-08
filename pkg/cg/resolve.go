@@ -232,5 +232,5 @@ func formatLsRow(r lsRow) string {
 	}
 
 	dur := formatDuration(time.Duration(r.meta.DurationMs) * time.Millisecond)
-	return fmt.Sprintf("%s\t%s\t%s\t%s", r.id, head, dur, escapeArgs(r.meta.Command))
+	return fmt.Sprintf("%s\t%s\t%s\t%s", r.id, head, dur, EscapeArgs(r.meta.Command))
 }

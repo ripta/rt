@@ -6,9 +6,11 @@ import (
 	"syscall"
 )
 
-// escapeArgs formats a command and its arguments in a shell-readable style.
-// Arguments containing spaces, quotes, or shell metacharacters are quoted.
-func escapeArgs(args []string) string {
+// EscapeArgs formats a command and its arguments in a shell-readable style.
+// Arguments containing spaces, quotes, or shell metacharacters are quoted. The
+// result is the canonical quoted-argv join the approval matcher patterns
+// against; it is built only for display and matching and is never executed.
+func EscapeArgs(args []string) string {
 	escaped := make([]string, len(args))
 	for i, arg := range args {
 		escaped[i] = shellQuote(arg)
