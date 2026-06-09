@@ -228,7 +228,17 @@ run started with `cg -c -- cmd` is visible to the MCP tools and a run
 started by `cg_run` is visible to `cg ls`. MCP is additive; the shell
 subcommands continue to work unchanged.
 
-Register the server with Claude Code by adding a `cg` entry under
+Register the server with Claude Code using its CLI:
+
+```
+claude mcp add cg cg mcp
+```
+
+For agents that support CLI-based registration but use a different command,
+check their docs — the pattern is the same: server name `cg`, command `cg`,
+argument `mcp`.
+
+For MCP hosts that require editing config by hand, add a `cg` entry under
 `mcpServers`:
 
 ```json
