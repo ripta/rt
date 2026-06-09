@@ -49,6 +49,7 @@ type runOutput struct {
 	StderrExcerpt string `json:"stderr_excerpt"`
 	ExcerptFrom   string `json:"excerpt_from,omitempty"`
 	Truncated     bool   `json:"truncated"`
+	StartError    string `json:"start_error,omitempty"`
 }
 
 func registerRun(s *mcpsdk.Server, reg *runRegistry, g *gate) {
@@ -94,6 +95,10 @@ func handleRun(ctx context.Context, reg *runRegistry, g *gate, el elicitor, in r
 
 	run, err := cg.RunCapture(in.Command, in.Cwd, in.Env)
 	if err != nil {
+		var sf *cg.StartFailure
+		if errors.As(err, &sf) {
+			return nil, runOutput{ID: sf.RunID, StartError: err.Error()}, nil
+		}
 		return nil, runOutput{}, fmt.Errorf("starting capture: %w", err)
 	}
 	if reg != nil {

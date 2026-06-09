@@ -67,6 +67,10 @@ func handleCancel(ctx context.Context, reg *runRegistry, in cancelInput) (*mcpsd
 		// Finished run: the thing you wanted dead is already dead.
 		out.Finished = true
 		return nil, out, nil
+	case errors.Is(lerr, cg.ErrFailedRun):
+		// Child never started; nothing to cancel.
+		out.Finished = true
+		return nil, out, nil
 	case !errors.Is(lerr, cg.ErrIncompleteRun):
 		return nil, cancelOutput{}, lerr
 	}

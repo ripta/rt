@@ -1,6 +1,7 @@
 package cg
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -84,11 +85,18 @@ func TestRunCaptureStartError(t *testing.T) {
 		t.Fatalf("RunCapture: expected error, got nil")
 	}
 
-	entries, _ := os.ReadDir(CaptureRoot())
-	for _, e := range entries {
-		if e.IsDir() && IsValidRunID(e.Name()) {
-			t.Errorf("leftover capture dir after start failure: %s", e.Name())
-		}
+	var sf *StartFailure
+	if !errors.As(err, &sf) {
+		t.Fatalf("expected *StartFailure, got %T: %v", err, err)
+	}
+
+	// The capture dir is kept so debug.json can be inspected.
+	dbg, dbgErr := ReadStartDebug(sf.Dir)
+	if dbgErr != nil {
+		t.Fatalf("ReadStartDebug: %v", dbgErr)
+	}
+	if dbg.StartError == "" {
+		t.Error("StartDebug.StartError is empty")
 	}
 }
 

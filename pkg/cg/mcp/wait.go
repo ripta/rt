@@ -49,6 +49,8 @@ func handleWait(ctx context.Context, reg *runRegistry, in waitInput) (*mcpsdk.Ca
 	case err == nil:
 		out, ferr := finishedWaitOutput(in.ID, dir)
 		return nil, out, ferr
+	case errors.Is(err, cg.ErrFailedRun):
+		return nil, waitOutput{ID: in.ID, Finished: true}, nil
 	case !errors.Is(err, cg.ErrIncompleteRun):
 		return nil, waitOutput{}, err
 	}
@@ -102,6 +104,9 @@ func awaitFinish(ctx context.Context, reg *runRegistry, id string, timeout time.
 			}
 			if errors.Is(e, cg.ErrUnknownRunID) {
 				return false, fmt.Errorf("unknown run id: %s", id)
+			}
+			if errors.Is(e, cg.ErrFailedRun) {
+				return true, nil
 			}
 			if !errors.Is(e, cg.ErrIncompleteRun) {
 				return false, e

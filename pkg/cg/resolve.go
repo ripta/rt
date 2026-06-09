@@ -18,8 +18,13 @@ import (
 var ErrUnknownRunID = errors.New("unknown run id")
 
 // ErrIncompleteRun is returned by LookupRunDir when the run directory exists
-// but meta.json is missing, i.e. the capture started but has not finished.
+// but neither meta.json nor debug.json is present, i.e. the capture is still
+// in flight.
 var ErrIncompleteRun = errors.New("incomplete run")
+
+// ErrFailedRun is returned by LookupRunDir when the run directory has a
+// debug.json but no meta.json, indicating the child process failed to start.
+var ErrFailedRun = errors.New("failed run")
 
 // IsValidRunID reports whether id has the right shape for a capture run ID:
 // the Crockford base-32 alphabet, exactly runIDLen characters.
@@ -57,10 +62,13 @@ func LookupRunDir(id string) (string, error) {
 	}
 
 	if _, err := os.Stat(filepath.Join(dir, MetaFilename)); err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			return dir, ErrIncompleteRun
+		if !errors.Is(err, fs.ErrNotExist) {
+			return dir, fmt.Errorf("stat meta.json: %w", err)
 		}
-		return dir, fmt.Errorf("stat meta.json: %w", err)
+		if _, err := os.Stat(filepath.Join(dir, DebugFilename)); err == nil {
+			return dir, ErrFailedRun
+		}
+		return dir, ErrIncompleteRun
 	}
 
 	return dir, nil
@@ -76,6 +84,10 @@ func resolveRunDir(cmd *cobra.Command, id string) (string, error) {
 	}
 	if errors.Is(err, ErrUnknownRunID) {
 		fmt.Fprintf(cmd.ErrOrStderr(), "unknown run id: %s\n", id)
+		return "", &ExitError{Code: 1}
+	}
+	if errors.Is(err, ErrFailedRun) {
+		fmt.Fprintf(cmd.ErrOrStderr(), "failed run: %s (start failed; see debug.json)\n", id)
 		return "", &ExitError{Code: 1}
 	}
 	if errors.Is(err, ErrIncompleteRun) {
@@ -173,6 +185,7 @@ type lsRow struct {
 	id    string
 	mtime time.Time
 	meta  *Meta
+	debug *StartDebug
 }
 
 func (opts *lsOptions) run(cmd *cobra.Command, args []string) error {
@@ -200,8 +213,11 @@ func (opts *lsOptions) run(cmd *cobra.Command, args []string) error {
 			continue
 		}
 		row := lsRow{id: name, mtime: info.ModTime()}
-		if m, err := ReadMeta(filepath.Join(root, name)); err == nil {
+		dir := filepath.Join(root, name)
+		if m, err := ReadMeta(dir); err == nil {
 			row.meta = m
+		} else if d, err := ReadStartDebug(dir); err == nil {
+			row.debug = d
 		}
 		rows = append(rows, row)
 	}
@@ -222,6 +238,9 @@ func (opts *lsOptions) run(cmd *cobra.Command, args []string) error {
 }
 
 func formatLsRow(r lsRow) string {
+	if r.debug != nil {
+		return fmt.Sprintf("%s\tstart_failed\t?\t%s", r.id, EscapeArgs(r.debug.Command))
+	}
 	if r.meta == nil {
 		return fmt.Sprintf("%s\texit=?\t?\t?", r.id)
 	}

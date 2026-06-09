@@ -162,11 +162,17 @@ func TestHandleRunEmptyCommand(t *testing.T) {
 func TestHandleRunStartError(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 
-	_, _, err := handleRun(context.Background(), nil, nil, nil, runInput{
+	_, out, err := handleRun(context.Background(), nil, nil, nil, runInput{
 		Command: []string{"this-binary-does-not-exist-zzzz"},
 	})
-	if err == nil {
-		t.Fatalf("expected error for missing binary, got nil")
+	if err != nil {
+		t.Fatalf("handleRun: unexpected MCP error: %v", err)
+	}
+	if out.ID == "" {
+		t.Error("expected non-empty ID for failed run")
+	}
+	if out.StartError == "" {
+		t.Error("expected non-empty StartError for missing binary")
 	}
 }
 

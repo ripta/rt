@@ -20,6 +20,18 @@ type CaptureRun struct {
 	Done <-chan struct{}
 }
 
+// StartFailure is returned by RunCapture when the child process cannot be
+// started. The run directory is preserved on disk with a debug.json for
+// post-mortem inspection via cg_meta and the other cg tools.
+type StartFailure struct {
+	RunID string
+	Dir   string
+	Err   error
+}
+
+func (e *StartFailure) Error() string { return e.Err.Error() }
+func (e *StartFailure) Unwrap() error { return e.Err }
+
 // RunCapture starts args[0] with args[1:] under capture. stdout and stderr are
 // written to $TMPDIR/cg/<ID>/{stdout,stderr}. cwd is passed through; empty
 // inherits the caller's working directory. env entries are appended to
@@ -53,8 +65,8 @@ func RunCapture(args []string, cwd string, env map[string]string) (*CaptureRun, 
 	start := time.Now()
 	if err := child.Start(); err != nil {
 		_ = cap.Close()
-		_ = os.RemoveAll(cap.Dir)
-		return nil, fmt.Errorf("starting child: %w", err)
+		_ = WriteStartDebug(cap.Dir, buildStartDebug(args, cwd, env, child.Path, err))
+		return nil, &StartFailure{RunID: cap.ID, Dir: cap.Dir, Err: fmt.Errorf("starting child: %w", err)}
 	}
 
 	_ = WritePidFile(cap.Dir, child.Process.Pid)
@@ -102,6 +114,28 @@ func (lc *lineCountingWriter) Write(p []byte) (int, error) {
 		}
 	}
 	return n, err
+}
+
+// buildStartDebug assembles the diagnostic payload written to debug.json when
+// child.Start fails. resolvedPath is child.Path after exec.Command — it holds
+// the LookPath result when lookup succeeded, or the raw name when it did not.
+func buildStartDebug(args []string, cwd string, env map[string]string, resolvedPath string, startErr error) *StartDebug {
+	d := &StartDebug{
+		Command:      args,
+		ResolvedPath: resolvedPath,
+		StartError:   startErr.Error(),
+	}
+	if cwd != "" {
+		d.Cwd = cwd
+	} else if wd, err := os.Getwd(); err == nil {
+		d.Cwd = wd
+	}
+	if v, ok := env["PATH"]; ok {
+		d.Path = v
+	} else {
+		d.Path = os.Getenv("PATH")
+	}
+	return d
 }
 
 // mergeEnv returns base with overrides applied: matching keys are replaced in

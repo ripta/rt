@@ -97,7 +97,7 @@ func handleGrep(_ context.Context, _ *mcpsdk.CallToolRequest, in grepInput) (*mc
 	}
 
 	dir, err := cg.LookupRunDir(in.ID)
-	if err != nil && !errors.Is(err, cg.ErrIncompleteRun) {
+	if err != nil && !errors.Is(err, cg.ErrIncompleteRun) && !errors.Is(err, cg.ErrFailedRun) {
 		return nil, grepOutput{}, mapLookupError(in.ID, err)
 	}
 
