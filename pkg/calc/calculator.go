@@ -93,6 +93,10 @@ func (c *Calculator) processLine(expr string, mode ExecutionMode, lineNum int) e
 		return err
 	}
 
+	if mode == ModeREPL {
+		c.env.SetConstant(fmt.Sprintf("$%d", c.count), res)
+	}
+
 	// ModeLoad adds to history after successful evaluation
 	if mode == ModeLoad {
 		c.history = append(c.history, expr)

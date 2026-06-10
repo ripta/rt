@@ -5,6 +5,7 @@ import (
 	"io"
 	"math/big"
 	"os"
+	"strings"
 
 	"github.com/ripta/reals/pkg/constructive"
 	"github.com/ripta/reals/pkg/rational"
@@ -86,6 +87,13 @@ func (e *Env) Set(name string, val *unified.Real) error {
 		mutable: true,
 	}
 	return nil
+}
+
+func (e *Env) SetConstant(name string, val *unified.Real) {
+	e.vars[name] = &binding{
+		value:   val,
+		mutable: false,
+	}
 }
 
 func (e *Env) SetDecimalPlaces(decimalPlaces int) {
@@ -220,6 +228,10 @@ func (n *IdentNode) Eval(env *Env) (*unified.Real, error) {
 
 	if val, ok := env.Get(n.Name.Value); ok {
 		return val, nil
+	}
+
+	if strings.HasPrefix(n.Name.Value, "$") {
+		return nil, fmt.Errorf("%s: no result for line %s", n.Name.Pos, n.Name.Value[1:])
 	}
 
 	return nil, fmt.Errorf("%s: undefined identifier %q", n.Name.Pos, n.Name.Value)

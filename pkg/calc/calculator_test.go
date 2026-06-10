@@ -1,7 +1,13 @@
 package calc
 
 import (
+	"fmt"
+	"math"
+	"strings"
 	"testing"
+
+	"github.com/ripta/reals/pkg/constructive"
+	"github.com/ripta/reals/pkg/unified"
 )
 
 type handleMetaCommandTest struct {
@@ -302,4 +308,122 @@ func TestToggleInvalidUsage(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestREPLStoresResultHistory(t *testing.T) {
+	c := &Calculator{DecimalPlaces: 30}
+
+	if err := c.processLine("2 + 3", ModeREPL, 0); err != nil {
+		t.Fatalf("processLine: %v", err)
+	}
+
+	res, err := c.Evaluate("$0")
+	if err != nil {
+		t.Fatalf("Evaluate($0): %v", err)
+	}
+
+	got := approxFloat(t, res)
+	if diff := math.Abs(got - 5); diff > 1e-9 {
+		t.Fatalf("$0 = %v, want 5", got)
+	}
+}
+
+func TestREPLCrossReference(t *testing.T) {
+	c := &Calculator{DecimalPlaces: 30}
+
+	if err := c.processLine("5", ModeREPL, 0); err != nil {
+		t.Fatalf("processLine(5): %v", err)
+	}
+	if err := c.processLine("$0 * 2", ModeREPL, 0); err != nil {
+		t.Fatalf("processLine($0 * 2): %v", err)
+	}
+
+	res, err := c.Evaluate("$1")
+	if err != nil {
+		t.Fatalf("Evaluate($1): %v", err)
+	}
+
+	got := approxFloat(t, res)
+	if diff := math.Abs(got - 10); diff > 1e-9 {
+		t.Fatalf("$1 = %v, want 10", got)
+	}
+}
+
+func TestSTDINDoesNotStoreHistory(t *testing.T) {
+	c := &Calculator{DecimalPlaces: 30}
+
+	if err := c.processLine("42", ModeSTDIN, 0); err != nil {
+		t.Fatalf("processLine: %v", err)
+	}
+
+	_, err := c.Evaluate("$0")
+	if err == nil {
+		t.Fatalf("expected error for $0 in STDIN mode")
+	}
+	if !strings.Contains(err.Error(), "no result for line 0") {
+		t.Fatalf("error mismatch: got %v, want substring %q", err, "no result for line 0")
+	}
+}
+
+func TestREPLResultHistoryImmutable(t *testing.T) {
+	c := &Calculator{DecimalPlaces: 30}
+
+	if err := c.processLine("7", ModeREPL, 0); err != nil {
+		t.Fatalf("processLine(7): %v", err)
+	}
+
+	err := c.processLine("$0 = 99", ModeREPL, 0)
+	if err == nil {
+		t.Fatalf("expected error when assigning to $0")
+	}
+	if !strings.Contains(err.Error(), "cannot assign to constant") {
+		t.Fatalf("error mismatch: got %v, want substring %q", err, "cannot assign to constant")
+	}
+}
+
+func TestREPLResultHistorySurvivesErrors(t *testing.T) {
+	c := &Calculator{DecimalPlaces: 30}
+
+	if err := c.processLine("10", ModeREPL, 0); err != nil {
+		t.Fatalf("processLine(10): %v", err)
+	}
+
+	if err := c.processLine("1/0", ModeREPL, 0); err == nil {
+		t.Fatalf("expected division by zero error")
+	}
+
+	if err := c.processLine("20", ModeREPL, 0); err != nil {
+		t.Fatalf("processLine(20): %v", err)
+	}
+
+	res, err := c.Evaluate("$0")
+	if err != nil {
+		t.Fatalf("Evaluate($0): %v", err)
+	}
+	if got := approxFloat(t, res); math.Abs(got-10) > 1e-9 {
+		t.Fatalf("$0 = %v, want 10", got)
+	}
+
+	if _, err := c.Evaluate("$1"); err == nil {
+		t.Fatalf("expected error for $1 after failed line")
+	} else if !strings.Contains(err.Error(), "no result for line 1") {
+		t.Fatalf("error mismatch: got %v, want substring %q", err, "no result for line 1")
+	}
+
+	res, err = c.Evaluate("$2")
+	if err != nil {
+		t.Fatalf("Evaluate($2): %v", err)
+	}
+	if got := approxFloat(t, res); math.Abs(got-20) > 1e-9 {
+		t.Fatalf("$2 = %v, want 20", got)
+	}
+}
+
+func approxFloat(t *testing.T, res *unified.Real) float64 {
+	t.Helper()
+	cons := res.Constructive()
+	text := constructive.Text(cons, 30, 10)
+	var f float64
+	fmt.Sscanf(text, "%f", &f)
+	return f
 }
