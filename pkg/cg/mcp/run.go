@@ -70,6 +70,8 @@ func handleRun(ctx context.Context, reg *runRegistry, g *gate, el elicitor, in r
 		return nil, runOutput{}, fmt.Errorf("command must contain at least one element")
 	}
 
+	resolved, _ := cg.ResolveCommand(in.Command, in.Cwd)
+
 	if err := g.check(ctx, in, el); err != nil {
 		return nil, runOutput{}, err
 	}
@@ -93,7 +95,7 @@ func handleRun(ctx context.Context, reg *runRegistry, g *gate, el elicitor, in r
 		wait = *in.Wait
 	}
 
-	run, err := cg.RunCapture(in.Command, in.Cwd, in.Env)
+	run, err := cg.RunCapture(in.Command, resolved, in.Cwd, in.Env)
 	if err != nil {
 		var sf *cg.StartFailure
 		if errors.As(err, &sf) {
