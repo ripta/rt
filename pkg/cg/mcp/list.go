@@ -27,7 +27,7 @@ const (
 // listInput is the argument shape for `cg_list`.
 type listInput struct {
 	Limit int    `json:"limit,omitempty" jsonschema:"maximum number of runs to return; default 20, max 1000"`
-	State string `json:"state,omitempty" jsonschema:"which runs to surface: all|finished|running; default finished"`
+	State string `json:"state,omitempty" jsonschema:"which runs to surface: all|finished|running|failed; default finished"`
 }
 
 // listOutput is the result shape for `cg_list`.
@@ -38,7 +38,7 @@ type listOutput struct {
 // listRun is a single row in the cg_list response. Only `id` and `state` are
 // guaranteed; the meta-derived fields are populated for finished runs only.
 // In-flight rows may carry `started_at` synthesized from the run dir's mtime
-// when filesystem stat succeeds.
+// when filesystem stat succeeds. Failed rows carry `start_error` and `command`.
 type listRun struct {
 	ID          string     `json:"id"`
 	State       string     `json:"state"`
@@ -50,12 +50,13 @@ type listRun struct {
 	Signal      *int       `json:"signal,omitempty"`
 	StdoutLines *int64     `json:"stdout_lines,omitempty"`
 	StderrLines *int64     `json:"stderr_lines,omitempty"`
+	StartError  string     `json:"start_error,omitempty"`
 }
 
 func registerList(s *mcpsdk.Server) {
 	mcpsdk.AddTool(s, &mcpsdk.Tool{
 		Name:        "cg_list",
-		Description: "List recent capture runs, most-recent-first by directory mtime. The `state` input filters to finished runs (the default), in-flight runs, or all runs. In-flight rows are sparse: id, state, and started_at synthesized from the run dir's mtime.",
+		Description: "List recent capture runs, most-recent-first by directory mtime. The `state` input filters to finished (default), running, failed, or all runs. Failed rows include state: \"failed\" and start_error. Running rows are sparse: id, state, and started_at from the run dir's mtime.",
 	}, handleList)
 }
 
@@ -73,9 +74,9 @@ func handleList(_ context.Context, _ *mcpsdk.CallToolRequest, in listInput) (*mc
 		state = defaultListState
 	}
 	switch state {
-	case listStateAll, stateFinished, stateRunning:
+	case listStateAll, stateFinished, stateRunning, stateFailed:
 	default:
-		return nil, listOutput{}, fmt.Errorf("invalid state %q: want all|finished|running", in.State)
+		return nil, listOutput{}, fmt.Errorf("invalid state %q: want all|finished|running|failed", in.State)
 	}
 
 	root := cg.CaptureRoot()
@@ -106,7 +107,26 @@ func handleList(_ context.Context, _ *mcpsdk.CallToolRequest, in listInput) (*mc
 
 		meta, err := cg.ReadMeta(dir)
 		if err != nil {
-			if state == stateFinished {
+			// No meta.json: distinguish a failed run (has debug.json) from one
+			// still in flight (neither file present yet).
+			if dbg, dbgErr := cg.ReadStartDebug(dir); dbgErr == nil {
+				if state == stateRunning || state == stateFinished {
+					continue
+				}
+				started := mtime
+				rows = append(rows, row{
+					mtime: mtime,
+					run: listRun{
+						ID:         name,
+						State:      stateFailed,
+						Command:    dbg.Command,
+						StartedAt:  &started,
+						StartError: dbg.StartError,
+					},
+				})
+				continue
+			}
+			if state == stateFinished || state == stateFailed {
 				continue
 			}
 			started := mtime
@@ -121,7 +141,7 @@ func handleList(_ context.Context, _ *mcpsdk.CallToolRequest, in listInput) (*mc
 			continue
 		}
 
-		if state == stateRunning {
+		if state == stateRunning || state == stateFailed {
 			continue
 		}
 

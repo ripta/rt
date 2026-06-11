@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -33,18 +34,24 @@ var multiVerbTools = map[string]struct{}{
 	"git":     {},
 	"cargo":   {},
 	"kubectl": {},
+	"make":    {},
 }
 
 // SuggestPrefix derives the prefix rule pre-filled into the approval prompt:
-// argv[0], extended to argv[0..1] when the program is a known multi-verb tool
-// and a subcommand is present. argv[0] is kept as written so the suggestion
-// reflects what ran; the user can edit it before saving.
+// argv[0], extended to argv[0..1] when the program is a known multi-verb tool,
+// a second argument is present, and that argument is not a flag. Flag arguments
+// are dropped to avoid rules like [make, -j8] or [git, --no-pager] that match
+// only on incidental invocation details rather than the actual operation.
+// argv[0] is kept as written so the suggestion reflects what ran; the user can
+// edit it before saving.
 func SuggestPrefix(argv []string) []string {
 	if len(argv) == 0 {
 		return nil
 	}
 	if _, ok := multiVerbTools[filepath.Base(argv[0])]; ok && len(argv) >= 2 {
-		return []string{argv[0], argv[1]}
+		if !strings.HasPrefix(argv[1], "-") {
+			return []string{argv[0], argv[1]}
+		}
 	}
 
 	return []string{argv[0]}

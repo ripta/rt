@@ -95,7 +95,7 @@ func handleStream(fileName string, in streamInput) (*mcpsdk.CallToolResult, stre
 	}
 
 	dir, err := cg.LookupRunDir(in.ID)
-	if err != nil && !errors.Is(err, cg.ErrIncompleteRun) {
+	if err != nil && !errors.Is(err, cg.ErrIncompleteRun) && !errors.Is(err, cg.ErrFailedRun) {
 		return nil, streamOutput{}, mapLookupError(in.ID, err)
 	}
 

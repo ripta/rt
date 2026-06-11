@@ -20,17 +20,40 @@ type CaptureRun struct {
 	Done <-chan struct{}
 }
 
+// StartFailure is returned by RunCapture when the child process cannot be
+// started. The run directory is preserved on disk with a debug.json for
+// post-mortem inspection via cg_meta and the other cg tools.
+type StartFailure struct {
+	RunID string
+	Dir   string
+	Err   error
+}
+
+func (e *StartFailure) Error() string { return e.Err.Error() }
+func (e *StartFailure) Unwrap() error { return e.Err }
+
 // RunCapture starts args[0] with args[1:] under capture. stdout and stderr are
 // written to $TMPDIR/cg/<ID>/{stdout,stderr}. cwd is passed through; empty
 // inherits the caller's working directory. env entries are appended to
 // os.Environ, so MCP-supplied keys override the parent's.
 //
+// resolved is the executable identity computed for args; when nil, RunCapture
+// resolves it itself. The child execs resolved.ExecPath, the canonical path,
+// while keeping args[0] as the child's argv[0], so a fresh PATH lookup at exec
+// time cannot select a different file than the one the approval gate matched. An
+// unresolved command falls back to args[0] so exec still surfaces the start
+// failure.
+//
 // The child runs in its own process group, so cancelling a caller's context
 // does not kill it. A background goroutine waits for the child, writes
 // meta.json, and closes Done.
-func RunCapture(args []string, cwd string, env map[string]string) (*CaptureRun, error) {
+func RunCapture(args []string, resolved *Resolution, cwd string, env map[string]string) (*CaptureRun, error) {
 	if len(args) == 0 {
 		return nil, fmt.Errorf("command is empty")
+	}
+
+	if resolved == nil {
+		resolved, _ = ResolveCommand(args, cwd)
 	}
 
 	cap, err := NewCapture()
@@ -41,7 +64,8 @@ func RunCapture(args []string, cwd string, env map[string]string) (*CaptureRun, 
 	outCounter := &lineCountingWriter{w: cap.Stdout}
 	errCounter := &lineCountingWriter{w: cap.Stderr}
 
-	child := exec.Command(args[0], args[1:]...)
+	child := exec.Command(resolved.ExecPath(), args[1:]...)
+	child.Args[0] = args[0]
 	child.Dir = cwd
 	child.Stdout = outCounter
 	child.Stderr = errCounter
@@ -53,8 +77,8 @@ func RunCapture(args []string, cwd string, env map[string]string) (*CaptureRun, 
 	start := time.Now()
 	if err := child.Start(); err != nil {
 		_ = cap.Close()
-		_ = os.RemoveAll(cap.Dir)
-		return nil, fmt.Errorf("starting child: %w", err)
+		_ = WriteStartDebug(cap.Dir, buildStartDebug(args, cwd, env, resolved, err))
+		return nil, &StartFailure{RunID: cap.ID, Dir: cap.Dir, Err: fmt.Errorf("starting child: %w", err)}
 	}
 
 	_ = WritePidFile(cap.Dir, child.Process.Pid)
@@ -102,6 +126,32 @@ func (lc *lineCountingWriter) Write(p []byte) (int, error) {
 		}
 	}
 	return n, err
+}
+
+// buildStartDebug assembles the diagnostic payload written to debug.json when
+// child.Start fails. resolved carries the absolute resolved path and the
+// symlink-canonical path when they could be determined, so a post-mortem shows
+// both the original command and the file cg tried to exec.
+func buildStartDebug(args []string, cwd string, env map[string]string, resolved *Resolution, startErr error) *StartDebug {
+	d := &StartDebug{
+		Command:    args,
+		StartError: startErr.Error(),
+	}
+	if resolved != nil {
+		d.ResolvedPath = resolved.Resolved
+		d.CanonicalPath = resolved.Canonical
+	}
+	if cwd != "" {
+		d.Cwd = cwd
+	} else if wd, err := os.Getwd(); err == nil {
+		d.Cwd = wd
+	}
+	if v, ok := env["PATH"]; ok {
+		d.Path = v
+	} else {
+		d.Path = os.Getenv("PATH")
+	}
+	return d
 }
 
 // mergeEnv returns base with overrides applied: matching keys are replaced in

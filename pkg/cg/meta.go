@@ -12,8 +12,7 @@ import (
 // machine-readable run summary.
 const MetaFilename = "meta.json"
 
-// Meta is the per-run metadata persisted alongside the captured stdout and
-// stderr. The schema matches RT-006.
+// Meta is the per-run metadata persisted alongside the captured stdout and stderr.
 type Meta struct {
 	ID          string    `json:"id"`
 	Command     []string  `json:"command"`

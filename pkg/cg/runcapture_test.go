@@ -1,6 +1,7 @@
 package cg
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -20,7 +21,7 @@ func waitDone(t *testing.T, run *CaptureRun, d time.Duration) {
 func TestRunCaptureEcho(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 
-	run, err := RunCapture([]string{"echo", "hello"}, "", nil)
+	run, err := RunCapture([]string{"echo", "hello"}, nil, "", nil)
 	if err != nil {
 		t.Fatalf("RunCapture: %v", err)
 	}
@@ -61,7 +62,7 @@ func TestRunCaptureEcho(t *testing.T) {
 func TestRunCaptureNonZeroExit(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 
-	run, err := RunCapture([]string{"sh", "-c", "exit 3"}, "", nil)
+	run, err := RunCapture([]string{"sh", "-c", "exit 3"}, nil, "", nil)
 	if err != nil {
 		t.Fatalf("RunCapture: %v", err)
 	}
@@ -79,21 +80,28 @@ func TestRunCaptureNonZeroExit(t *testing.T) {
 func TestRunCaptureStartError(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 
-	_, err := RunCapture([]string{"this-binary-does-not-exist-zzzz"}, "", nil)
+	_, err := RunCapture([]string{"this-binary-does-not-exist-zzzz"}, nil, "", nil)
 	if err == nil {
 		t.Fatalf("RunCapture: expected error, got nil")
 	}
 
-	entries, _ := os.ReadDir(CaptureRoot())
-	for _, e := range entries {
-		if e.IsDir() && IsValidRunID(e.Name()) {
-			t.Errorf("leftover capture dir after start failure: %s", e.Name())
-		}
+	var sf *StartFailure
+	if !errors.As(err, &sf) {
+		t.Fatalf("expected *StartFailure, got %T: %v", err, err)
+	}
+
+	// The capture dir is kept so debug.json can be inspected.
+	dbg, dbgErr := ReadStartDebug(sf.Dir)
+	if dbgErr != nil {
+		t.Fatalf("ReadStartDebug: %v", dbgErr)
+	}
+	if dbg.StartError == "" {
+		t.Error("StartDebug.StartError is empty")
 	}
 }
 
 func TestRunCaptureEmptyCommand(t *testing.T) {
-	if _, err := RunCapture(nil, "", nil); err == nil {
+	if _, err := RunCapture(nil, nil, "", nil); err == nil {
 		t.Fatalf("expected error for empty command")
 	}
 }
@@ -101,7 +109,7 @@ func TestRunCaptureEmptyCommand(t *testing.T) {
 func TestRunCaptureEnv(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 
-	run, err := RunCapture([]string{"sh", "-c", "echo $CG_TEST_KEY"}, "", map[string]string{"CG_TEST_KEY": "from-mcp"})
+	run, err := RunCapture([]string{"sh", "-c", "echo $CG_TEST_KEY"}, nil, "", map[string]string{"CG_TEST_KEY": "from-mcp"})
 	if err != nil {
 		t.Fatalf("RunCapture: %v", err)
 	}
@@ -120,7 +128,7 @@ func TestRunCaptureEnvOverride(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 	t.Setenv("CG_OVERRIDE_ME", "parent-value")
 
-	run, err := RunCapture([]string{"sh", "-c", "echo $CG_OVERRIDE_ME"}, "", map[string]string{"CG_OVERRIDE_ME": "child-value"})
+	run, err := RunCapture([]string{"sh", "-c", "echo $CG_OVERRIDE_ME"}, nil, "", map[string]string{"CG_OVERRIDE_ME": "child-value"})
 	if err != nil {
 		t.Fatalf("RunCapture: %v", err)
 	}
@@ -139,7 +147,7 @@ func TestRunCaptureCwd(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 
 	dir := t.TempDir()
-	run, err := RunCapture([]string{"pwd"}, dir, nil)
+	run, err := RunCapture([]string{"pwd"}, nil, dir, nil)
 	if err != nil {
 		t.Fatalf("RunCapture: %v", err)
 	}
@@ -166,7 +174,7 @@ func TestRunCaptureCwd(t *testing.T) {
 func TestRunCaptureStderr(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 
-	run, err := RunCapture([]string{"sh", "-c", "echo only-err >&2"}, "", nil)
+	run, err := RunCapture([]string{"sh", "-c", "echo only-err >&2"}, nil, "", nil)
 	if err != nil {
 		t.Fatalf("RunCapture: %v", err)
 	}

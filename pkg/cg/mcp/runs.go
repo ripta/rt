@@ -6,6 +6,7 @@ import "sync"
 const (
 	stateRunning  = "running"
 	stateFinished = "finished"
+	stateFailed   = "failed"
 )
 
 // runRegistry tracks the Done channels of capture runs that this MCP server

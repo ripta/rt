@@ -32,17 +32,19 @@ type metaFields struct {
 }
 
 // metaOutput is the result shape for `cg_meta`. State is always populated;
-// the embedded meta fields are populated only when the run has finished.
+// the embedded meta fields are populated only when the run has finished;
+// Debug is populated only when the run failed to start.
 type metaOutput struct {
-	ID    string `json:"id"`
-	State string `json:"state"`
+	ID    string          `json:"id"`
+	State string          `json:"state"`
+	Debug *cg.StartDebug  `json:"debug,omitempty"`
 	metaFields
 }
 
 func registerMeta(s *mcpsdk.Server) {
 	mcpsdk.AddTool(s, &mcpsdk.Tool{
 		Name:        "cg_meta",
-		Description: "Return the run state and meta.json fields for a capture run. In-flight runs return {id, state: \"running\"}; finished runs return state: \"finished\" plus all meta fields. Unknown ID is a tool error.",
+		Description: "Return the run state and meta.json fields for a capture run. Finished runs return state: \"finished\" with all meta fields. In-flight runs return state: \"running\". Failed-to-start runs return state: \"failed\" with a debug field. Unknown ID is a tool error.",
 	}, handleMeta)
 }
 
@@ -53,6 +55,9 @@ func handleMeta(_ context.Context, _ *mcpsdk.CallToolRequest, in metaInput) (*mc
 		return nil, metaOutput{}, fmt.Errorf("unknown run id: %s", in.ID)
 	case errors.Is(err, cg.ErrIncompleteRun):
 		return nil, metaOutput{ID: in.ID, State: stateRunning}, nil
+	case errors.Is(err, cg.ErrFailedRun):
+		dbg, _ := cg.ReadStartDebug(dir)
+		return nil, metaOutput{ID: in.ID, State: stateFailed, Debug: dbg}, nil
 	case err != nil:
 		return nil, metaOutput{}, err
 	}
@@ -79,6 +84,8 @@ func mapLookupError(id string, err error) error {
 		return fmt.Errorf("unknown run id: %s", id)
 	case errors.Is(err, cg.ErrIncompleteRun):
 		return fmt.Errorf("incomplete run: %s (missing meta.json)", id)
+	case errors.Is(err, cg.ErrFailedRun):
+		return fmt.Errorf("failed run: %s (start failed; use cg_meta for debug info)", id)
 	default:
 		return err
 	}

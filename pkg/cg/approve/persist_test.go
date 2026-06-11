@@ -16,9 +16,15 @@ type suggestPrefixTest struct {
 
 var suggestPrefixTests = []suggestPrefixTest{
 	{Name: "single program", Argv: []string{"make"}, Want: []string{"make"}},
+	{Name: "multi-verb make", Argv: []string{"make", "test"}, Want: []string{"make", "test"}},
+	{Name: "make multiple targets", Argv: []string{"make", "foo", "bar"}, Want: []string{"make", "foo"}},
+	{Name: "make flag before target", Argv: []string{"make", "-j8", "test"}, Want: []string{"make"}},
+	{Name: "make -C flag", Argv: []string{"make", "-C", "/path", "foo"}, Want: []string{"make"}},
 	{Name: "program with arg", Argv: []string{"echo", "hi"}, Want: []string{"echo"}},
 	{Name: "multi-verb go", Argv: []string{"go", "test", "./..."}, Want: []string{"go", "test"}},
+	{Name: "go flag before subcommand", Argv: []string{"go", "-v", "test"}, Want: []string{"go"}},
 	{Name: "multi-verb git", Argv: []string{"git", "status"}, Want: []string{"git", "status"}},
+	{Name: "git flag before subcommand", Argv: []string{"git", "--no-pager", "log"}, Want: []string{"git"}},
 	{Name: "multi-verb path basename", Argv: []string{"/usr/bin/kubectl", "get", "pods"}, Want: []string{"/usr/bin/kubectl", "get"}},
 	{Name: "multi-verb no subcommand", Argv: []string{"go"}, Want: []string{"go"}},
 	{Name: "empty", Argv: nil, Want: nil},

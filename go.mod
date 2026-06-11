@@ -15,7 +15,7 @@ require (
 	github.com/mr-tron/base58 v1.3.0
 	github.com/pmezard/go-difflib v1.0.0
 	github.com/r3labs/diff/v3 v3.0.2
-	github.com/ripta/hypercmd v0.5.0
+	github.com/ripta/hypercmd v0.6.0
 	github.com/ripta/reals v0.0.0-20251220032726-c99f163d5c5c
 	github.com/ripta/unihan v0.0.0-20250404091138-c307c698a880
 	github.com/rogpeppe/go-internal v1.15.0
@@ -59,11 +59,11 @@ require (
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
 	golang.org/x/exp v0.0.0-20260603202125-055de637280b // indirect
-	golang.org/x/mod v0.36.0 // indirect
+	golang.org/x/mod v0.37.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
 	golang.org/x/sync v0.21.0 // indirect
 	golang.org/x/sys v0.46.0 // indirect
 	golang.org/x/tools v0.45.0 // indirect
-	google.golang.org/genproto/googleapis/api v0.0.0-20260526163538-3dc84a4a5aaa // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20260526163538-3dc84a4a5aaa // indirect
+	google.golang.org/genproto/googleapis/api v0.0.0-20260608224507-4308a22a1bab // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20260608224507-4308a22a1bab // indirect
 )
