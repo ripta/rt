@@ -19,7 +19,7 @@ stdout '/cg/ABCDEF/stderr'
 
 # cg ls renders the single seeded run
 exec cg ls
-stdout '^ABCDEF\texit=0\t12ms\techo hi$'
+stdout '^ABCDEF  exit=0  12ms  echo hi$'
 
 # Unknown ID exits 1 with a single-line stderr message
 ! exec cg out NOSUCH

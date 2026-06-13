@@ -169,6 +169,7 @@ func (opts *Options) run(cmd *cobra.Command, args []string) error {
 		defer cap.Close()
 
 		_ = WritePidFile(cap.Dir, child.Process.Pid)
+		_ = WriteStartInfo(cap.Dir, &StartInfo{Command: args, StartedAt: start.UTC()})
 
 		if opts.Verbose {
 			if err := writeInfo(fmt.Sprintf("capture.stdout=%s", cap.Stdout.Name())); err != nil {
@@ -285,6 +286,7 @@ func (opts *Options) run(cmd *cobra.Command, args []string) error {
 			_ = writeInfo(fmt.Sprintf("meta.json write failed: %s", err))
 		}
 		RemovePidFile(cap.Dir)
+		RemoveStartInfo(cap.Dir)
 	}
 
 	if code != 0 {

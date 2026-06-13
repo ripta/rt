@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"text/tabwriter"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -186,6 +187,7 @@ type lsRow struct {
 	mtime time.Time
 	meta  *Meta
 	debug *StartDebug
+	start *StartInfo
 }
 
 func (opts *lsOptions) run(cmd *cobra.Command, args []string) error {
@@ -218,6 +220,8 @@ func (opts *lsOptions) run(cmd *cobra.Command, args []string) error {
 			row.meta = m
 		} else if d, err := ReadStartDebug(dir); err == nil {
 			row.debug = d
+		} else if s, err := ReadStartInfo(dir); err == nil {
+			row.start = s
 		}
 		rows = append(rows, row)
 	}
@@ -230,26 +234,34 @@ func (opts *lsOptions) run(cmd *cobra.Command, args []string) error {
 		rows = rows[:opts.N]
 	}
 
-	out := cmd.OutOrStdout()
+	tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
+	now := time.Now()
 	for _, r := range rows {
-		fmt.Fprintln(out, formatLsRow(r))
+		fmt.Fprintln(tw, formatLsRow(r, now))
 	}
-	return nil
+	return tw.Flush()
 }
 
-func formatLsRow(r lsRow) string {
+// formatLsRow renders one tab-separated ls row: id, status, duration, command.
+// Finished runs read their status and duration from meta.json; failed runs read
+// the command from debug.json; in-flight runs read the command from start.json
+// and show elapsed time measured against now. The caller aligns the columns
+// with a tabwriter.
+func formatLsRow(r lsRow, now time.Time) string {
 	if r.debug != nil {
 		return fmt.Sprintf("%s\tstart_failed\t?\t%s", r.id, EscapeArgs(r.debug.Command))
 	}
-	if r.meta == nil {
-		return fmt.Sprintf("%s\texit=?\t?\t?", r.id)
+	if r.meta != nil {
+		head := fmt.Sprintf("exit=%d", r.meta.ExitCode)
+		if r.meta.Signal != nil {
+			head = fmt.Sprintf("signal=%d", *r.meta.Signal)
+		}
+		dur := formatDuration(time.Duration(r.meta.DurationMs) * time.Millisecond)
+		return fmt.Sprintf("%s\t%s\t%s\t%s", r.id, head, dur, EscapeArgs(r.meta.Command))
 	}
-
-	head := fmt.Sprintf("exit=%d", r.meta.ExitCode)
-	if r.meta.Signal != nil {
-		head = fmt.Sprintf("signal=%d", *r.meta.Signal)
+	if r.start != nil {
+		elapsed := formatDuration(now.Sub(r.start.StartedAt))
+		return fmt.Sprintf("%s\trunning\t%s\t%s", r.id, elapsed, EscapeArgs(r.start.Command))
 	}
-
-	dur := formatDuration(time.Duration(r.meta.DurationMs) * time.Millisecond)
-	return fmt.Sprintf("%s\t%s\t%s\t%s", r.id, head, dur, EscapeArgs(r.meta.Command))
+	return fmt.Sprintf("%s\trunning\t?\t?", r.id)
 }
