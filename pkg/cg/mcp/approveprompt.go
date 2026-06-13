@@ -2,11 +2,13 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"strings"
 
+	jsonschema "github.com/google/jsonschema-go/jsonschema"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/pmezard/go-difflib/difflib"
 	"gopkg.in/yaml.v3"
@@ -41,6 +43,13 @@ func (g *gate) prompt(ctx context.Context, in runInput, el elicitor) error {
 	if err != nil {
 		return fmt.Errorf("cg_run refused: approval prompt failed: %w", err)
 	}
+	// A declined or cancelled prompt refuses the command this once and persists
+	// nothing. Elicitation only returns form content on accept, so the remember
+	// checkbox cannot ride along with a decline to record a deny rule, and there
+	// is no way to remember a denial here. We deliberately do not add an in-form
+	// "always accept / always decline" enum to work around that: the prompt
+	// already carries Accept and Decline buttons, and duplicating that choice
+	// inside the form is clunky.
 	if res.Action != actionAccept {
 		return fmt.Errorf("cg_run refused: command was declined at the approval prompt")
 	}
@@ -124,22 +133,35 @@ func approvalMessage(in runInput) string {
 	return fmt.Sprintf("Allow this command?\n\n  %s\n\nworking directory: %s", cg.EscapeArgs(in.Command), cwd)
 }
 
-// approvalSchema builds the elicitation form: a remember checkbox and an
-// editable rule field pre-filled with the suggested prefix as a YAML flow
-// sequence. path is the project rules file the remembered rule is saved to.
-func approvalSchema(suggestion []string, path string) map[string]any {
-	return obj(map[string]any{
-		"remember": map[string]any{
-			"type": "boolean", "title": "Remember this command",
-			"description": fmt.Sprintf("save an allow rule to %s so it is not asked again", path),
-			"default":     false,
+// approvalSchema builds the elicitation form: an editable rule field pre-filled
+// with the suggested prefix as a YAML flow sequence, followed by a remember
+// checkbox. path is the project rules file the remembered rule is saved to.
+//
+// The form is a typed *jsonschema.Schema rather than a property map so
+// PropertyOrder controls the field order on the wire: a property map marshals
+// its keys alphabetically, which would float "remember" above "rule". The client
+// renders fields in wire order, so listing rule first keeps the command the
+// prompt is about at the top, above the remember toggle.
+func approvalSchema(suggestion []string, path string) *jsonschema.Schema {
+	ruleDefault, _ := json.Marshal(renderFlowSeq(suggestion))
+	return &jsonschema.Schema{
+		Type: "object",
+		Properties: map[string]*jsonschema.Schema{
+			"rule": {
+				Type:        "string",
+				Title:       "Allow rule (prefix)",
+				Description: "edited only when remembering; a YAML list of argv tokens, e.g. [go, test] or [foo, \"bar baz\"]",
+				Default:     ruleDefault,
+			},
+			"remember": {
+				Type:        "boolean",
+				Title:       "Remember this command",
+				Description: fmt.Sprintf("save an allow rule to %s so it is not asked again", path),
+				Default:     json.RawMessage("false"),
+			},
 		},
-		"rule": map[string]any{
-			"type": "string", "title": "Allow rule (prefix)",
-			"description": "edited only when remembering; a YAML list of argv tokens, e.g. [go, test] or [foo, \"bar baz\"]",
-			"default":     renderFlowSeq(suggestion),
-		},
-	})
+		PropertyOrder: []string{"rule", "remember"},
+	}
 }
 
 // divergenceMessage renders the second prompt's body with a unified diff of the

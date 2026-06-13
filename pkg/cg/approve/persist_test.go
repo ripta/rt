@@ -144,6 +144,41 @@ func TestAppendPreservesCommentsAndQuotesTokens(t *testing.T) {
 	}
 }
 
+func TestAppendSortsAndDedupesEntries(t *testing.T) {
+	t.Parallel()
+
+	// Out-of-order entries with a hand-added duplicate of [make].
+	content := "version: 1\nallow:\n  - prefix: [make]\n  - prefix: [echo]\n  - prefix: [make]\n"
+	root := writeProject(t, content)
+	s := loadProject(t, root)
+
+	if err := s.AppendProjectAllowPrefix([]string{"go", "test"}, WriteDirect); err != nil {
+		t.Fatalf("AppendProjectAllowPrefix: %v", err)
+	}
+
+	raw, err := os.ReadFile(ProjectPath(root, ""))
+	if err != nil {
+		t.Fatalf("reading written file: %v", err)
+	}
+	got := string(raw)
+
+	// The duplicate [make] collapses to one entry.
+	if n := strings.Count(got, "prefix: [make]"); n != 1 {
+		t.Errorf("expected one [make] entry after dedupe, got %d:\n%s", n, got)
+	}
+
+	// Entries are ordered by command text: echo, go test, make.
+	idxEcho := strings.Index(got, "prefix: [echo]")
+	idxGo := strings.Index(got, "prefix: [go, test]")
+	idxMake := strings.Index(got, "prefix: [make]")
+	if idxEcho < 0 || idxGo < 0 || idxMake < 0 {
+		t.Fatalf("missing an expected entry:\n%s", got)
+	}
+	if !(idxEcho < idxGo && idxGo < idxMake) {
+		t.Errorf("entries not sorted by command text (echo < go test < make):\n%s", got)
+	}
+}
+
 func TestCheckProjectDivergence(t *testing.T) {
 	t.Parallel()
 

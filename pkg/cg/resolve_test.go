@@ -227,14 +227,41 @@ func TestLsCommand(t *testing.T) {
 	if len(lines) != 3 {
 		t.Fatalf("expected 3 lines, got %d: %q", len(lines), stdout)
 	}
-	if lines[0] != "AAAAAA\texit=0\t12ms\techo new" {
+	// Columns are space-aligned by a tabwriter; status width is set by the widest
+	// cell ("running"), so the finished rows pad out to match.
+	if lines[0] != "AAAAAA  exit=0   12ms   echo new" {
 		t.Errorf("line 0 = %q", lines[0])
 	}
-	if lines[1] != "CCCCCC\texit=?\t?\t?" {
+	if lines[1] != "CCCCCC  running  ?      ?" {
 		t.Errorf("line 1 = %q", lines[1])
 	}
-	if lines[2] != "BBBBBB\texit=2\t1.23s\tsh -c 'exit 2'" {
+	if lines[2] != "BBBBBB  exit=2   1.23s  sh -c 'exit 2'" {
 		t.Errorf("line 2 = %q", lines[2])
+	}
+}
+
+func TestFormatLsRowRunning(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now()
+	row := lsRow{
+		id:    "DDDDDD",
+		start: &StartInfo{Command: []string{"sleep", "30"}, StartedAt: now.Add(-90 * time.Second)},
+	}
+	got := formatLsRow(row, now)
+	want := "DDDDDD\trunning\t1m30s\tsleep 30"
+	if got != want {
+		t.Errorf("formatLsRow running = %q, want %q", got, want)
+	}
+}
+
+func TestFormatLsRowRunningNoStartInfo(t *testing.T) {
+	t.Parallel()
+
+	got := formatLsRow(lsRow{id: "EEEEEE"}, time.Now())
+	want := "EEEEEE\trunning\t?\t?"
+	if got != want {
+		t.Errorf("formatLsRow running fallback = %q, want %q", got, want)
 	}
 }
 
@@ -264,8 +291,31 @@ func TestLsCommandLimit(t *testing.T) {
 	if len(lines) != 1 {
 		t.Fatalf("expected 1 line with -n 1, got %d: %q", len(lines), stdout)
 	}
-	if !strings.HasPrefix(lines[0], "AAAAAA\t") {
+	if !strings.HasPrefix(lines[0], "AAAAAA  ") {
 		t.Errorf("line 0 = %q, want most-recent (AAAAAA) first", lines[0])
+	}
+}
+
+func TestLsCommandRunningReadsStartInfo(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	root := CaptureRoot()
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatalf("mkdir root: %v", err)
+	}
+
+	dir := seedRunDir(t, "DDDDDD", nil)
+	if err := WriteStartInfo(dir, &StartInfo{Command: []string{"sleep", "30"}, StartedAt: time.Now().Add(-5 * time.Second)}); err != nil {
+		t.Fatalf("WriteStartInfo: %v", err)
+	}
+
+	stdout, _, err := runCgSplit("ls")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, want := range []string{"DDDDDD", "running", "sleep 30"} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("ls output missing %q:\n%s", want, stdout)
+		}
 	}
 }
 
@@ -289,7 +339,7 @@ func TestLsCommandSignaledMeta(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	want := "AAAAAA\tsignal=15\t5ms\tsleep 10\n"
+	want := "AAAAAA  signal=15  5ms  sleep 10\n"
 	if stdout != want {
 		t.Errorf("stdout = %q, want %q", stdout, want)
 	}

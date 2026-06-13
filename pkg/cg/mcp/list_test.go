@@ -181,6 +181,34 @@ func TestHandleListStateRunning(t *testing.T) {
 	}
 }
 
+func TestHandleListRunningReadsStartInfo(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	if err := os.MkdirAll(cg.CaptureRoot(), 0o755); err != nil {
+		t.Fatalf("mkdir root: %v", err)
+	}
+
+	dir := seedRunDir(t, "CCCCCC", nil)
+	started := time.Now().Add(-2 * time.Minute).UTC()
+	if err := cg.WriteStartInfo(dir, &cg.StartInfo{Command: []string{"sleep", "30"}, StartedAt: started}); err != nil {
+		t.Fatalf("WriteStartInfo: %v", err)
+	}
+
+	_, out, err := handleList(context.Background(), nil, listInput{State: "running"})
+	if err != nil {
+		t.Fatalf("handleList: %v", err)
+	}
+	if len(out.Runs) != 1 {
+		t.Fatalf("expected 1 run, got %d: %+v", len(out.Runs), out.Runs)
+	}
+	r := out.Runs[0]
+	if want := []string{"sleep", "30"}; len(r.Command) != 2 || r.Command[0] != want[0] || r.Command[1] != want[1] {
+		t.Errorf("running Command = %v, want %v", r.Command, want)
+	}
+	if r.StartedAt == nil || !r.StartedAt.Equal(started) {
+		t.Errorf("running StartedAt = %v, want %v", r.StartedAt, started)
+	}
+}
+
 func TestHandleListInvalidState(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 

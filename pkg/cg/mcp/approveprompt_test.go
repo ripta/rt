@@ -3,6 +3,7 @@ package mcp
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,6 +11,29 @@ import (
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
+
+// TestApprovalSchemaFieldOrder pins the wire order of the approval form so the
+// rule field renders above the remember toggle. A property map would marshal its
+// keys alphabetically and float "remember" first, so the typed schema's
+// PropertyOrder is what keeps this true.
+func TestApprovalSchemaFieldOrder(t *testing.T) {
+	t.Parallel()
+
+	raw, err := json.Marshal(approvalSchema([]string{"go", "test"}, "/tmp/.cg.yaml"))
+	if err != nil {
+		t.Fatalf("marshalling schema: %v", err)
+	}
+	wire := string(raw)
+
+	idxRule := strings.Index(wire, `"rule"`)
+	idxRemember := strings.Index(wire, `"remember"`)
+	if idxRule < 0 || idxRemember < 0 {
+		t.Fatalf("schema missing a field: %s", wire)
+	}
+	if idxRule > idxRemember {
+		t.Errorf("rule must serialize before remember:\n%s", wire)
+	}
+}
 
 // fakeElicitor returns canned results for each Elicit call in order, so a test
 // can script both the approval prompt and the divergence prompt. It records the

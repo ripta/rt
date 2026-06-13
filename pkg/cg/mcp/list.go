@@ -36,9 +36,10 @@ type listOutput struct {
 }
 
 // listRun is a single row in the cg_list response. Only `id` and `state` are
-// guaranteed; the meta-derived fields are populated for finished runs only.
-// In-flight rows may carry `started_at` synthesized from the run dir's mtime
-// when filesystem stat succeeds. Failed rows carry `start_error` and `command`.
+// guaranteed; the remaining meta-derived fields are populated for finished runs
+// only. In-flight rows carry `command` and `started_at` from start.json, or just
+// `started_at` synthesized from the run dir's mtime when start.json is absent.
+// Failed rows carry `start_error` and `command`.
 type listRun struct {
 	ID          string     `json:"id"`
 	State       string     `json:"state"`
@@ -56,7 +57,7 @@ type listRun struct {
 func registerList(s *mcpsdk.Server) {
 	mcpsdk.AddTool(s, &mcpsdk.Tool{
 		Name:        "cg_list",
-		Description: "List recent capture runs, most-recent-first by directory mtime. The `state` input filters to finished (default), running, failed, or all runs. Failed rows include state: \"failed\" and start_error. Running rows are sparse: id, state, and started_at from the run dir's mtime.",
+		Description: "List recent capture runs, most-recent-first by directory mtime. The `state` input filters to finished (default), running, failed, or all runs. Failed rows include state: \"failed\" and start_error. Running rows carry id, state, command, and started_at from start.json, falling back to the run dir's mtime when start.json is absent.",
 	}, handleList)
 }
 
@@ -129,15 +130,18 @@ func handleList(_ context.Context, _ *mcpsdk.CallToolRequest, in listInput) (*mc
 			if state == stateFinished || state == stateFailed {
 				continue
 			}
-			started := mtime
-			rows = append(rows, row{
-				mtime: mtime,
-				run: listRun{
-					ID:        name,
-					State:     stateRunning,
-					StartedAt: &started,
-				},
-			})
+			// A running capture writes start.json with its command and precise
+			// start time; fall back to the run dir's mtime when it is absent.
+			running := listRun{ID: name, State: stateRunning}
+			if si, siErr := cg.ReadStartInfo(dir); siErr == nil {
+				started := si.StartedAt
+				running.StartedAt = &started
+				running.Command = si.Command
+			} else {
+				started := mtime
+				running.StartedAt = &started
+			}
+			rows = append(rows, row{mtime: mtime, run: running})
 			continue
 		}
 

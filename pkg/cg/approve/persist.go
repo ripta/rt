@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"sort"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -96,6 +97,7 @@ func (s *Store) AppendProjectAllowPrefix(tokens []string, strategy WriteStrategy
 	}
 	allowSeq := ensureSeq(root, "allow")
 	allowSeq.Content = append(allowSeq.Content, buildPrefixEntry(tokens))
+	canonicalizeRuleSeqs(root)
 
 	data, err := renderDocument(doc)
 	if err != nil {
@@ -259,6 +261,102 @@ func buildRuleEntry(rule *Rule, isDeny bool) *yaml.Node {
 	}
 
 	return entry
+}
+
+// canonicalizeRuleSeqs sorts and de-duplicates the deny and allow rule
+// sequences in root so the written file stays tidy: entries are ordered by their
+// command text and exact duplicates are dropped, keeping the first occurrence so
+// its comments and any message survive. Rule order does not affect matching,
+// which refuses on any deny match and runs on any allow match, so reordering is
+// safe.
+func canonicalizeRuleSeqs(root *yaml.Node) {
+	for _, key := range []string{"deny", "allow"} {
+		if seq := findSeq(root, key); seq != nil {
+			seq.Content = sortDedupeEntries(seq.Content)
+		}
+	}
+}
+
+// findSeq returns the sequence value node for key in root, or nil when key is
+// absent or its value is not a sequence.
+func findSeq(root *yaml.Node, key string) *yaml.Node {
+	for i := 0; i+1 < len(root.Content); i += 2 {
+		if root.Content[i].Value == key && root.Content[i+1].Kind == yaml.SequenceNode {
+			return root.Content[i+1]
+		}
+	}
+
+	return nil
+}
+
+// sortDedupeEntries returns entries sorted by command text with exact-duplicate
+// rules removed, preserving each kept entry's node so its comments stay
+// attached. An entry that does not decode to a single recognized rule kind is
+// left at the end in its original order and never deduplicated.
+func sortDedupeEntries(entries []*yaml.Node) []*yaml.Node {
+	type keyed struct {
+		node       *yaml.Node
+		sortKey    string
+		ident      string
+		recognized bool
+		idx        int
+	}
+
+	ks := make([]keyed, len(entries))
+	for i, n := range entries {
+		sortKey, ident, ok := ruleKeys(n)
+		ks[i] = keyed{node: n, sortKey: sortKey, ident: ident, recognized: ok, idx: i}
+	}
+
+	sort.SliceStable(ks, func(i, j int) bool {
+		if ks[i].recognized != ks[j].recognized {
+			return ks[i].recognized
+		}
+		if !ks[i].recognized {
+			return ks[i].idx < ks[j].idx
+		}
+		if ks[i].sortKey != ks[j].sortKey {
+			return ks[i].sortKey < ks[j].sortKey
+		}
+		return ks[i].ident < ks[j].ident
+	})
+
+	out := make([]*yaml.Node, 0, len(ks))
+	seen := make(map[string]bool, len(ks))
+	for _, k := range ks {
+		if k.recognized {
+			if seen[k.ident] {
+				continue
+			}
+			seen[k.ident] = true
+		}
+		out = append(out, k.node)
+	}
+
+	return out
+}
+
+// ruleKeys derives a sort key, the rule's command text, and an identity key, its
+// kind plus payload, from a rule entry node. ok is false when the node does not
+// decode to exactly one recognized rule kind.
+func ruleKeys(n *yaml.Node) (sortKey, ident string, ok bool) {
+	var r Rule
+	if err := n.Decode(&r); err != nil {
+		return "", "", false
+	}
+
+	switch {
+	case len(r.Exact) > 0:
+		return strings.Join(r.Exact, " "), "exact\x00" + strings.Join(r.Exact, "\x00"), true
+	case len(r.Prefix) > 0:
+		return strings.Join(r.Prefix, " "), "prefix\x00" + strings.Join(r.Prefix, "\x00"), true
+	case r.Glob != "":
+		return r.Glob, "glob\x00" + r.Glob, true
+	case r.Regex != "":
+		return r.Regex, "regex\x00" + r.Regex, true
+	}
+
+	return "", "", false
 }
 
 // ensureSeq returns the sequence value node for key in root, creating it (or
