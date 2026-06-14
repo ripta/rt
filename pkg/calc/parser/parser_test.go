@@ -413,6 +413,21 @@ func TestParserExpressions(t *testing.T) {
 		{name: "acos call", exprs: []string{"acos(1)"}, want: 0},
 		{name: "cbrt of negative", exprs: []string{"cbrt(-8)"}, want: -2},
 		{name: "cbrt of positive", exprs: []string{"cbrt(27)"}, want: 3},
+		{name: "floor call", exprs: []string{"floor(3.7)"}, want: 3},
+		{name: "floor of integer", exprs: []string{"floor(3.0)"}, want: 3},
+		{name: "ceil call", exprs: []string{"ceil(3.2)"}, want: 4},
+		{name: "round half away from zero", exprs: []string{"round(2.5)"}, want: 3},
+		{name: "round negative half away from zero", exprs: []string{"round(-2.5)"}, want: -3},
+		{name: "min call", exprs: []string{"min(3, 1, 2)"}, want: 1},
+		{name: "max call", exprs: []string{"max(3, 1, 2)"}, want: 3},
+		{name: "min single argument", exprs: []string{"min(5)"}, want: 5},
+		{name: "max of equal irrationals", exprs: []string{"max(PI, PI)"}, want: math.Pi},
+		{name: "sinh call", exprs: []string{"sinh(0)"}, want: 0},
+		{name: "cosh call", exprs: []string{"cosh(0)"}, want: 1},
+		{name: "tanh call", exprs: []string{"tanh(0)"}, want: 0},
+		{name: "factorial of zero", exprs: []string{"factorial(0)"}, want: 1},
+		{name: "factorial call", exprs: []string{"factorial(5)"}, want: 120},
+		{name: "factorial of ten", exprs: []string{"factorial(10)"}, want: 3628800},
 	}
 
 	for _, tt := range tests {
@@ -550,6 +565,21 @@ func TestCallEvalErrors(t *testing.T) {
 			name:    "log with one argument",
 			expr:    "log(8)",
 			wantErr: "log expects 2 arguments, got 1",
+		},
+		{
+			name:    "factorial of negative",
+			expr:    "factorial(-1)",
+			wantErr: "factorial(-1): argument must be a non-negative integer",
+		},
+		{
+			name:    "factorial of non-integer",
+			expr:    "factorial(1.5)",
+			wantErr: "factorial(1.5): argument must be a non-negative integer",
+		},
+		{
+			name:    "min with no arguments",
+			expr:    "min()",
+			wantErr: "min expects at least 1 argument, got 0",
 		},
 	}
 

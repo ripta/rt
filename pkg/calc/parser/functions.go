@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/ripta/reals/pkg/constructive"
+	"github.com/ripta/reals/pkg/rational"
 	"github.com/ripta/reals/pkg/unified"
 )
 
@@ -39,6 +40,61 @@ var functions = map[string]function{
 	"log":   {2, 2, func(_ *Env, a []*unified.Real) (*unified.Real, error) { return a[0].Log(a[1]) }},
 	"sqrt":  {1, 1, func(_ *Env, a []*unified.Real) (*unified.Real, error) { return a[0].Sqrt() }},
 	"cbrt":  {1, 1, func(_ *Env, a []*unified.Real) (*unified.Real, error) { return a[0].Cbrt(), nil }},
+
+	"floor":     {1, 1, func(e *Env, a []*unified.Real) (*unified.Real, error) { return a[0].Floor(e.precision), nil }},
+	"ceil":      {1, 1, func(e *Env, a []*unified.Real) (*unified.Real, error) { return a[0].Ceil(e.precision), nil }},
+	"round":     {1, 1, func(e *Env, a []*unified.Real) (*unified.Real, error) { return a[0].Round(e.precision), nil }},
+	"min":       {1, -1, func(e *Env, a []*unified.Real) (*unified.Real, error) { return foldMinMax(a, e.precision, false), nil }},
+	"max":       {1, -1, func(e *Env, a []*unified.Real) (*unified.Real, error) { return foldMinMax(a, e.precision, true), nil }},
+	"sinh":      {1, 1, func(_ *Env, a []*unified.Real) (*unified.Real, error) { return a[0].Sinh(), nil }},
+	"cosh":      {1, 1, func(_ *Env, a []*unified.Real) (*unified.Real, error) { return a[0].Cosh(), nil }},
+	"tanh":      {1, 1, func(_ *Env, a []*unified.Real) (*unified.Real, error) { return a[0].Tanh(), nil }},
+	"factorial": {1, 1, func(e *Env, a []*unified.Real) (*unified.Real, error) { return factorial(a[0], e.precision) }},
+}
+
+// errFactorialDomain reports an argument to factorial that is negative or not an
+// integer. It carries no sentinel match in domainError, so its own message
+// becomes the reason text: factorial(-1): argument must be a non-negative integer.
+var errFactorialDomain = errors.New("argument must be a non-negative integer")
+
+// foldMinMax reduces args to their minimum or maximum with a left-to-right
+// pairwise fold. Operands equal within precision resolve to the leftmost, which
+// is the library's own tie behavior.
+func foldMinMax(args []*unified.Real, precision int, max bool) *unified.Real {
+	acc := args[0]
+	for _, a := range args[1:] {
+		if max {
+			acc = acc.Max(a, precision)
+		} else {
+			acc = acc.Min(a, precision)
+		}
+	}
+	return acc
+}
+
+// factorial computes the exact factorial of a non-negative integer. The argument
+// is decided at precision; a non-integer or negative value is a domain error.
+// The product is exact over big.Int, so the result is a rational Real.
+func factorial(r *unified.Real, precision int) (*unified.Real, error) {
+	scale := new(big.Int).Exp(big.NewInt(2), big.NewInt(int64(-precision)), nil)
+
+	approx := constructive.Approximate(r.Constructive(), precision)
+	if approx == nil {
+		return nil, errFactorialDomain
+	}
+
+	rat := new(big.Rat).SetFrac(approx, scale)
+	if !rat.IsInt() || rat.Sign() < 0 {
+		return nil, errFactorialDomain
+	}
+
+	n := rat.Num()
+	result := big.NewInt(1)
+	for i := big.NewInt(2); i.Cmp(n) <= 0; i.Add(i, big.NewInt(1)) {
+		result.Mul(result, i)
+	}
+
+	return unified.New(constructive.One(), rational.FromRational(new(big.Rat).SetInt(result))), nil
 }
 
 // arityError formats a message describing the accepted argument count against
