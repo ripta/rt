@@ -4,11 +4,35 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
 	"github.com/ripta/rt/pkg/cg/approve"
 )
+
+// plantScript writes an executable shell script under dir that echoes marker,
+// and returns its path. Used to drive resolution and exec end-to-end.
+func plantScript(t *testing.T, dir, name, marker string) string {
+	t.Helper()
+	path := filepath.Join(dir, name)
+	body := "#!/bin/sh\necho " + marker + "\n"
+	if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
+		t.Fatalf("planting %s: %v", path, err)
+	}
+	return path
+}
+
+// canonicalPath resolves symlinks so an approval rule can name the executable's
+// canonical path, which is what the gate matches after resolution.
+func canonicalPath(t *testing.T, path string) string {
+	t.Helper()
+	got, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(%s): %v", path, err)
+	}
+	return got
+}
 
 // newTestGate builds a gate from project YAML written under a fresh temp project
 // root. Use newTestGateAt when the test needs the root path to inspect the file.
@@ -158,5 +182,91 @@ func TestGateAllowAllPassesEnv(t *testing.T) {
 	}
 	if out.ExitCode == nil || *out.ExitCode != 0 {
 		t.Errorf("ExitCode = %v, want 0", out.ExitCode)
+	}
+}
+
+// TestGateSymlinkCanonicalAllow allows the executable by its canonical path and
+// invokes it through a symlink in another directory. Resolution canonicalizes
+// the link to its target, so the path-based allow rule matches and the program
+// runs.
+func TestGateSymlinkCanonicalAllow(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+
+	realDir := t.TempDir()
+	linkDir := t.TempDir()
+	real := plantScript(t, realDir, "tool", "ran-real")
+	link := filepath.Join(linkDir, "tool")
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+
+	yaml := "version: 1\nallow:\n  - prefix: ['" + canonicalPath(t, real) + "']\n"
+	g := newTestGate(t, yaml, false)
+	_, out, err := handleRun(context.Background(), nil, g, nil, runInput{
+		Command: []string{link},
+	})
+	if err != nil {
+		t.Fatalf("handleRun: %v", err)
+	}
+	if !strings.Contains(out.StdoutExcerpt, "ran-real") {
+		t.Errorf("StdoutExcerpt = %q, want it to contain %q", out.StdoutExcerpt, "ran-real")
+	}
+}
+
+// TestGateSymlinkCanonicalDeny denies a directory by its canonical path and
+// invokes an executable inside it through a symlink elsewhere. The deny fires on
+// the canonicalized target even though the invoked path is the link.
+func TestGateSymlinkCanonicalDeny(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+
+	realDir := t.TempDir()
+	linkDir := t.TempDir()
+	real := plantScript(t, realDir, "tool", "should-not-run")
+	link := filepath.Join(linkDir, "tool")
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+
+	denyDir := regexp.QuoteMeta(canonicalPath(t, realDir))
+	yaml := "version: 1\ndeny:\n  - regex: '^" + denyDir + "/'\n    message: no executables from that directory\n"
+	g := newTestGate(t, yaml, false)
+	_, _, err := handleRun(context.Background(), nil, g, nil, runInput{
+		Command: []string{link},
+	})
+	if err == nil {
+		t.Fatalf("expected refusal for canonical-path deny")
+	}
+	if !strings.Contains(err.Error(), "no executables from that directory") {
+		t.Errorf("err = %v, want the rule message surfaced", err)
+	}
+}
+
+// TestGateEnvPathDoesNotRedirectExec plants the same program name on the server
+// PATH and in an off-PATH directory, then runs it with env.PATH pointed at the
+// off-PATH copy. The server-PATH binary resolves and execs, so env.PATH cannot
+// redirect the approved top-level executable; the dangerous-env gate still
+// requires the explicit permit_unsafe_envs exemption to run at all.
+func TestGateEnvPathDoesNotRedirectExec(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+
+	serverDir := t.TempDir()
+	evilDir := t.TempDir()
+	plantScript(t, serverDir, "tool", "server")
+	plantScript(t, evilDir, "tool", "evil")
+	t.Setenv("PATH", serverDir)
+
+	g := newTestGate(t, "version: 1\nallow:\n  - prefix: [tool]\n    as_basename: true\n    permit_unsafe_envs: [PATH]\n", false)
+	_, out, err := handleRun(context.Background(), nil, g, nil, runInput{
+		Command: []string{"tool"},
+		Env:     map[string]string{"PATH": evilDir},
+	})
+	if err != nil {
+		t.Fatalf("handleRun: %v", err)
+	}
+	if !strings.Contains(out.StdoutExcerpt, "server") {
+		t.Errorf("StdoutExcerpt = %q, want the server-PATH copy to run", out.StdoutExcerpt)
+	}
+	if strings.Contains(out.StdoutExcerpt, "evil") {
+		t.Errorf("StdoutExcerpt = %q, env.PATH redirected the exec", out.StdoutExcerpt)
 	}
 }

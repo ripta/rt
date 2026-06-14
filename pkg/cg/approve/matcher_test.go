@@ -109,6 +109,10 @@ func TestMatch(t *testing.T) {
 		{name: "allow when no deny matches", deny: []Rule{prefixRule("git", "push", "--force")}, allow: []Rule{prefixRule("git")}, argv: []string{"git", "status"}, want: DecisionRun},
 		{name: "no match prompts", allow: []Rule{prefixRule("go")}, argv: []string{"cargo", "build"}, want: DecisionPrompt},
 
+		// deny wins across canonical and basename forms
+		{name: "basename deny beats canonical allow", deny: []Rule{asBase(prefixRule("sh"))}, allow: []Rule{prefixRule("/bin/sh")}, argv: []string{"/bin/sh", "-c", "x"}, canonical: []string{"/bin/sh", "-c", "x"}, want: DecisionRefuse},
+		{name: "canonical path deny beats basename allow", deny: []Rule{prefixRule("/tmp/make")}, allow: []Rule{asBase(prefixRule("make"))}, argv: []string{"make"}, canonical: []string{"/tmp/make"}, want: DecisionRefuse},
+
 		// deny message propagation
 		{name: "deny message surfaced", deny: []Rule{{Prefix: []string{"rm", "-rf"}, Message: "delete specific paths", kind: KindPrefix}}, argv: []string{"rm", "-rf", "/"}, want: DecisionRefuse, wantMessage: "delete specific paths"},
 	}
