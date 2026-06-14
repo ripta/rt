@@ -93,7 +93,7 @@ Functions are called with C-style syntax, e.g. `sin(0)`, `log(8, 2)`, or
 | Rounding | `floor(x)`, `ceil(x)`, `round(x)` |
 | Comparison | `min(x, ...)`, `max(x, ...)` |
 | Hyperbolic | `sinh(x)`, `cosh(x)`, `tanh(x)` |
-| Combinatorial | `factorial(n)` |
+| Combinatorial | `factorial(n)`, `gamma(x)` |
 
 Trig functions take and return radians; work in degrees by converting
 explicitly, e.g. `sin(45 * PI / 180)`.

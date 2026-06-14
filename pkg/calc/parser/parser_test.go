@@ -428,6 +428,9 @@ func TestParserExpressions(t *testing.T) {
 		{name: "factorial of zero", exprs: []string{"factorial(0)"}, want: 1},
 		{name: "factorial call", exprs: []string{"factorial(5)"}, want: 120},
 		{name: "factorial of ten", exprs: []string{"factorial(10)"}, want: 3628800},
+		{name: "gamma of one", exprs: []string{"gamma(1)"}, want: 1},
+		{name: "gamma matches factorial", exprs: []string{"gamma(5)"}, want: 24},
+		{name: "gamma of one half", exprs: []string{"gamma(0.5)"}, want: math.Sqrt(math.Pi)},
 	}
 
 	for _, tt := range tests {
@@ -575,6 +578,16 @@ func TestCallEvalErrors(t *testing.T) {
 			name:    "factorial of non-integer",
 			expr:    "factorial(1.5)",
 			wantErr: "factorial(1.5): argument must be a non-negative integer",
+		},
+		{
+			name:    "gamma at a pole",
+			expr:    "gamma(0)",
+			wantErr: "gamma(0): argument must not be a non-positive integer",
+		},
+		{
+			name:    "gamma at a negative pole",
+			expr:    "gamma(-2)",
+			wantErr: "gamma(-2): argument must not be a non-positive integer",
 		},
 		{
 			name:    "min with no arguments",

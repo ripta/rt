@@ -62,6 +62,7 @@ var functionCatalog = []function{
 	{name: "tanh", group: "Hyperbolic", signature: "tanh(x)", summary: "hyperbolic tangent", minArgs: 1, maxArgs: 1, fn: func(_ *Env, a []*unified.Real) (*unified.Real, error) { return a[0].Tanh(), nil }},
 
 	{name: "factorial", group: "Combinatorial", signature: "factorial(n)", summary: "factorial of a non-negative integer", minArgs: 1, maxArgs: 1, fn: func(e *Env, a []*unified.Real) (*unified.Real, error) { return factorial(a[0], e.precision) }},
+	{name: "gamma", group: "Combinatorial", signature: "gamma(x)", summary: "gamma function, the continuous factorial", minArgs: 1, maxArgs: 1, fn: func(_ *Env, a []*unified.Real) (*unified.Real, error) { return a[0].Gamma() }},
 }
 
 // functions is the registry consulted by CallNode, derived from functionCatalog.
@@ -187,6 +188,8 @@ func domainError(name string, args []*unified.Real, precision int, err error) er
 		reason = "undefined at the origin"
 	case errors.Is(err, unified.ErrInvalidBase):
 		reason = "base must not be equal to one"
+	case errors.Is(err, unified.ErrGammaPole):
+		reason = "argument must not be a non-positive integer"
 	default:
 		reason = err.Error()
 	}
