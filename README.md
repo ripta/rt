@@ -102,94 +102,38 @@ explicitly, e.g. `sin(45 * PI / 180)`.
 `cg`
 ----
 
-Run a command and annotate each line of its stdout and stderr with a stream
-indicator (`O` for stdout, `E` for stderr, `I` for cg's own lifecycle
-messages). At the end of the run, print a one-line summary with the exit
-code, wall duration, and per-stream line counts.
-
-Acts like the `annotate-output` script; `cg` is short for command guard.
+Run a command and annotate each output line with a stream indicator: `O` for
+stdout, `E` for stderr, `I` for cg's own lifecycle messages. At the end of the
+run, a one-line summary reports the exit code, wall duration, and per-stream
+line counts.
 
 ```
 go install github.com/ripta/rt/cmd/cg@latest
 ```
 
-Basic usage:
-
 ```
 ❯ cg -- echo hello
 O: hello
 I: Finished exitcode=0 in 2ms (out=1 err=0)
-```
 
-Stdout and stderr are distinguished:
-
-```
 ❯ cg -- sh -c 'echo out; echo err >&2'
 O: out
 E: err
 I: Finished exitcode=0 in 3ms (out=1 err=1)
 ```
 
-The child's exit code is propagated:
+The child's exit code propagates to the shell. If the child is killed by a
+signal, the summary reports the signal number instead. SIGINT and SIGTERM are
+forwarded to the child.
 
-```
-❯ cg -- sh -c 'exit 42'; echo $?
-I: Finished exitcode=42 in 2ms (out=0 err=0)
-42
-```
-
-If the child is killed by a signal, the summary reports the signal number
-instead of an exit code:
-
-```
-❯ cg -- sh -c 'kill -TERM $$'
-I: Finished signal=15 in 2ms (out=0 err=0)
-```
-
-SIGINT and SIGTERM are forwarded to the child process.
-
-Verbose mode (`-v` / `--verbose`) restores the older preamble — version line,
-prefix echo, `Started` line — and prefixes every output line with a
-timestamp:
-
-```
-❯ cg -v -- echo hello
-19:02:59 I: cg v0.1.0
-19:02:59 I: prefix="15:04:05 "
-19:02:59 I: Started echo hello
-19:02:59 O: hello
-19:02:59 I: Finished exitcode=0 in 2ms (out=1 err=0)
-```
-
-The verbose timestamp format follows the Go `time.Format` layout and is
-customised with `--format`:
-
-```
-❯ cg -v --format '2006-01-02T15:04:05 ' -- echo hello
-2026-02-22T19:05:00 I: cg v0.1.0
-2026-02-22T19:05:00 I: prefix="2006-01-02T15:04:05 "
-2026-02-22T19:05:00 I: Started echo hello
-2026-02-22T19:05:00 O: hello
-2026-02-22T19:05:00 I: Finished exitcode=0 in 2ms (out=1 err=0)
-```
-
-### Capturing output
-
-`-c` / `--capture` writes the child's stdout and stderr to files under
-`$TMPDIR/cg/<ID>/` and appends a short run ID to the summary line. The ID is
-6 characters of Crockford base-32 (no `I`, `L`, `O`, or `U`), regenerated on
-collision.
+`-c` / `--capture` writes the child's stdout and stderr to `$TMPDIR/cg/<ID>/`
+and appends a short run ID to the summary line. Resolution subcommands thread
+the ID through follow-up calls:
 
 ```
 ❯ cg -c -- sh -c 'echo out; echo err >&2'
 I: Finished exitcode=0 in 3ms (out=1 err=1) id=Q3F9K2
-```
 
-Each run directory contains `stdout`, `stderr`, and a `meta.json` written
-atomically at end-of-run. Resolution subcommands let downstream tooling
-thread the ID through follow-up calls without scraping paths:
-
-```
 ❯ cg out Q3F9K2
 /tmp/cg/Q3F9K2/stdout
 
@@ -200,334 +144,87 @@ thread the ID through follow-up calls without scraping paths:
 ❯ rg -i FOO $(cg out Q3F9K2)
 ```
 
-`cg ls` lists recent runs, most-recent-first by mtime, one row per run:
+`cg ls` lists recent runs, most-recent-first; `cg ls -n N` overrides the
+default cap of 20. Capture never deletes anything; `cg prune` is the explicit
+cleanup hook:
 
 ```
 ❯ cg ls
 Q3F9K2  exit=0   3ms     sh -c 'echo out; echo err >&2'
 M7P4QX  exit=42  2ms     sh -c 'exit 42'
-```
 
-`cg ls -n N` overrides the default cap of 20.
-
-Capture itself never deletes anything. `cg prune` is the explicit cleanup
-hook:
-
-```
 ❯ cg prune                  # keep the 50 most recent by mtime
-❯ cg prune --keep 10        # keep the 10 most recent
-❯ cg prune --older-than 7d  # evict runs older than seven days
-❯ cg prune --dry-run        # print what would be removed, change nothing
+❯ cg prune --keep 10
+❯ cg prune --older-than 7d
+❯ cg prune --dry-run
 ```
 
-`--keep` and `--older-than` are mutually exclusive. `--older-than` accepts
-the Go `time.ParseDuration` grammar (`90m`, `1h30m`, `2h`) plus convenience
-suffixes `Nd` (days) and `Nw` (weeks). Stray non-run entries and incomplete
-runs (no `meta.json`) under `$TMPDIR/cg/` are skipped.
+`-v` / `--verbose` prefixes every line with a timestamp and adds a started/finished
+preamble; `--format` controls the layout using Go's `time.Format` syntax.
+`--buffered` defers child output until the command finishes, grouping by stream.
+`--log-parse json|logfmt` reformats structured log lines inline.
 
-### Other flags
-
-`--buffered` defers the child's output until the command finishes, grouping
-by stream instead of streaming in real time.
-
-`--log-parse json|logfmt` reformats structured child log lines; see
-`cg --help` for the message-key, timestamp-key, timestamp-format, and field
-selectors.
-
-### MCP server
-
-`cg mcp` starts a stdio MCP server that exposes the capture-run model as
-native tools. Coding agents that speak MCP (Claude Code, the Anthropic SDK,
-others) can call `cg` with structured JSON input and output rather than
-constructing shell argv and parsing printed paths. The server is a thin
-wrapper over the same on-disk capture model the shell subcommands use, so a
-run started with `cg -c -- cmd` is visible to the MCP tools and a run
-started by `cg_run` is visible to `cg ls`. MCP is additive; the shell
-subcommands continue to work unchanged.
-
-Register the server with Claude Code using its CLI:
+`cg mcp` starts a stdio MCP server that exposes the capture-run model as native
+tools, using the same on-disk storage the shell subcommands use — a run started
+with `cg -c` is visible to `cg_list`, and a run started by `cg_run` is visible
+to `cg ls`. Register with Claude Code:
 
 ```
 claude mcp add cg cg mcp
 ```
 
-For agents that support CLI-based registration but use a different command,
-check their docs — the pattern is the same: server name `cg`, command `cg`,
-argument `mcp`.
-
-For MCP hosts that require editing config by hand, add a `cg` entry under
-`mcpServers`:
+Or by hand in the MCP host config:
 
 ```json
 {
   "mcpServers": {
-    "cg": {
-      "command": "cg",
-      "args": ["mcp"]
-    }
+    "cg": { "command": "cg", "args": ["mcp"] }
   }
 }
 ```
-
-Any MCP host that speaks the stdio transport launches the server the same
-way: spawn `cg mcp` and exchange MCP messages over its stdin and stdout.
 
 The server registers ten tools:
 
 | Tool | Purpose |
 |------|---------|
-| `cg_run` | Run a command with capture and return metadata plus head- or tail-window excerpts. |
-| `cg_list` | List recent capture runs, most-recent-first by mtime. |
-| `cg_meta` | Return the run state and `meta.json` fields for a run. |
+| `cg_run` | Run a command with capture; returns metadata and head/tail excerpts. |
+| `cg_list` | List recent runs, most-recent-first. |
+| `cg_meta` | Return run state and metadata. |
 | `cg_wait` | Block until a run finishes or a timeout elapses. |
 | `cg_cancel` | Signal a run's process group, with optional escalation. |
-| `cg_paths` | Return absolute paths for a run's `stdout`, `stderr`, `meta.json`. |
-| `cg_stdout` | Fetch captured stdout for a run, with byte limits and head/tail windowing. |
-| `cg_stderr` | Fetch captured stderr for a run, with byte limits and head/tail windowing. |
-| `cg_grep` | Search a run's captured output and return matching lines. |
-| `cg_prune` | Evict capture runs by count (`keep`) or age (`older_than`). |
+| `cg_paths` | Return absolute paths for a run's stdout, stderr, and meta.json. |
+| `cg_stdout` | Fetch captured stdout with byte limits and head/tail windowing. |
+| `cg_stderr` | Fetch captured stderr with byte limits and head/tail windowing. |
+| `cg_grep` | Search captured output and return matching lines. |
+| `cg_prune` | Evict runs by count or age. |
 
-Unknown IDs and malformed inputs surface as MCP tool errors. A child
-command exiting non-zero is data, not an error: `cg_run` returns
+A non-zero child exit code is data, not an MCP error: `cg_run` returns
 successfully with `exit_code: N` and the caller decides how to react.
 
-#### `cg_run`
+`cg_run` checks each command against an approval matcher before running it. The
+default mode prompts for unmatched commands when the client supports elicitation,
+and otherwise fails closed; `cg mcp --blindly-allow` skips the gate entirely.
+Rules live in `~/.config/cg/approve.yaml` (global) and `.cg.yaml` /
+`.cg/approve.yaml` / `.claude/cg.yaml` (project), merged at startup:
 
-Run a command with capture. Blocks until the child exits or
-`wait_timeout_ms` elapses; on timeout, the child keeps running and the
-capture continues on disk.
+```yaml
+version: 1
+mode: enforce        # enforce (default), allow-all, or deny-all
+deny:
+  - regex: '^/tmp/'
+    message: do not run executables from temporary directories
+allow:
+  - prefix: [go, test]
+    as_basename: true
+  - regex: '^/opt/foo/bin/[^ ]+(\s|$)'
+```
 
-**Inputs**
-
-| Field | Type | Default | Notes |
-|-------|------|---------|-------|
-| `command` | `string[]` | required | argv; index 0 is the program. |
-| `cwd` | `string` | server cwd | working directory. |
-| `env` | `object` | server env | environment overrides, merged onto the server's env. |
-| `wait` | `bool` | `true` | block until exit or timeout. |
-| `wait_timeout_ms` | `int` | `60000` | how long to wait before returning `timed_out: true`. |
-| `excerpt_bytes` | `int` | `4096` | per-stream excerpt cap; max `16384`. |
-| `excerpt_from` | `string` | `auto` | excerpt window: `auto` picks head on success, tail on non-zero exit / signal / timeout; `head` or `tail` forces the window. |
-
-**Outputs**
-
-| Field | Type | Notes |
-|-------|------|-------|
-| `id` | `string` | Capture run ID. |
-| `started` | `bool` | Set when `wait: false`. |
-| `timed_out` | `bool` | Set when the wait timeout fired. |
-| `exit_code` | `int?` | Child exit code; absent if timed out. |
-| `signal` | `int?` | Signal that killed the child, if any. |
-| `duration_ms` | `int?` | Wall-clock run duration; absent if timed out. |
-| `stdout_lines` | `int?` | Total stdout lines; absent if timed out. |
-| `stderr_lines` | `int?` | Total stderr lines; absent if timed out. |
-| `stdout_excerpt` | `string` | `excerpt_bytes` from stdout; window per `excerpt_from`. |
-| `stderr_excerpt` | `string` | `excerpt_bytes` from stderr; window per `excerpt_from`. |
-| `excerpt_from` | `string` | Window that was used: `head` or `tail`. Omitted when no excerpts (e.g., `wait: false`). |
-| `truncated` | `bool` | Either stream had more than `excerpt_bytes`. |
-
-#### `cg_list`
-
-List recent capture runs, most-recent-first by directory mtime. The default
-surfaces only finished runs; pass `state` to include in-flight runs (started,
-no `meta.json` yet) or to ask for them on their own.
-
-**Inputs**
-
-| Field | Type | Default | Notes |
-|-------|------|---------|-------|
-| `limit` | `int` | `20` | maximum runs to return; max `1000`. |
-| `state` | `string` | `finished` | filter: `all`, `finished`, or `running`. |
-
-**Outputs**
-
-| Field | Type | Notes |
-|-------|------|-------|
-| `runs` | `object[]` | One entry per matching run; see fields below. |
-
-Every `runs[]` entry has `id` and `state` (`"finished"` or `"running"`).
-Finished entries also carry `command`, `started_at`, `finished_at`,
-`duration_ms`, `exit_code`, `signal?`, `stdout_lines`, `stderr_lines`.
-In-flight entries are sparse: only `id`, `state`, and `started_at`
-synthesized from the run directory's mtime.
-
-#### `cg_meta`
-
-Return a run's state and `meta.json` fields. An in-flight run (no
-`meta.json` yet) returns `{id, state: "running"}` with no error; a finished
-run returns `state: "finished"` plus all meta fields. An unknown ID is a
-tool error.
-
-**Inputs**
-
-| Field | Type | Default | Notes |
-|-------|------|---------|-------|
-| `id` | `string` | required | capture run ID. |
-
-**Outputs**
-
-| Field | Type | Notes |
-|-------|------|-------|
-| `id` | `string` | Run ID. |
-| `state` | `string` | `"running"` or `"finished"`. |
-| `command` | `string[]` | argv that was executed; finished runs only. |
-| `started_at` | `string` | RFC 3339 timestamp; finished runs only. |
-| `finished_at` | `string` | RFC 3339 timestamp; finished runs only. |
-| `duration_ms` | `int` | Wall-clock duration; finished runs only. |
-| `exit_code` | `int` | Child exit code; finished runs only. |
-| `signal` | `int?` | Signal that killed the child, if any. |
-| `stdout_lines` | `int` | Total stdout lines; finished runs only. |
-| `stderr_lines` | `int` | Total stderr lines; finished runs only. |
-
-#### `cg_wait`
-
-Block until a run finishes or `timeout_ms` elapses. Uses the in-process
-`Done` channel for runs this server started and falls back to filesystem
-polling otherwise. An unknown ID is a tool error.
-
-**Inputs**
-
-| Field | Type | Default | Notes |
-|-------|------|---------|-------|
-| `id` | `string` | required | capture run ID. |
-| `timeout_ms` | `int` | `60000` | how long to block before returning `finished: false`. |
-
-**Outputs**
-
-| Field | Type | Notes |
-|-------|------|-------|
-| `id` | `string` | Run ID. |
-| `finished` | `bool` | `true` if the run completed before the timeout. |
-| meta fields | — | When `finished`, the same fields as `cg_meta`. |
-
-#### `cg_cancel`
-
-Send a signal to a run's process group. An already-finished run returns
-`{signaled: false}` without error; an unknown ID is a tool error. With
-`escalate_after_ms > 0`, the server sends the initial signal, waits up to
-the deadline, and sends `escalate_signal` if the child is still running.
-
-**Inputs**
-
-| Field | Type | Default | Notes |
-|-------|------|---------|-------|
-| `id` | `string` | required | capture run ID. |
-| `signal` | `string`/`int` | `SIGTERM` | initial signal; `SIGTERM`, `SIGINT`, `SIGKILL`, or numeric. |
-| `escalate_after_ms` | `int` | `0` | wait this long, then escalate; `0` disables escalation. |
-| `escalate_signal` | `string`/`int` | `SIGKILL` | signal sent on escalation. |
-
-**Outputs**
-
-| Field | Type | Notes |
-|-------|------|-------|
-| `id` | `string` | Run ID. |
-| `signaled` | `bool` | Whether the initial signal was sent. |
-| `signal` | `int` | Numeric value of the initial signal. |
-| `escalated` | `bool` | Whether `escalate_signal` was sent. |
-| `escalate_signal` | `int?` | Numeric escalation signal; present only when escalated. |
-| `finished` | `bool` | Whether the child had exited by the time the call returned. |
-
-#### `cg_paths`
-
-Return absolute paths for a run's `stdout`, `stderr`, and `meta.json`
-files. Works for in-flight runs; the `meta` path is returned even when the
-file does not yet exist, so callers can poll the same path.
-
-**Inputs**
-
-| Field | Type | Default | Notes |
-|-------|------|---------|-------|
-| `id` | `string` | required | capture run ID. |
-
-**Outputs**
-
-| Field | Type | Notes |
-|-------|------|-------|
-| `stdout` | `string` | Absolute path to the stdout file. |
-| `stderr` | `string` | Absolute path to the stderr file. |
-| `meta` | `string` | Absolute path to `meta.json` (may not exist yet). |
-
-#### `cg_stdout` and `cg_stderr`
-
-Fetch captured stdout or stderr for a run. Defaults to the first 16 KiB;
-`from: "tail"` reads the last `max_bytes` instead. Works for in-flight
-runs. The default encoding validates bytes as UTF-8 and falls back to
-base64 automatically on invalid input (binary streams or a tail read
-that lands mid-codepoint); set `content_encoding: "base64"` to force
-base64 for known binary streams.
-
-**Inputs**
-
-| Field | Type | Default | Notes |
-|-------|------|---------|-------|
-| `id` | `string` | required | capture run ID. |
-| `max_bytes` | `int` | `16384` | response cap; max `1048576` (1 MiB), clamped if higher. |
-| `from` | `string` | `"head"` | `"head"` reads from `offset`; `"tail"` reads the last `max_bytes`. |
-| `offset` | `int` | `0` | byte offset for head reads; ignored when `from: "tail"`. |
-| `content_encoding` | `string` | `"utf8"` | `"utf8"` validates UTF-8 and falls back to base64 on invalid bytes; `"base64"` always base64-encodes. |
-
-**Outputs**
-
-| Field | Type | Notes |
-|-------|------|-------|
-| `content` | `string` | Bytes read from the stream, encoded per `content_encoding`. |
-| `content_encoding` | `string` | `"utf8"` or `"base64"`; describes how to decode `content`. |
-| `total_bytes` | `int` | Total size of the stream file. |
-| `returned_bytes` | `int` | Length of `content` in bytes. |
-| `truncated` | `bool` | More data exists beyond the returned window. |
-| `clamped` | `bool` | `max_bytes` was reduced to the 1 MiB ceiling. |
-
-#### `cg_grep`
-
-Search a run's captured output line by line and return matching lines.
-Supply exactly one of `text` (fixed substring) or `pattern` (RE2 regex).
-Searches both streams by default. Works for in-flight runs. A line with
-invalid UTF-8 is base64-encoded and tagged `content_encoding: "base64"`.
-
-**Inputs**
-
-| Field | Type | Default | Notes |
-|-------|------|---------|-------|
-| `id` | `string` | required | capture run ID. |
-| `text` | `string` | — | fixed-string substring; mutually exclusive with `pattern`. |
-| `pattern` | `string` | — | RE2 regex; mutually exclusive with `text`. |
-| `streams` | `string` | `all` | which streams to search: `all`, `stdout`, or `stderr`. |
-| `case_insensitive` | `bool` | `false` | fold case when matching. |
-| `invert_match` | `bool` | `false` | return lines that do NOT match. |
-| `max_matches` | `int` | `1000` | cap on returned matches; max `10000`. |
-
-**Outputs**
-
-| Field | Type | Notes |
-|-------|------|-------|
-| `matches` | `object[]` | One entry per matching line; see fields below. |
-| `match_count` | `int` | Number of returned matches. |
-| `truncated` | `bool` | `max_matches` was hit before the streams were fully scanned. |
-
-Each `matches[]` entry has `stream` (`"stdout"` or `"stderr"`),
-`line_number` (1-based, per stream), `line`, and `content_encoding`
-(omitted for UTF-8 lines, `"base64"` when the line is base64-encoded).
-
-#### `cg_prune`
-
-Evict capture runs from `$TMPDIR/cg/`. Either keep the `N` most recent
-runs by mtime or remove runs older than a duration. `keep` and
-`older_than` are mutually exclusive.
-
-**Inputs**
-
-| Field | Type | Default | Notes |
-|-------|------|---------|-------|
-| `keep` | `int` | `50` | keep N most recent runs by mtime. |
-| `older_than` | `string` | unset | evict runs older than the given duration, e.g. `7d`, `2h`, `90m`. |
-| `dry_run` | `bool` | `false` | report what would be removed without removing. |
-
-**Outputs**
-
-| Field | Type | Notes |
-|-------|------|-------|
-| `removed` | `string[]` | Run IDs that were or would be removed. |
-| `dry_run` | `bool` | Echoes the input flag. |
+In enforce mode the matcher checks deny rules, then allow rules, then prompts;
+deny always wins. Each rule matches by `exact` argv, `prefix` tokens, `glob`,
+or `regex`. `argv[0]` is resolved to an absolute path before matching, so
+path-based rules work however the command was spelled. `as_basename: true`
+matches the program's basename instead, regardless of install path; shells and
+inline-code interpreters are denied by default and cannot be re-allowed.
 
 
 `enc`
