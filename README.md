@@ -81,6 +81,23 @@ calc:000/ Construction: Multiply(Inverse(Named("1", Int(1))), Multiply(Int(22), 
 
 Sessions can be saved and loaded with `.save` and `.load`.
 
+Functions are called with C-style syntax, e.g. `sin(0)`, `log(8, 2)`, or
+`atan2(1, 1)`. The library, also listed in the REPL with `.show functions`:
+
+| Group | Functions |
+|-------|-----------|
+| Basic | `abs(x)` |
+| Trigonometric | `sin(x)`, `cos(x)`, `tan(x)`, `asin(x)`, `acos(x)`, `atan(x)`, `atan2(y, x)` |
+| Exponential and logarithmic | `exp(x)`, `ln(x)`, `log10(x)`, `log2(x)`, `log(x, base)` |
+| Roots | `sqrt(x)`, `cbrt(x)` |
+| Rounding | `floor(x)`, `ceil(x)`, `round(x)` |
+| Comparison | `min(x, ...)`, `max(x, ...)` |
+| Hyperbolic | `sinh(x)`, `cosh(x)`, `tanh(x)` |
+| Combinatorial | `factorial(n)` |
+
+Trig functions take and return radians; work in degrees by converting
+explicitly, e.g. `sin(45 * PI / 180)`.
+
 
 `cg`
 ----
