@@ -399,6 +399,20 @@ func TestParserExpressions(t *testing.T) {
 			exprs: []string{"sin = 5", "sin(0) + sin"},
 			want:  5,
 		},
+		{name: "cos call", exprs: []string{"cos(0)"}, want: 1},
+		{name: "tan call", exprs: []string{"tan(0)"}, want: 0},
+		{name: "exp call", exprs: []string{"exp(1)"}, want: math.E},
+		{name: "ln call", exprs: []string{"ln(1)"}, want: 0},
+		{name: "ln of e", exprs: []string{"ln(E)"}, want: 1},
+		{name: "log10 call", exprs: []string{"log10(1000)"}, want: 3},
+		{name: "log2 call", exprs: []string{"log2(8)"}, want: 3},
+		{name: "log base call", exprs: []string{"log(8, 2)"}, want: 3},
+		{name: "atan call", exprs: []string{"atan(0)"}, want: 0},
+		{name: "atan2 call", exprs: []string{"atan2(1, 1)"}, want: math.Pi / 4},
+		{name: "asin call", exprs: []string{"asin(1)"}, want: math.Pi / 2},
+		{name: "acos call", exprs: []string{"acos(1)"}, want: 0},
+		{name: "cbrt of negative", exprs: []string{"cbrt(-8)"}, want: -2},
+		{name: "cbrt of positive", exprs: []string{"cbrt(27)"}, want: 3},
 	}
 
 	for _, tt := range tests {
@@ -500,7 +514,42 @@ func TestCallEvalErrors(t *testing.T) {
 		{
 			name:    "domain error",
 			expr:    "sqrt(-1)",
-			wantErr: "non-negative",
+			wantErr: "sqrt(-1): argument must be non-negative",
+		},
+		{
+			name:    "ln of non-positive",
+			expr:    "ln(-1)",
+			wantErr: "ln(-1): argument must be positive",
+		},
+		{
+			name:    "log10 of zero",
+			expr:    "log10(0)",
+			wantErr: "log10(0): argument must be positive",
+		},
+		{
+			name:    "asin outside unit interval",
+			expr:    "asin(2)",
+			wantErr: "asin(2): argument must be in [-1, 1]",
+		},
+		{
+			name:    "acos outside unit interval",
+			expr:    "acos(2)",
+			wantErr: "acos(2): argument must be in [-1, 1]",
+		},
+		{
+			name:    "atan2 at origin",
+			expr:    "atan2(0, 0)",
+			wantErr: "atan2(0, 0): undefined at the origin",
+		},
+		{
+			name:    "log base one",
+			expr:    "log(8, 1)",
+			wantErr: "log(8, 1): base must not be equal to one",
+		},
+		{
+			name:    "log with one argument",
+			expr:    "log(8)",
+			wantErr: "log expects 2 arguments, got 1",
 		},
 	}
 

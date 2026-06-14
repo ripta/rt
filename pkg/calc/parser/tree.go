@@ -263,7 +263,7 @@ func (n *CallNode) Eval(env *Env) (*unified.Real, error) {
 
 	result, err := fn.fn(env, args)
 	if err != nil {
-		return nil, fmt.Errorf("%s: %w", n.Func.Pos, err)
+		return nil, fmt.Errorf("%s: %w", n.Func.Pos, domainError(n.Func.Value, args, env.precision, err))
 	}
 	return result, nil
 }
