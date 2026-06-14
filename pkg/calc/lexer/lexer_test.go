@@ -86,6 +86,19 @@ var tokenTests = []tokenTest{
 		wantErr: "too many decimal points",
 	},
 	{
+		name:  "function call with comma-separated arguments",
+		input: "max(1, 2)",
+		want: []tokenExpectation{
+			{Type: tokens.IDENT, Value: "max", Col: 1},
+			{Type: tokens.LPAREN, Value: "(", Col: 4},
+			{Type: tokens.LIT_INT, Value: "1", Col: 5},
+			{Type: tokens.COMMA, Value: ",", Col: 6},
+			{Type: tokens.WHITESPACE, Value: " ", Col: 7},
+			{Type: tokens.LIT_INT, Value: "2", Col: 8},
+			{Type: tokens.RPAREN, Value: ")", Col: 9},
+		},
+	},
+	{
 		name:  "minus operator and identifier",
 		input: "-foo",
 		want: []tokenExpectation{

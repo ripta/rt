@@ -359,6 +359,46 @@ func TestParserExpressions(t *testing.T) {
 			exprs: []string{`a "assign" = 5`, `a * 2`},
 			want:  10,
 		},
+		{
+			name:  "sqrt call",
+			exprs: []string{"sqrt(4)"},
+			want:  2,
+		},
+		{
+			name:  "abs call",
+			exprs: []string{"abs(-3)"},
+			want:  3,
+		},
+		{
+			name:  "sin call",
+			exprs: []string{"sin(0)"},
+			want:  0,
+		},
+		{
+			name:  "call with grouped argument expression",
+			exprs: []string{"sqrt(2 + 2)"},
+			want:  2,
+		},
+		{
+			name:  "call nested in expression",
+			exprs: []string{"sqrt(9) + abs(-1)"},
+			want:  4,
+		},
+		{
+			name:  "call with whitespace around argument",
+			exprs: []string{"sqrt( 16 )"},
+			want:  4,
+		},
+		{
+			name:  "variable shares name with function",
+			exprs: []string{"sin = 5", "sin"},
+			want:  5,
+		},
+		{
+			name:  "variable and function coexist",
+			exprs: []string{"sin = 5", "sin(0) + sin"},
+			want:  5,
+		},
 	}
 
 	for _, tt := range tests {
@@ -406,6 +446,16 @@ func TestParserErrors(t *testing.T) {
 			expr:    "$",
 			wantErr: "expected digits after '$'",
 		},
+		{
+			name:    "missing comma between arguments",
+			expr:    "max(1 2)",
+			wantErr: "expected ',' or ')'",
+		},
+		{
+			name:    "unterminated argument list",
+			expr:    "sqrt(4",
+			wantErr: "expected ',' or ')', got EOF",
+		},
 	}
 
 	for _, tt := range tests {
@@ -414,6 +464,51 @@ func TestParserErrors(t *testing.T) {
 			t.Parallel()
 			p := New("test", tt.expr)
 			_, err := p.Parse()
+			if err == nil {
+				t.Fatalf("expected error containing %q", tt.wantErr)
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("error mismatch: got %v want substring %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestCallEvalErrors(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		expr    string
+		wantErr string
+	}{
+		{
+			name:    "too few arguments",
+			expr:    "sin()",
+			wantErr: "sin expects 1 argument, got 0",
+		},
+		{
+			name:    "too many arguments",
+			expr:    "sin(1, 2)",
+			wantErr: "sin expects 1 argument, got 2",
+		},
+		{
+			name:    "unknown function",
+			expr:    "nope(1)",
+			wantErr: `unknown function "nope"`,
+		},
+		{
+			name:    "domain error",
+			expr:    "sqrt(-1)",
+			wantErr: "non-negative",
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := parseAndEval(t, tt.expr, NewEnv())
 			if err == nil {
 				t.Fatalf("expected error containing %q", tt.wantErr)
 			}

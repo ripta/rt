@@ -237,6 +237,37 @@ func (n *IdentNode) Eval(env *Env) (*unified.Real, error) {
 	return nil, fmt.Errorf("%s: undefined identifier %q", n.Name.Pos, n.Name.Value)
 }
 
+type CallNode struct {
+	Func tokens.Token
+	Args []Node
+}
+
+func (n *CallNode) Eval(env *Env) (*unified.Real, error) {
+	fn, ok := functions[n.Func.Value]
+	if !ok {
+		return nil, fmt.Errorf("%s: unknown function %q", n.Func.Pos, n.Func.Value)
+	}
+
+	if len(n.Args) < fn.minArgs || (fn.maxArgs >= 0 && len(n.Args) > fn.maxArgs) {
+		return nil, fmt.Errorf("%s: %s %s", n.Func.Pos, n.Func.Value, arityError(fn, len(n.Args)))
+	}
+
+	args := make([]*unified.Real, len(n.Args))
+	for i, a := range n.Args {
+		val, err := a.Eval(env)
+		if err != nil {
+			return nil, err
+		}
+		args[i] = val
+	}
+
+	result, err := fn.fn(env, args)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", n.Func.Pos, err)
+	}
+	return result, nil
+}
+
 type AssignNode struct {
 	Name  tokens.Token
 	Value Node
