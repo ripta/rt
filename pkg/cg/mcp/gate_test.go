@@ -42,7 +42,7 @@ func newTestGateAt(t *testing.T, root, projectYAML string, blindly bool) *gate {
 func TestGateAllowRuns(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 
-	g := newTestGate(t, "version: 1\nallow:\n  - prefix: [echo]\n", false)
+	g := newTestGate(t, "version: 1\nallow:\n  - prefix: [echo]\n    as_basename: true\n", false)
 	_, out, err := handleRun(context.Background(), nil, g, nil, runInput{
 		Command: []string{"echo", "hi"},
 	})
@@ -57,7 +57,7 @@ func TestGateAllowRuns(t *testing.T) {
 func TestGateDenyRefusesWithMessage(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 
-	g := newTestGate(t, "version: 1\ndeny:\n  - prefix: [rm, -rf]\n    message: delete specific paths instead\n", false)
+	g := newTestGate(t, "version: 1\ndeny:\n  - prefix: [rm, -rf]\n    as_basename: true\n    message: delete specific paths instead\n", false)
 	_, _, err := handleRun(context.Background(), nil, g, nil, runInput{
 		Command: []string{"rm", "-rf", "x"},
 	})
@@ -115,7 +115,7 @@ func TestGateFailsClosedOnUnmatched(t *testing.T) {
 func TestGateEnvGateRefuses(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 
-	g := newTestGate(t, "version: 1\nallow:\n  - prefix: [echo]\n", false)
+	g := newTestGate(t, "version: 1\nallow:\n  - prefix: [echo]\n    as_basename: true\n", false)
 	_, _, err := handleRun(context.Background(), nil, g, nil, runInput{
 		Command: []string{"echo", "hi"},
 		Env:     map[string]string{"LD_PRELOAD": "evil.so"},
@@ -131,7 +131,7 @@ func TestGateEnvGateRefuses(t *testing.T) {
 func TestGateEnvGatePermitted(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 
-	g := newTestGate(t, "version: 1\nallow:\n  - prefix: [echo]\n    permit_unsafe_envs: [PATH]\n", false)
+	g := newTestGate(t, "version: 1\nallow:\n  - prefix: [echo]\n    as_basename: true\n    permit_unsafe_envs: [PATH]\n", false)
 	_, out, err := handleRun(context.Background(), nil, g, nil, runInput{
 		Command: []string{"echo", "hi"},
 		Env:     map[string]string{"PATH": os.Getenv("PATH")},

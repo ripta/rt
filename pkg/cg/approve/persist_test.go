@@ -85,7 +85,7 @@ func TestAppendCreatesProjectFile(t *testing.T) {
 
 	// The file must reload cleanly and the rule must be live.
 	reloaded := loadProject(t, root)
-	if got := reloaded.Ruleset().Match([]string{"make", "build"}); got.Decision != DecisionRun {
+	if got := reloaded.Ruleset().Match(identitySubject([]string{"make", "build"})); got.Decision != DecisionRun {
 		t.Errorf("reloaded match = %v, want run", got.Decision)
 	}
 }
@@ -96,13 +96,13 @@ func TestAppendUpdatesLiveMatcher(t *testing.T) {
 	root := t.TempDir()
 	s := loadProject(t, root)
 
-	if got := s.Ruleset().Match([]string{"make"}); got.Decision != DecisionPrompt {
+	if got := s.Ruleset().Match(identitySubject([]string{"make"})); got.Decision != DecisionPrompt {
 		t.Fatalf("before append, match = %v, want prompt", got.Decision)
 	}
 	if err := s.AppendProjectAllowPrefix([]string{"make"}, WriteDirect); err != nil {
 		t.Fatalf("AppendProjectAllowPrefix: %v", err)
 	}
-	if got := s.Ruleset().Match([]string{"make"}); got.Decision != DecisionRun {
+	if got := s.Ruleset().Match(identitySubject([]string{"make"})); got.Decision != DecisionRun {
 		t.Errorf("after append, match = %v, want run (live swap)", got.Decision)
 	}
 }
@@ -126,8 +126,9 @@ func TestAppendPreservesCommentsAndQuotesTokens(t *testing.T) {
 	if !strings.Contains(got, "# keep this comment") {
 		t.Errorf("comment not preserved:\n%s", got)
 	}
-	// yes must round-trip as a string, not the boolean true.
-	if !strings.Contains(got, "yes") || strings.Contains(got, "true") {
+	// yes must round-trip as a string, not the boolean true. The rule itself
+	// carries as_basename: true, so check the token rendering specifically.
+	if !strings.Contains(got, "[weird, yes]") || strings.Contains(got, "[weird, true]") {
 		t.Errorf("token yes mis-rendered:\n%s", got)
 	}
 
@@ -136,10 +137,10 @@ func TestAppendPreservesCommentsAndQuotesTokens(t *testing.T) {
 	if len(reloaded.Project.Doc.Allow) != 2 {
 		t.Errorf("allow count = %d, want 2", len(reloaded.Project.Doc.Allow))
 	}
-	if got := reloaded.Ruleset().Match([]string{"go", "test"}); got.Decision != DecisionRun {
+	if got := reloaded.Ruleset().Match(identitySubject([]string{"go", "test"})); got.Decision != DecisionRun {
 		t.Errorf("existing rule lost: match = %v, want run", got.Decision)
 	}
-	if got := reloaded.Ruleset().Match([]string{"weird", "yes"}); got.Decision != DecisionRun {
+	if got := reloaded.Ruleset().Match(identitySubject([]string{"weird", "yes"})); got.Decision != DecisionRun {
 		t.Errorf("new rule missing: match = %v, want run", got.Decision)
 	}
 }
@@ -259,7 +260,7 @@ func TestReloadMergeUnionsRules(t *testing.T) {
 		{"cargo", "build", "--release"},
 	}
 	for _, argv := range wants {
-		if got := reloaded.Ruleset().Match(argv); got.Decision != DecisionRun {
+		if got := reloaded.Ruleset().Match(identitySubject(argv)); got.Decision != DecisionRun {
 			t.Errorf("after reload-merge, match %v = %v, want run", argv, got.Decision)
 		}
 	}
@@ -281,13 +282,13 @@ func TestOverwriteDropsDiskChanges(t *testing.T) {
 	}
 
 	reloaded := loadProject(t, root)
-	if got := reloaded.Ruleset().Match([]string{"npm", "ci"}); got.Decision == DecisionRun {
+	if got := reloaded.Ruleset().Match(identitySubject([]string{"npm", "ci"})); got.Decision == DecisionRun {
 		t.Errorf("overwrite kept the dropped on-disk rule")
 	}
-	if got := reloaded.Ruleset().Match([]string{"go", "vet"}); got.Decision != DecisionRun {
+	if got := reloaded.Ruleset().Match(identitySubject([]string{"go", "vet"})); got.Decision != DecisionRun {
 		t.Errorf("overwrite did not add the new rule")
 	}
-	if got := reloaded.Ruleset().Match([]string{"make"}); got.Decision != DecisionRun {
+	if got := reloaded.Ruleset().Match(identitySubject([]string{"make"})); got.Decision != DecisionRun {
 		t.Errorf("overwrite lost the in-memory make rule")
 	}
 }

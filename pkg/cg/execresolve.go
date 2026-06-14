@@ -82,6 +82,21 @@ func resolveExecPath(argv0, cwd string) (string, error) {
 	return filepath.Join(base, argv0), nil
 }
 
+// CanonicalArgv is the argv the approval matcher evaluates against canonical
+// rules: the symlink-evaluated executable path followed by the original argument
+// tail. It is nil when canonicalization did not succeed, so a command with an
+// unknown executable identity cannot be allowed by canonical policy.
+func (r *Resolution) CanonicalArgv() []string {
+	if r == nil || r.Canonical == "" || len(r.Argv) == 0 {
+		return nil
+	}
+
+	out := make([]string, len(r.Argv))
+	out[0] = r.Canonical
+	copy(out[1:], r.Argv[1:])
+	return out
+}
+
 // ExecPath is the path RunCapture execs: the canonical path when available, then
 // the resolved path, falling back to the original argv[0] so a command that
 // could not be resolved still surfaces its start failure through exec.

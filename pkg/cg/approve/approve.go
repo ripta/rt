@@ -47,13 +47,15 @@ const (
 
 // Rule is one allow or deny entry. Exactly one of Exact/Prefix/Glob/Regex is
 // populated after validation; kind records which. Message is valid only on deny
-// rules and PermitUnsafeEnvs only on allow rules.
+// rules and PermitUnsafeEnvs only on allow rules. AsBasename, valid on both,
+// matches the basename form of the subject instead of the canonical form.
 type Rule struct {
 	Exact  []string `yaml:"exact,omitempty"`
 	Prefix []string `yaml:"prefix,omitempty"`
 	Glob   string   `yaml:"glob,omitempty"`
 	Regex  string   `yaml:"regex,omitempty"`
 
+	AsBasename       bool     `yaml:"as_basename,omitempty"`
 	Message          string   `yaml:"message,omitempty"`
 	PermitUnsafeEnvs []string `yaml:"permit_unsafe_envs,omitempty"`
 
@@ -110,6 +112,20 @@ type Store struct {
 
 // Ruleset returns the current ruleset the matcher evaluates.
 func (s *Store) Ruleset() *Ruleset { return s.rules.Load() }
+
+// Subject is the command representation the matcher evaluates. Argv is the
+// original argv as invoked. Canonical is the resolved, symlink-evaluated argv
+// whose first element is the absolute executable path and whose tail mirrors
+// Argv[1:]; it is nil when the executable could not be resolved or canonicalized.
+//
+// Rules match Canonical by default, so a non-basename rule cannot match when
+// Canonical is nil. A rule with AsBasename set instead matches a form derived
+// from filepath.Base(Argv[0]), the invoked token, so name-based rules still
+// evaluate even when canonicalization fails.
+type Subject struct {
+	Argv      []string
+	Canonical []string
+}
 
 // Decision is the matcher's verdict for a command.
 type Decision int
