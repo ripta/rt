@@ -35,6 +35,69 @@ func TestApprovalSchemaFieldOrder(t *testing.T) {
 	}
 }
 
+// renderDivergenceTest drives the tiered divergence rendering: a small change
+// stays a unified diff, a taller one collapses to changed lines, and an even
+// larger one collapses to a count summary.
+type renderDivergenceTest struct {
+	name     string
+	snapshot string
+	current  string
+	maxLines int
+	contains []string
+	absent   []string
+}
+
+var renderDivergenceTests = []renderDivergenceTest{
+	{
+		name:     "small change keeps unified diff",
+		snapshot: "a\nb\nc\n",
+		current:  "a\nb\nc\nd\n",
+		maxLines: maxDiffLines,
+		contains: []string{"--- loaded", "+++ on disk", "+d"},
+	},
+	{
+		name:     "tall change collapses to changed lines",
+		snapshot: "a\nb\nc\nd\ne\nf\ng\nh\ni\nj\nk\nl\n",
+		current:  "a\nX1\nb\nc\nd\ne\nY1\nf\ng\nh\ni\nZ1\nj\nk\nl\n",
+		maxLines: maxDiffLines,
+		contains: []string{"+X1", "+Y1", "+Z1"},
+		absent:   []string{"@@", "loaded", "on disk"},
+	},
+	{
+		name:     "huge change collapses to summary",
+		snapshot: "a\n",
+		current:  "a\nn01\nn02\nn03\nn04\nn05\nn06\nn07\nn08\nn09\nn10\nn11\nn12\n",
+		maxLines: 1,
+		contains: []string{"12 line(s) added", "0 line(s) removed", "too large"},
+		absent:   []string{"@@", "+n01"},
+	},
+}
+
+func TestRenderDivergence(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range renderDivergenceTests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := renderDivergence([]byte(test.snapshot), []byte(test.current))
+			if n := countLines(got); n > test.maxLines {
+				t.Errorf("body has %d lines, want <= %d:\n%s", n, test.maxLines, got)
+			}
+			for _, want := range test.contains {
+				if !strings.Contains(got, want) {
+					t.Errorf("body missing %q:\n%s", want, got)
+				}
+			}
+			for _, bad := range test.absent {
+				if strings.Contains(got, bad) {
+					t.Errorf("body should not contain %q:\n%s", bad, got)
+				}
+			}
+		})
+	}
+}
+
 // fakeElicitor returns canned results for each Elicit call in order, so a test
 // can script both the approval prompt and the divergence prompt. It records the
 // params it was sent for assertions.

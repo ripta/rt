@@ -28,6 +28,11 @@ const (
 	divergeOverwrite   = "overwrite"
 	divergeSkip        = "skip"
 
+	// maxDiffLines bounds how tall the divergence body may grow. The elicitation
+	// dialog does not scroll, so a taller body pushes the approval buttons off
+	// screen; past this many lines the body collapses to changed lines, then to a
+	// count summary.
+	maxDiffLines = 10
 	maxDiffBytes = 4000
 )
 
@@ -164,25 +169,87 @@ func approvalSchema(suggestion []string, path string) *jsonschema.Schema {
 	}
 }
 
-// divergenceMessage renders the second prompt's body with a unified diff of the
-// project file as loaded versus its current on-disk content. path is the project
-// rules file the diff describes.
+// divergenceMessage renders the second prompt's body describing how the project
+// file as loaded differs from its current on-disk content. path is the project
+// rules file the change describes.
 func divergenceMessage(snapshot, current []byte, path string) string {
+	return fmt.Sprintf("%s changed on disk since it was loaded. How should the remembered rule be saved?\n\n%s", path, renderDivergence(snapshot, current))
+}
+
+// renderDivergence renders a compact view of the change between the loaded
+// snapshot and the current on-disk content. A small change shows as a unified
+// diff with one line of context; a taller change collapses to just the added and
+// removed lines; a change whose changed lines still overflow collapses to a count
+// summary. This keeps the body short enough that the approval buttons stay on
+// screen, since the elicitation dialog does not scroll.
+func renderDivergence(snapshot, current []byte) string {
 	diff, err := difflib.GetUnifiedDiffString(difflib.UnifiedDiff{
 		A:        difflib.SplitLines(string(snapshot)),
 		B:        difflib.SplitLines(string(current)),
 		FromFile: "loaded",
 		ToFile:   "on disk",
-		Context:  3,
+		Context:  1,
 	})
 	if err != nil {
-		diff = "(could not render diff)"
-	}
-	if len(diff) > maxDiffBytes {
-		diff = diff[:maxDiffBytes] + "\n... (diff truncated)"
+		return "(could not render diff)"
 	}
 
-	return fmt.Sprintf("%s changed on disk since it was loaded. How should the remembered rule be saved?\n\n%s", path, diff)
+	diff = strings.TrimRight(diff, "\n")
+	if countLines(diff) <= maxDiffLines {
+		return clampBytes(diff)
+	}
+
+	changed := changedLines(diff)
+	if len(changed) <= maxDiffLines {
+		return clampBytes(strings.Join(changed, "\n"))
+	}
+
+	added, removed := 0, 0
+	for _, line := range changed {
+		if strings.HasPrefix(line, "+") {
+			added++
+		} else {
+			removed++
+		}
+	}
+
+	return fmt.Sprintf("%d line(s) added, %d line(s) removed (change too large to show)", added, removed)
+}
+
+// changedLines extracts only the added and removed lines from a unified diff,
+// dropping the file headers, hunk headers, and context lines. The returned lines
+// keep their leading + or - marker.
+func changedLines(diff string) []string {
+	var out []string
+	for _, line := range strings.Split(diff, "\n") {
+		if strings.HasPrefix(line, "+++") || strings.HasPrefix(line, "---") {
+			continue
+		}
+		if strings.HasPrefix(line, "+") || strings.HasPrefix(line, "-") {
+			out = append(out, line)
+		}
+	}
+
+	return out
+}
+
+// countLines reports the number of newline-separated lines in s.
+func countLines(s string) int {
+	if s == "" {
+		return 0
+	}
+
+	return strings.Count(s, "\n") + 1
+}
+
+// clampBytes guards against pathologically long lines by capping the body at
+// maxDiffBytes, since the line-count bounds alone do not limit line width.
+func clampBytes(s string) string {
+	if len(s) > maxDiffBytes {
+		return s[:maxDiffBytes] + "\n... (truncated)"
+	}
+
+	return s
 }
 
 // divergenceSchema builds the titled-enum form for reconciling an on-disk
