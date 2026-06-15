@@ -6,9 +6,10 @@ package approve
 // would otherwise wave through arbitrary code in an argument the rules do not
 // introspect. Allowlisting an interpreter allowlists everything it can run.
 //
-// Rules are prefix kind, so the deny-side basename normalization catches the
-// program however it is spelled (sh, /bin/sh, ./sh). The two-token interpreter
-// rules additionally pin argv[1] to the eval flag.
+// Rules are prefix kind with as_basename set, so they match the invoked token's
+// basename and catch the program however it is spelled (sh, /bin/sh, ./sh), even
+// when /bin/sh is a symlink to dash or busybox. The two-token interpreter rules
+// additionally pin argv[1] to the eval flag.
 func builtinDenyRules() []Rule {
 	tokens := [][]string{
 		{"sh"},
@@ -26,7 +27,7 @@ func builtinDenyRules() []Rule {
 
 	rules := make([]Rule, len(tokens))
 	for i, t := range tokens {
-		rules[i] = Rule{Prefix: t, kind: KindPrefix}
+		rules[i] = Rule{Prefix: t, AsBasename: true, kind: KindPrefix}
 	}
 
 	return rules

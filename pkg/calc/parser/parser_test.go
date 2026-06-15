@@ -359,6 +359,114 @@ func TestParserExpressions(t *testing.T) {
 			exprs: []string{`a "assign" = 5`, `a * 2`},
 			want:  10,
 		},
+		{
+			name:  "sqrt call",
+			exprs: []string{"sqrt(4)"},
+			want:  2,
+		},
+		{
+			name:  "abs call",
+			exprs: []string{"abs(-3)"},
+			want:  3,
+		},
+		{
+			name:  "sin call",
+			exprs: []string{"sin(0)"},
+			want:  0,
+		},
+		{
+			name:  "call with grouped argument expression",
+			exprs: []string{"sqrt(2 + 2)"},
+			want:  2,
+		},
+		{
+			name:  "call nested in expression",
+			exprs: []string{"sqrt(9) + abs(-1)"},
+			want:  4,
+		},
+		{
+			name:  "call with whitespace around argument",
+			exprs: []string{"sqrt( 16 )"},
+			want:  4,
+		},
+		{
+			name:  "variable shares name with function",
+			exprs: []string{"sin = 5", "sin"},
+			want:  5,
+		},
+		{
+			name:  "variable and function coexist",
+			exprs: []string{"sin = 5", "sin(0) + sin"},
+			want:  5,
+		},
+		{name: "cos call", exprs: []string{"cos(0)"}, want: 1},
+		{name: "tan call", exprs: []string{"tan(0)"}, want: 0},
+		{name: "exp call", exprs: []string{"exp(1)"}, want: math.E},
+		{name: "ln call", exprs: []string{"ln(1)"}, want: 0},
+		{name: "ln of e", exprs: []string{"ln(E)"}, want: 1},
+		{name: "log10 call", exprs: []string{"log10(1000)"}, want: 3},
+		{name: "log2 call", exprs: []string{"log2(8)"}, want: 3},
+		{name: "log base call", exprs: []string{"log(8, 2)"}, want: 3},
+		{name: "atan call", exprs: []string{"atan(0)"}, want: 0},
+		{name: "atan2 call", exprs: []string{"atan2(1, 1)"}, want: math.Pi / 4},
+		{name: "asin call", exprs: []string{"asin(1)"}, want: math.Pi / 2},
+		{name: "acos call", exprs: []string{"acos(1)"}, want: 0},
+		{name: "cbrt of negative", exprs: []string{"cbrt(-8)"}, want: -2},
+		{name: "cbrt of positive", exprs: []string{"cbrt(27)"}, want: 3},
+		{name: "floor call", exprs: []string{"floor(3.7)"}, want: 3},
+		{name: "floor of integer", exprs: []string{"floor(3.0)"}, want: 3},
+		{name: "ceil call", exprs: []string{"ceil(3.2)"}, want: 4},
+		{name: "round half away from zero", exprs: []string{"round(2.5)"}, want: 3},
+		{name: "round negative half away from zero", exprs: []string{"round(-2.5)"}, want: -3},
+		{name: "min call", exprs: []string{"min(3, 1, 2)"}, want: 1},
+		{name: "max call", exprs: []string{"max(3, 1, 2)"}, want: 3},
+		{name: "min single argument", exprs: []string{"min(5)"}, want: 5},
+		{name: "max of equal irrationals", exprs: []string{"max(PI, PI)"}, want: math.Pi},
+		{name: "sinh call", exprs: []string{"sinh(0)"}, want: 0},
+		{name: "cosh call", exprs: []string{"cosh(0)"}, want: 1},
+		{name: "tanh call", exprs: []string{"tanh(0)"}, want: 0},
+		{name: "factorial of zero", exprs: []string{"factorial(0)"}, want: 1},
+		{name: "factorial call", exprs: []string{"factorial(5)"}, want: 120},
+		{name: "factorial of ten", exprs: []string{"factorial(10)"}, want: 3628800},
+		{name: "gamma of one", exprs: []string{"gamma(1)"}, want: 1},
+		{name: "gamma matches factorial", exprs: []string{"gamma(5)"}, want: 24},
+		{name: "gamma of one half", exprs: []string{"gamma(0.5)"}, want: math.Sqrt(math.Pi)},
+		{name: "lgamma of one", exprs: []string{"lgamma(1)"}, want: 0},
+		{name: "lgamma matches log factorial", exprs: []string{"lgamma(5)"}, want: math.Log(24)},
+		{name: "lgamma of one half", exprs: []string{"lgamma(0.5)"}, want: math.Log(math.Sqrt(math.Pi))},
+		{name: "signum of negative", exprs: []string{"signum(-3)"}, want: -1},
+		{name: "signum of zero", exprs: []string{"signum(0)"}, want: 0},
+		{name: "signum of positive", exprs: []string{"signum(2.5)"}, want: 1},
+		{name: "trunc of positive", exprs: []string{"trunc(3.9)"}, want: 3},
+		{name: "trunc of negative", exprs: []string{"trunc(-3.9)"}, want: -3},
+		{name: "trunc of integer", exprs: []string{"trunc(5)"}, want: 5},
+		{name: "deg2rad of straight angle", exprs: []string{"deg2rad(180)"}, want: math.Pi},
+		{name: "deg2rad of right angle", exprs: []string{"deg2rad(90)"}, want: math.Pi / 2},
+		{name: "rad2deg of pi", exprs: []string{"rad2deg(PI)"}, want: 180},
+		{name: "deg2rad and rad2deg round trip", exprs: []string{"rad2deg(deg2rad(57))"}, want: 57},
+		{name: "hypot of 3 and 4", exprs: []string{"hypot(3, 4)"}, want: 5},
+		{name: "hypot of zeroes", exprs: []string{"hypot(0, 0)"}, want: 0},
+		{name: "dist of two points", exprs: []string{"dist(0, 0, 3, 4)"}, want: 5},
+		{name: "dist with negative coordinates", exprs: []string{"dist(-1, -1, 2, 3)"}, want: 5},
+		{name: "dist of coincident points", exprs: []string{"dist(7, 2, 7, 2)"}, want: 0},
+		{name: "norm of one component", exprs: []string{"norm(-5)"}, want: 5},
+		{name: "norm of two components", exprs: []string{"norm(3, 4)"}, want: 5},
+		{name: "norm of three components", exprs: []string{"norm(2, 3, 6)"}, want: 7},
+		{name: "asinh of zero", exprs: []string{"asinh(0)"}, want: 0},
+		{name: "asinh of one", exprs: []string{"asinh(1)"}, want: math.Asinh(1)},
+		{name: "asinh of negative", exprs: []string{"asinh(-2)"}, want: math.Asinh(-2)},
+		{name: "acosh of one", exprs: []string{"acosh(1)"}, want: 0},
+		{name: "acosh of two", exprs: []string{"acosh(2)"}, want: math.Acosh(2)},
+		{name: "atanh of zero", exprs: []string{"atanh(0)"}, want: 0},
+		{name: "atanh of one half", exprs: []string{"atanh(0.5)"}, want: math.Atanh(0.5)},
+		{name: "atanh of negative", exprs: []string{"atanh(-0.5)"}, want: math.Atanh(-0.5)},
+		{name: "choose call", exprs: []string{"choose(5, 2)"}, want: 10},
+		{name: "choose with zero k", exprs: []string{"choose(10, 0)"}, want: 1},
+		{name: "choose with k greater than n", exprs: []string{"choose(4, 5)"}, want: 0},
+		{name: "choose of a poker hand", exprs: []string{"choose(52, 5)"}, want: 2598960},
+		{name: "perm call", exprs: []string{"perm(5, 2)"}, want: 20},
+		{name: "perm with zero k", exprs: []string{"perm(5, 0)"}, want: 1},
+		{name: "perm with k greater than n", exprs: []string{"perm(4, 5)"}, want: 0},
 	}
 
 	for _, tt := range tests {
@@ -406,6 +514,16 @@ func TestParserErrors(t *testing.T) {
 			expr:    "$",
 			wantErr: "expected digits after '$'",
 		},
+		{
+			name:    "missing comma between arguments",
+			expr:    "max(1 2)",
+			wantErr: "expected ',' or ')'",
+		},
+		{
+			name:    "unterminated argument list",
+			expr:    "sqrt(4",
+			wantErr: "expected ',' or ')', got EOF",
+		},
 	}
 
 	for _, tt := range tests {
@@ -414,6 +532,146 @@ func TestParserErrors(t *testing.T) {
 			t.Parallel()
 			p := New("test", tt.expr)
 			_, err := p.Parse()
+			if err == nil {
+				t.Fatalf("expected error containing %q", tt.wantErr)
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("error mismatch: got %v want substring %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestCallEvalErrors(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		expr    string
+		wantErr string
+	}{
+		{
+			name:    "too few arguments",
+			expr:    "sin()",
+			wantErr: "sin expects 1 argument, got 0",
+		},
+		{
+			name:    "too many arguments",
+			expr:    "sin(1, 2)",
+			wantErr: "sin expects 1 argument, got 2",
+		},
+		{
+			name:    "unknown function",
+			expr:    "nope(1)",
+			wantErr: `unknown function "nope"`,
+		},
+		{
+			name:    "domain error",
+			expr:    "sqrt(-1)",
+			wantErr: "sqrt(-1): argument must be non-negative",
+		},
+		{
+			name:    "ln of non-positive",
+			expr:    "ln(-1)",
+			wantErr: "ln(-1): argument must be positive",
+		},
+		{
+			name:    "log10 of zero",
+			expr:    "log10(0)",
+			wantErr: "log10(0): argument must be positive",
+		},
+		{
+			name:    "asin outside unit interval",
+			expr:    "asin(2)",
+			wantErr: "asin(2): argument must be in [-1, 1]",
+		},
+		{
+			name:    "acos outside unit interval",
+			expr:    "acos(2)",
+			wantErr: "acos(2): argument must be in [-1, 1]",
+		},
+		{
+			name:    "atan2 at origin",
+			expr:    "atan2(0, 0)",
+			wantErr: "atan2(0, 0): undefined at the origin",
+		},
+		{
+			name:    "log base one",
+			expr:    "log(8, 1)",
+			wantErr: "log(8, 1): base must not be equal to one",
+		},
+		{
+			name:    "log with one argument",
+			expr:    "log(8)",
+			wantErr: "log expects 2 arguments, got 1",
+		},
+		{
+			name:    "factorial of negative",
+			expr:    "factorial(-1)",
+			wantErr: "factorial(-1): argument must be a non-negative integer",
+		},
+		{
+			name:    "factorial of non-integer",
+			expr:    "factorial(1.5)",
+			wantErr: "factorial(1.5): argument must be a non-negative integer",
+		},
+		{
+			name:    "gamma at a pole",
+			expr:    "gamma(0)",
+			wantErr: "gamma(0): argument must not be a non-positive integer",
+		},
+		{
+			name:    "gamma at a negative pole",
+			expr:    "gamma(-2)",
+			wantErr: "gamma(-2): argument must not be a non-positive integer",
+		},
+		{
+			name:    "min with no arguments",
+			expr:    "min()",
+			wantErr: "min expects at least 1 argument, got 0",
+		},
+		{
+			name:    "acosh below one",
+			expr:    "acosh(0.5)",
+			wantErr: "acosh(0.5): argument must be at least 1",
+		},
+		{
+			name:    "atanh at the boundary",
+			expr:    "atanh(1)",
+			wantErr: "atanh(1): argument must be in (-1, 1)",
+		},
+		{
+			name:    "atanh below the boundary",
+			expr:    "atanh(-2)",
+			wantErr: "atanh(-2): argument must be in (-1, 1)",
+		},
+		{
+			name:    "lgamma at a pole",
+			expr:    "lgamma(0)",
+			wantErr: "lgamma(0): argument must not be a non-positive integer",
+		},
+		{
+			name:    "choose of negative",
+			expr:    "choose(-1, 2)",
+			wantErr: "choose(-1, 2): arguments must be non-negative integers",
+		},
+		{
+			name:    "choose of non-integer",
+			expr:    "choose(5, 1.5)",
+			wantErr: "choose(5, 1.5): arguments must be non-negative integers",
+		},
+		{
+			name:    "perm of negative",
+			expr:    "perm(-1, 2)",
+			wantErr: "perm(-1, 2): arguments must be non-negative integers",
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := parseAndEval(t, tt.expr, NewEnv())
 			if err == nil {
 				t.Fatalf("expected error containing %q", tt.wantErr)
 			}

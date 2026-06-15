@@ -95,8 +95,9 @@ func (s *Store) AppendProjectAllowPrefix(tokens []string, strategy WriteStrategy
 	if root == nil {
 		return fmt.Errorf("project document has no root mapping")
 	}
+	asBasename := prefixWantsBasename(tokens)
 	allowSeq := ensureSeq(root, "allow")
-	allowSeq.Content = append(allowSeq.Content, buildPrefixEntry(tokens))
+	allowSeq.Content = append(allowSeq.Content, buildPrefixEntry(tokens, asBasename))
 	canonicalizeRuleSeqs(root)
 
 	data, err := renderDocument(doc)
@@ -116,9 +117,22 @@ func (s *Store) AppendProjectAllowPrefix(tokens []string, strategy WriteStrategy
 	s.Project.Snapshot = data
 	s.Project.Present = true
 
-	s.appendLiveAllow(tokens)
+	s.appendLiveAllow(tokens, asBasename)
 
 	return nil
+}
+
+// prefixWantsBasename reports whether a remembered prefix rule should match by
+// basename. A name-based program token, one with no slash, is matched by the
+// invoked basename so the rule fires however the program is spelled or resolved;
+// a path-bearing token describes an install location and matches the canonical
+// path instead.
+func prefixWantsBasename(tokens []string) bool {
+	if len(tokens) == 0 {
+		return false
+	}
+
+	return !strings.ContainsRune(tokens[0], filepath.Separator) && !strings.ContainsRune(tokens[0], '/')
 }
 
 // baseDocument returns the document node the new rule is appended to. The direct
@@ -186,8 +200,10 @@ func mergeAbsent(seq *yaml.Node, mem, disk []Rule, isDeny bool) {
 // appendLiveAllow swaps a new ruleset with tokens appended to Allow into the
 // atomic pointer. The deny slice is shared because it is never mutated; the
 // allow slice is copied so the live snapshot the matcher reads stays immutable.
-func (s *Store) appendLiveAllow(tokens []string) {
-	rule := Rule{Prefix: slices.Clone(tokens), kind: KindPrefix}
+// asBasename mirrors what was written to disk so the live rule matches the same
+// commands the reloaded file would.
+func (s *Store) appendLiveAllow(tokens []string, asBasename bool) {
+	rule := Rule{Prefix: slices.Clone(tokens), AsBasename: asBasename, kind: KindPrefix}
 	cur := s.rules.Load()
 	next := &Ruleset{
 		Mode:  cur.Mode,
@@ -230,15 +246,16 @@ func ruleEqual(a, b *Rule) bool {
 	return false
 }
 
-// buildPrefixEntry builds the mapping node for a prefix allow rule.
-func buildPrefixEntry(tokens []string) *yaml.Node {
-	return buildRuleEntry(&Rule{Prefix: tokens, kind: KindPrefix}, false)
+// buildPrefixEntry builds the mapping node for a prefix allow rule, marking it
+// as_basename when the rule should match by basename.
+func buildPrefixEntry(tokens []string, asBasename bool) *yaml.Node {
+	return buildRuleEntry(&Rule{Prefix: tokens, AsBasename: asBasename, kind: KindPrefix}, false)
 }
 
-// buildRuleEntry builds the YAML mapping node for a rule: its single kind key
-// plus any message (deny) or permit_unsafe_envs (allow). Every scalar carries an
-// explicit !!str tag so a token like yes or 123 round-trips as a string rather
-// than re-parsing as a bool or int.
+// buildRuleEntry builds the YAML mapping node for a rule: its single kind key,
+// an as_basename flag when set, plus any message (deny) or permit_unsafe_envs
+// (allow). Every scalar carries an explicit !!str tag so a token like yes or 123
+// round-trips as a string rather than re-parsing as a bool or int.
 func buildRuleEntry(rule *Rule, isDeny bool) *yaml.Node {
 	entry := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
 
@@ -253,6 +270,9 @@ func buildRuleEntry(rule *Rule, isDeny bool) *yaml.Node {
 		entry.Content = append(entry.Content, strScalar("regex"), strScalar(rule.Regex))
 	}
 
+	if rule.AsBasename {
+		entry.Content = append(entry.Content, strScalar("as_basename"), boolScalar(true))
+	}
 	if isDeny && rule.Message != "" {
 		entry.Content = append(entry.Content, strScalar("message"), strScalar(rule.Message))
 	}
@@ -395,6 +415,16 @@ func newEmptyProjectDoc() *yaml.Node {
 // strScalar builds a string scalar node with an explicit tag.
 func strScalar(v string) *yaml.Node {
 	return &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: v}
+}
+
+// boolScalar builds a boolean scalar node with an explicit tag.
+func boolScalar(v bool) *yaml.Node {
+	val := "false"
+	if v {
+		val = "true"
+	}
+
+	return &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!bool", Value: val}
 }
 
 // flowSeq builds a flow-style string sequence node ([a, b]) so token lists

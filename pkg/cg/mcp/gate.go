@@ -7,6 +7,7 @@ import (
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/ripta/rt/pkg/cg"
 	"github.com/ripta/rt/pkg/cg/approve"
 )
 
@@ -29,17 +30,20 @@ type gate struct {
 }
 
 // check evaluates the command against the gate and returns nil to permit
-// execution or a refusal error. blindlyAllow (and a nil gate) bypasses matching
-// and lets the env override pass through untouched, matching allow-all. A real
-// allow rule additionally gates dangerous env overrides; allow-all (whose rule
-// is nil) does not. A command that matches nothing prompts the user when el is
-// available, and otherwise fails closed.
-func (g *gate) check(ctx context.Context, in runInput, el elicitor) error {
+// execution or a refusal error. The matcher sees the canonical executable
+// resolved from argv[0], so policy and execution agree on which file runs.
+// blindlyAllow (and a nil gate) bypasses matching and lets the env override pass
+// through untouched, matching allow-all. A real allow rule additionally gates
+// dangerous env overrides; allow-all (whose rule is nil) does not. A command that
+// matches nothing prompts the user when el is available, and otherwise fails
+// closed.
+func (g *gate) check(ctx context.Context, in runInput, resolved *cg.Resolution, el elicitor) error {
 	if g == nil || g.blindlyAllow {
 		return nil
 	}
 
-	res := g.store.Ruleset().Match(in.Command)
+	subject := approve.Subject{Argv: in.Command, Canonical: resolved.CanonicalArgv()}
+	res := g.store.Ruleset().Match(subject)
 	switch res.Decision {
 	case approve.DecisionRun:
 		if res.Rule != nil {

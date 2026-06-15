@@ -67,6 +67,26 @@ var handleMetaCommandTests = []handleMetaCommandTest{
 		cmd:     ".sho",
 		wantErr: false,
 	},
+	{
+		name:    ".show functions",
+		cmd:     ".show functions",
+		wantErr: false,
+	},
+	{
+		name:    ".sh functions prefix",
+		cmd:     ".sh functions",
+		wantErr: false,
+	},
+	{
+		name:    ".sh f resolves functions topic by prefix",
+		cmd:     ".sh f",
+		wantErr: false,
+	},
+	{
+		name:    ".show unknown topic",
+		cmd:     ".show bogus",
+		wantErr: true,
+	},
 }
 
 func TestHandleMetaCommand(t *testing.T) {
@@ -83,6 +103,25 @@ func TestHandleMetaCommand(t *testing.T) {
 				t.Errorf("handleMetaCommand() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestHandleShowTopics(t *testing.T) {
+	t.Parallel()
+
+	c := &Calculator{DecimalPlaces: 30}
+
+	if err := c.handleShow(nil); err != nil {
+		t.Errorf("handleShow(nil) = %v, want nil", err)
+	}
+	if err := c.handleShow([]string{"settings"}); err != nil {
+		t.Errorf("handleShow(settings) = %v, want nil", err)
+	}
+	if err := c.handleShow([]string{"functions"}); err != nil {
+		t.Errorf("handleShow(functions) = %v, want nil", err)
+	}
+	if err := c.handleShow([]string{"bogus"}); err == nil {
+		t.Error("handleShow(bogus) = nil, want error")
 	}
 }
 

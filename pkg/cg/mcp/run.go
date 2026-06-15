@@ -72,7 +72,7 @@ func handleRun(ctx context.Context, reg *runRegistry, g *gate, el elicitor, in r
 
 	resolved, _ := cg.ResolveCommand(in.Command, in.Cwd)
 
-	if err := g.check(ctx, in, el); err != nil {
+	if err := g.check(ctx, in, resolved, el); err != nil {
 		return nil, runOutput{}, err
 	}
 

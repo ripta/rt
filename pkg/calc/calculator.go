@@ -198,8 +198,7 @@ func init() {
 			return c.handleSet(args)
 		},
 		".show": func(c *Calculator, args []string) error {
-			c.handleShow()
-			return nil
+			return c.handleShow(args)
 		},
 		".toggle": func(c *Calculator, args []string) error {
 			return c.handleToggle(args)
@@ -424,8 +423,33 @@ func (c *Calculator) handleLoad(args []string) error {
 	return nil
 }
 
-// handleShow displays current settings
-func (c *Calculator) handleShow() {
+// showTopics maps each .show topic to its handler. Topics accept any
+// unambiguous prefix, like every other meta-command.
+var showTopics = map[string]func(*Calculator){
+	"settings":  (*Calculator).showSettings,
+	"functions": (*Calculator).showFunctions,
+}
+
+// handleShow displays settings or the function library, selected by an optional
+// topic. No topic shows settings; a topic selects its listing by unambiguous
+// prefix.
+func (c *Calculator) handleShow(args []string) error {
+	topic := "settings"
+	if len(args) > 0 {
+		topic = args[0]
+	}
+
+	show, err := findByPrefix(topic, showTopics)
+	if err != nil {
+		return err
+	}
+
+	show(c)
+	return nil
+}
+
+// showSettings prints each setting's current value.
+func (c *Calculator) showSettings() {
 	fmt.Println("settings:")
 	for name, setting := range settingsRegistry {
 		switch setting.Type {
@@ -437,11 +461,38 @@ func (c *Calculator) handleShow() {
 	}
 }
 
+// showFunctions lists the registered functions grouped by category. Trig
+// functions take and return radians; convert degrees explicitly, e.g.
+// sin(45 * PI / 180).
+func (c *Calculator) showFunctions() {
+	fns := parser.Functions()
+
+	width := 0
+	for _, f := range fns {
+		if len(f.Signature) > width {
+			width = len(f.Signature)
+		}
+	}
+
+	group := ""
+	for _, f := range fns {
+		if f.Group != group {
+			if group != "" {
+				fmt.Println()
+			}
+			group = f.Group
+			fmt.Printf("%s:\n", group)
+		}
+		fmt.Printf("  %-*s  %s\n", width, f.Signature, f.Summary)
+	}
+}
+
 // handleHelp displays available meta-commands
 func (c *Calculator) handleHelp() {
 	fmt.Println("Available commands:")
 	fmt.Println("  .set <setting> <value>  - Change a setting")
 	fmt.Println("  .show                   - Show current settings")
+	fmt.Println("  .show functions         - List available functions")
 	fmt.Println("  .toggle <setting>       - Toggle a boolean setting")
 	fmt.Println("  .save [path]            - Save session (default: ~/.local/state/rt/calc/session.txt)")
 	fmt.Println("  .load [path]            - Load session (default: ~/.local/state/rt/calc/session.txt)")

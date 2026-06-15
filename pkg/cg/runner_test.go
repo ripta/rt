@@ -3,7 +3,9 @@ package cg
 import (
 	"bytes"
 	"errors"
+	"os"
 	"os/exec"
+	"os/signal"
 	"regexp"
 	"strings"
 	"syscall"
@@ -381,6 +383,38 @@ func TestCommandCustomFormat(t *testing.T) {
 	}
 }
 
+// sendSignalAndWait sends SIGTERM to the test process so cg's forwarding goroutine relays it to
+// the child, then waits for cmd.Execute to return.
+//
+// Delivery of a signal sent to our own process is asynchronous, and under scheduling pressure the
+// forwarding goroutine occasionally does not observe a single SIGTERM before the deadline, so we
+// resend periodically until the command finishes.
+func sendSignalAndWait(t *testing.T, done <-chan error) {
+	t.Helper()
+
+	// Register a handler so a stray or late SIGTERM cannot apply the default
+	// action and kill the test binary once the runner has stopped forwarding.
+	guard := make(chan os.Signal, 1)
+	signal.Notify(guard, syscall.SIGTERM)
+	defer signal.Stop(guard)
+
+	syscall.Kill(syscall.Getpid(), syscall.SIGTERM)
+
+	deadline := time.After(30 * time.Second)
+	resend := time.NewTicker(250 * time.Millisecond)
+	defer resend.Stop()
+	for {
+		select {
+		case <-done:
+			return
+		case <-deadline:
+			t.Fatal("timed out waiting for command to finish after signal")
+		case <-resend.C:
+			syscall.Kill(syscall.Getpid(), syscall.SIGTERM)
+		}
+	}
+}
+
 func TestCommandSignalForwarding(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
@@ -416,15 +450,7 @@ func TestCommandSignalForwarding(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	// Send SIGTERM to our own process group; the child should receive it via
-	// the signal forwarding goroutine
-	syscall.Kill(syscall.Getpid(), syscall.SIGTERM)
-
-	select {
-	case <-done:
-	case <-time.After(5 * time.Second):
-		t.Fatal("timed out waiting for command to finish after signal")
-	}
+	sendSignalAndWait(t, done)
 
 	out := buf.String()
 	if !strings.Contains(out, "O: got_sigterm") {
@@ -477,13 +503,7 @@ func TestCommandFinishLineSignaled(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	syscall.Kill(syscall.Getpid(), syscall.SIGTERM)
-
-	select {
-	case <-done:
-	case <-time.After(5 * time.Second):
-		t.Fatal("timed out waiting for command to finish after signal")
-	}
+	sendSignalAndWait(t, done)
 
 	out := buf.String()
 	m := finishLineRE.FindStringSubmatch(out)

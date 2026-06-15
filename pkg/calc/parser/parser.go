@@ -299,7 +299,15 @@ func (p *P) parsePrimary() (Node, error) {
 		node = &NumberNode{Value: val}
 
 	case tokens.IDENT:
-		node = &IdentNode{Name: tok}
+		if p.peek().Type == tokens.LPAREN {
+			var err error
+			node, err = p.parseCall(tok)
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			node = &IdentNode{Name: tok}
+		}
 
 	case tokens.LPAREN:
 		var err error
@@ -329,6 +337,37 @@ func (p *P) parsePrimary() (Node, error) {
 	}
 
 	return node, nil
+}
+
+func (p *P) parseCall(name tokens.Token) (Node, error) {
+	p.next() // consume LPAREN
+
+	var args []Node
+	if p.peek().Type == tokens.RPAREN {
+		p.next()
+		return &CallNode{Func: name, Args: args}, nil
+	}
+
+	for {
+		arg, err := p.parseAssignment()
+		if err != nil {
+			return nil, err
+		}
+		args = append(args, arg)
+
+		tok := p.next()
+		if p.err != nil {
+			return nil, p.err
+		}
+		switch tok.Type {
+		case tokens.COMMA:
+			continue
+		case tokens.RPAREN:
+			return &CallNode{Func: name, Args: args}, nil
+		default:
+			return nil, p.errorf(tok, "expected ',' or ')', got %s", tok.Type)
+		}
+	}
 }
 
 func (p *P) parseNumber(tok tokens.Token) (*unified.Real, error) {

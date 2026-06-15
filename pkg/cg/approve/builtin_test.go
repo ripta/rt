@@ -41,7 +41,7 @@ func TestBuiltinDeny(t *testing.T) {
 
 	for _, tt := range builtinTests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := rs.Match(tt.argv); got.Decision != tt.want {
+			if got := rs.Match(identitySubject(tt.argv)); got.Decision != tt.want {
 				t.Errorf("Match(%v) = %v, want %v", tt.argv, got.Decision, tt.want)
 			}
 		})
@@ -58,7 +58,7 @@ func TestBuiltinDenyNotOverridable(t *testing.T) {
 		Deny:  builtinDenyRules(),
 		Allow: []Rule{prefixRule("sh")},
 	}
-	if got := rs.Match([]string{"sh", "-c", "x"}); got.Decision != DecisionRefuse {
+	if got := rs.Match(identitySubject([]string{"sh", "-c", "x"})); got.Decision != DecisionRefuse {
 		t.Errorf("Match(sh -c x) = %v, want refuse (builtin deny not overridable)", got.Decision)
 	}
 }

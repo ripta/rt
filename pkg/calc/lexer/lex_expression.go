@@ -88,6 +88,10 @@ func lexExpression(l *L) lexingState {
 		l.Emit(tokens.RPAREN)
 		return lexExpression
 
+	case r == ',':
+		l.Emit(tokens.COMMA)
+		return lexExpression
+
 	case r == '$':
 		return lexLineIdent
 
