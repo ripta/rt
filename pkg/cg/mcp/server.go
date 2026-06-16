@@ -7,6 +7,7 @@ package mcp
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/spf13/cobra"
@@ -53,13 +54,14 @@ func runServer(cmd *cobra.Command, opts *serverOptions) error {
 	}
 	g := &gate{store: store, blindlyAllow: opts.blindlyAllow}
 
-	s := newServer(v, g)
+	s := newServer(v, time.Now(), g)
 	return s.Run(cmd.Context(), &mcpsdk.StdioTransport{})
 }
 
 // newServer constructs a fully-registered MCP server. Pulled out so tests can
-// drive it without going through stdio.
-func newServer(v string, g *gate) *mcpsdk.Server {
+// drive it without going through stdio. startedAt is the server's start time,
+// reported by cg_info.
+func newServer(v string, startedAt time.Time, g *gate) *mcpsdk.Server {
 	s := mcpsdk.NewServer(&mcpsdk.Implementation{Name: "cg", Version: v}, nil)
 	reg := newRunRegistry()
 	registerRun(s, reg, g)
@@ -72,5 +74,6 @@ func newServer(v string, g *gate) *mcpsdk.Server {
 	registerGrep(s)
 	registerPrune(s)
 	registerElicitTest(s)
+	registerInfo(s, v, startedAt)
 	return s
 }
