@@ -39,8 +39,10 @@ const (
 // prompt asks the user to approve an unmatched command. Accept runs the command
 // and, when remember is checked, persists the edited prefix rule to the project
 // file and swaps it into the live matcher. Decline and cancel refuse this once.
-func (g *gate) prompt(ctx context.Context, in runInput, el elicitor) error {
-	suggestion := approve.SuggestPrefix(in.Command)
+// The suggestion pre-fills the canonical executable path resolved for the run, so
+// a remembered rule is strict by default; the user can edit it down to a name.
+func (g *gate) prompt(ctx context.Context, in runInput, resolved *cg.Resolution, el elicitor) error {
+	suggestion := approve.SuggestPrefix(in.Command, resolved.ExecPath())
 	res, err := el.Elicit(ctx, &mcpsdk.ElicitParams{
 		Message:         approvalMessage(in),
 		RequestedSchema: approvalSchema(suggestion, g.store.Project.Path),

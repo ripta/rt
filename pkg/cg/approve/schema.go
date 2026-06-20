@@ -97,7 +97,7 @@ func validateRule(entry *yaml.Node, rule *Rule, isDeny bool) error {
 	}
 
 	var kinds []RuleKind
-	var hasMessage, hasPermit bool
+	var hasMessage, hasPermit, hasAsBasename bool
 	if entry != nil && entry.Kind == yaml.MappingNode {
 		for k := 0; k+1 < len(entry.Content); k += 2 {
 			key := entry.Content[k].Value
@@ -110,6 +110,8 @@ func validateRule(entry *yaml.Node, rule *Rule, isDeny bool) error {
 				hasMessage = true
 			case "permit_unsafe_envs":
 				hasPermit = true
+			case "as_basename":
+				hasAsBasename = true
 			}
 		}
 	}
@@ -126,6 +128,9 @@ func validateRule(entry *yaml.Node, rule *Rule, isDeny bool) error {
 	}
 	if hasPermit && isDeny {
 		return fmt.Errorf("line %d: %w", line, ErrPermitOnDeny)
+	}
+	if hasAsBasename && (kinds[0] == KindExact || kinds[0] == KindPrefix) {
+		return fmt.Errorf("line %d: %w", line, ErrAsBasenameOnTokens)
 	}
 
 	rule.kind = kinds[0]

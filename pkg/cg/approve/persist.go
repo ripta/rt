@@ -39,23 +39,31 @@ var multiVerbTools = map[string]struct{}{
 }
 
 // SuggestPrefix derives the prefix rule pre-filled into the approval prompt:
-// argv[0], extended to argv[0..1] when the program is a known multi-verb tool,
-// a second argument is present, and that argument is not a flag. Flag arguments
-// are dropped to avoid rules like [make, -j8] or [git, --no-pager] that match
-// only on incidental invocation details rather than the actual operation.
-// argv[0] is kept as written so the suggestion reflects what ran; the user can
-// edit it before saving.
-func SuggestPrefix(argv []string) []string {
+// execPath, extended to a second token when the program is a known multi-verb
+// tool, a second argument is present, and that argument is not a flag. Flag
+// arguments are dropped to avoid rules like [make, -j8] or [git, --no-pager] that
+// match only on incidental invocation details rather than the actual operation.
+//
+// execPath is the canonical absolute executable path, so the suggested rule is
+// strict by default: it pins the exact binary that ran rather than its name. The
+// user can edit it down to a bare name to allow the command however it resolves.
+// An empty execPath, as when canonicalization failed, falls back to argv[0] as
+// written. The multi-verb decision still reads the invoked program's basename.
+func SuggestPrefix(argv []string, execPath string) []string {
 	if len(argv) == 0 {
 		return nil
 	}
+	head := execPath
+	if head == "" {
+		head = argv[0]
+	}
 	if _, ok := multiVerbTools[filepath.Base(argv[0])]; ok && len(argv) >= 2 {
 		if !strings.HasPrefix(argv[1], "-") {
-			return []string{argv[0], argv[1]}
+			return []string{head, argv[1]}
 		}
 	}
 
-	return []string{argv[0]}
+	return []string{head}
 }
 
 // CheckProjectDivergence re-reads the project file and reports whether it
@@ -95,9 +103,8 @@ func (s *Store) AppendProjectAllowPrefix(tokens []string, strategy WriteStrategy
 	if root == nil {
 		return fmt.Errorf("project document has no root mapping")
 	}
-	asBasename := prefixWantsBasename(tokens)
 	allowSeq := ensureSeq(root, "allow")
-	allowSeq.Content = append(allowSeq.Content, buildPrefixEntry(tokens, asBasename))
+	allowSeq.Content = append(allowSeq.Content, buildPrefixEntry(tokens))
 	canonicalizeRuleSeqs(root)
 
 	data, err := renderDocument(doc)
@@ -117,22 +124,9 @@ func (s *Store) AppendProjectAllowPrefix(tokens []string, strategy WriteStrategy
 	s.Project.Snapshot = data
 	s.Project.Present = true
 
-	s.appendLiveAllow(tokens, asBasename)
+	s.appendLiveAllow(tokens)
 
 	return nil
-}
-
-// prefixWantsBasename reports whether a remembered prefix rule should match by
-// basename. A name-based program token, one with no slash, is matched by the
-// invoked basename so the rule fires however the program is spelled or resolved;
-// a path-bearing token describes an install location and matches the canonical
-// path instead.
-func prefixWantsBasename(tokens []string) bool {
-	if len(tokens) == 0 {
-		return false
-	}
-
-	return !strings.ContainsRune(tokens[0], filepath.Separator) && !strings.ContainsRune(tokens[0], '/')
 }
 
 // baseDocument returns the document node the new rule is appended to. The direct
@@ -200,10 +194,11 @@ func mergeAbsent(seq *yaml.Node, mem, disk []Rule, isDeny bool) {
 // appendLiveAllow swaps a new ruleset with tokens appended to Allow into the
 // atomic pointer. The deny slice is shared because it is never mutated; the
 // allow slice is copied so the live snapshot the matcher reads stays immutable.
-// asBasename mirrors what was written to disk so the live rule matches the same
-// commands the reloaded file would.
-func (s *Store) appendLiveAllow(tokens []string, asBasename bool) {
-	rule := Rule{Prefix: slices.Clone(tokens), AsBasename: asBasename, kind: KindPrefix}
+// The rule is compiled against the store's project root so the live rule matches
+// the same commands the reloaded file would, including a relative first token.
+func (s *Store) appendLiveAllow(tokens []string) {
+	rule := Rule{Prefix: slices.Clone(tokens), kind: KindPrefix}
+	compileMatch(&rule, s.projectRoot)
 	cur := s.rules.Load()
 	next := &Ruleset{
 		Mode:  cur.Mode,
@@ -246,10 +241,11 @@ func ruleEqual(a, b *Rule) bool {
 	return false
 }
 
-// buildPrefixEntry builds the mapping node for a prefix allow rule, marking it
-// as_basename when the rule should match by basename.
-func buildPrefixEntry(tokens []string, asBasename bool) *yaml.Node {
-	return buildRuleEntry(&Rule{Prefix: tokens, AsBasename: asBasename, kind: KindPrefix}, false)
+// buildPrefixEntry builds the mapping node for a prefix allow rule. The first
+// token's shape settles how the rule matches on reload, so no as_basename flag is
+// written.
+func buildPrefixEntry(tokens []string) *yaml.Node {
+	return buildRuleEntry(&Rule{Prefix: tokens, kind: KindPrefix}, false)
 }
 
 // buildRuleEntry builds the YAML mapping node for a rule: its single kind key,

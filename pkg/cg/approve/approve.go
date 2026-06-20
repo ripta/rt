@@ -47,8 +47,20 @@ const (
 
 // Rule is one allow or deny entry. Exactly one of Exact/Prefix/Glob/Regex is
 // populated after validation; kind records which. Message is valid only on deny
-// rules and PermitUnsafeEnvs only on allow rules. AsBasename, valid on both,
-// matches the basename form of the subject instead of the canonical form.
+// rules and PermitUnsafeEnvs only on allow rules.
+//
+// For prefix and exact rules the match form is inferred from the shape of the
+// first token: a bare program name matches the invoked basename, while an
+// absolute or project-relative path matches the canonical executable path.
+// AsBasename is meaningful only on glob and regex rules, where there is no token
+// to read; it selects the basename quoted join over the canonical one. The
+// loader rejects as_basename on prefix and exact rules, where the token shape
+// already settles the form.
+//
+// wantBasename and cmpArgv are derived at load by compileMatch: wantBasename
+// selects the basename form for matching, and cmpArgv holds the prefix/exact
+// comparison tokens with a relative first token resolved against the project
+// root.
 type Rule struct {
 	Exact  []string `yaml:"exact,omitempty"`
 	Prefix []string `yaml:"prefix,omitempty"`
@@ -59,8 +71,10 @@ type Rule struct {
 	Message          string   `yaml:"message,omitempty"`
 	PermitUnsafeEnvs []string `yaml:"permit_unsafe_envs,omitempty"`
 
-	kind     RuleKind
-	compiled *regexp.Regexp
+	kind         RuleKind
+	compiled     *regexp.Regexp
+	wantBasename bool
+	cmpArgv      []string
 }
 
 // Kind reports which matching strategy this rule uses, set by the loader.
@@ -106,6 +120,11 @@ type Store struct {
 	Global  Layer
 	Project Layer
 
+	// projectRoot is the directory relative-path rule tokens resolve against,
+	// fixed at load. The live-append path reuses it so a remembered relative rule
+	// anchors the same way a reloaded one would.
+	projectRoot string
+
 	mu    sync.Mutex
 	rules atomic.Pointer[Ruleset]
 }
@@ -118,10 +137,10 @@ func (s *Store) Ruleset() *Ruleset { return s.rules.Load() }
 // whose first element is the absolute executable path and whose tail mirrors
 // Argv[1:]; it is nil when the executable could not be resolved or canonicalized.
 //
-// Rules match Canonical by default, so a non-basename rule cannot match when
-// Canonical is nil. A rule with AsBasename set instead matches a form derived
-// from filepath.Base(Argv[0]), the invoked token, so name-based rules still
-// evaluate even when canonicalization fails.
+// A rule that matches the canonical form cannot match when Canonical is nil. A
+// rule that matches by basename matches a form derived from
+// filepath.Base(Argv[0]), the invoked token, so name-based rules still evaluate
+// even when canonicalization fails.
 type Subject struct {
 	Argv      []string
 	Canonical []string
@@ -150,10 +169,11 @@ type MatchResult struct {
 // Loader and merge errors. They are wrapped with the file path and, where a
 // node is available, the offending line.
 var (
-	ErrUnknownVersion    = errors.New("unknown version (expected 1)")
-	ErrUnknownMode       = errors.New("unknown mode (expected enforce, allow-all, or deny-all)")
-	ErrNoRuleKind        = errors.New("rule has no rule-kind key (need one of exact, prefix, glob, or regex)")
-	ErrMultipleRuleKinds = errors.New("rule has more than one rule-kind key")
-	ErrMessageOnAllow    = errors.New("message is not valid on an allow rule; use a YAML comment instead")
-	ErrPermitOnDeny      = errors.New("permit_unsafe_envs is not valid on a deny rule")
+	ErrUnknownVersion     = errors.New("unknown version (expected 1)")
+	ErrUnknownMode        = errors.New("unknown mode (expected enforce, allow-all, or deny-all)")
+	ErrNoRuleKind         = errors.New("rule has no rule-kind key (need one of exact, prefix, glob, or regex)")
+	ErrMultipleRuleKinds  = errors.New("rule has more than one rule-kind key")
+	ErrMessageOnAllow     = errors.New("message is not valid on an allow rule; use a YAML comment instead")
+	ErrPermitOnDeny       = errors.New("permit_unsafe_envs is not valid on a deny rule")
+	ErrAsBasenameOnTokens = errors.New("as_basename is not valid on a prefix or exact rule; the first token's shape already settles the form (bare name matches the basename, a path matches the canonical path)")
 )

@@ -129,12 +129,12 @@ func Load(opts LoadOptions) (*Store, error) {
 		return nil, err
 	}
 
-	rules, err := buildRuleset(global, project)
+	rules, err := buildRuleset(global, project, projectRoot)
 	if err != nil {
 		return nil, err
 	}
 
-	s := &Store{Global: global, Project: project}
+	s := &Store{Global: global, Project: project, projectRoot: projectRoot}
 	s.rules.Store(rules)
 
 	return s, nil
@@ -170,7 +170,7 @@ func loadLayer(path string) (Layer, error) {
 // from both layers are unioned. The built-in default-deny set leads the deny
 // list, so it cannot be re-allowed, and deny is evaluated before allow, which
 // gives deny precedence across layers.
-func buildRuleset(global, project Layer) (*Ruleset, error) {
+func buildRuleset(global, project Layer, projectRoot string) (*Ruleset, error) {
 	rs := &Ruleset{Mode: ModeEnforce}
 
 	if global.Doc != nil && global.Doc.Mode != "" {
@@ -188,6 +188,13 @@ func buildRuleset(global, project Layer) (*Ruleset, error) {
 	if project.Doc != nil {
 		rs.Deny = append(rs.Deny, project.Doc.Deny...)
 		rs.Allow = append(rs.Allow, project.Doc.Allow...)
+	}
+
+	for i := range rs.Deny {
+		compileMatch(&rs.Deny[i], projectRoot)
+	}
+	for i := range rs.Allow {
+		compileMatch(&rs.Allow[i], projectRoot)
 	}
 
 	return rs, nil

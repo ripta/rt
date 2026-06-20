@@ -1,15 +1,20 @@
 package approve
 
-import "testing"
+import (
+	"slices"
+	"testing"
+)
 
 // rule constructors mirror what the loader produces: kind is set and glob/regex
-// patterns are compiled.
+// patterns are compiled. compileMatch, which derives the match form, is applied
+// by runMatchCase so each case exercises the same path Load takes.
 
 func exactRule(tokens ...string) Rule { return Rule{Exact: tokens, kind: KindExact} }
 
 func prefixRule(tokens ...string) Rule { return Rule{Prefix: tokens, kind: KindPrefix} }
 
-// asBase marks a rule as basename-matching, the as_basename: true form.
+// asBase sets as_basename, which is meaningful only on glob and regex rules now
+// that prefix and exact rules infer their form from the first token's shape.
 func asBase(r Rule) Rule {
 	r.AsBasename = true
 	return r
@@ -42,8 +47,8 @@ func identitySubject(argv []string) Subject {
 }
 
 type matchTest struct {
-	name string
-	mode Mode
+	name  string
+	mode  Mode
 	deny  []Rule
 	allow []Rule
 	argv  []string
@@ -51,7 +56,9 @@ type matchTest struct {
 	canonical []string
 	// unresolved leaves the canonical form unavailable, as when canonicalization
 	// fails. It takes precedence over canonical.
-	unresolved  bool
+	unresolved bool
+	// root is the project root relative rule tokens resolve against.
+	root        string
 	want        Decision
 	wantMessage string
 }
@@ -66,25 +73,24 @@ func TestMatch(t *testing.T) {
 		{name: "allow-all overrides deny", mode: ModeAllowAll, deny: []Rule{prefixRule("rm")}, argv: []string{"rm", "-rf", "/"}, want: DecisionRun},
 		{name: "deny-all overrides allow", mode: ModeDenyAll, allow: []Rule{prefixRule("git")}, argv: []string{"git", "status"}, want: DecisionRefuse},
 
-		// exact against the canonical form
+		// bare-name exact matches by basename
 		{name: "exact match", allow: []Rule{exactRule("git", "status")}, argv: []string{"git", "status"}, want: DecisionRun},
 		{name: "exact longer argv no match", allow: []Rule{exactRule("git", "status")}, argv: []string{"git", "status", "-s"}, want: DecisionPrompt},
 		{name: "exact different arg no match", allow: []Rule{exactRule("git", "status")}, argv: []string{"git", "log"}, want: DecisionPrompt},
 
-		// prefix against the canonical form
+		// bare-name prefix matches by basename
 		{name: "prefix match with extra args", allow: []Rule{prefixRule("go", "test")}, argv: []string{"go", "test", "./..."}, want: DecisionRun},
 		{name: "prefix argv shorter no match", allow: []Rule{prefixRule("go", "test")}, argv: []string{"go"}, want: DecisionPrompt},
 		{name: "prefix differing token no match", allow: []Rule{prefixRule("go", "test")}, argv: []string{"go", "vet"}, want: DecisionPrompt},
 
-		// canonical path policy: rules match the resolved executable path
+		// absolute path policy: the token matches the resolved executable path
 		{name: "canonical path allow", allow: []Rule{prefixRule("/opt/foo/bin/foo")}, argv: []string{"foo"}, canonical: []string{"/opt/foo/bin/foo"}, want: DecisionRun},
 		{name: "canonical path allow with tail", allow: []Rule{prefixRule("/opt/foo/bin/foo")}, argv: []string{"foo", "--bar"}, canonical: []string{"/opt/foo/bin/foo", "--bar"}, want: DecisionRun},
-		{name: "bare token does not match canonical path", allow: []Rule{prefixRule("foo")}, argv: []string{"foo"}, canonical: []string{"/opt/foo/bin/foo"}, want: DecisionPrompt},
+		{name: "bare token matches by basename", allow: []Rule{prefixRule("foo")}, argv: []string{"foo"}, canonical: []string{"/opt/foo/bin/foo"}, want: DecisionRun},
 		{name: "canonical exact full path", allow: []Rule{exactRule("/usr/bin/git", "status")}, argv: []string{"git", "status"}, canonical: []string{"/usr/bin/git", "status"}, want: DecisionRun},
 
-		// element-wise comparison includes argv[0]; no implicit normalization
+		// an absolute token compares element-wise; no implicit normalization
 		{name: "literal path prefix match", deny: []Rule{prefixRule("/bin/sh")}, argv: []string{"/bin/sh"}, want: DecisionRefuse},
-		{name: "literal path no bare match", deny: []Rule{prefixRule("/bin/sh")}, argv: []string{"sh"}, want: DecisionPrompt},
 		{name: "literal path other path no match", deny: []Rule{prefixRule("/bin/sh")}, argv: []string{"/usr/bin/sh"}, want: DecisionPrompt},
 
 		// argv[1:] compares byte-exact
@@ -92,17 +98,17 @@ func TestMatch(t *testing.T) {
 		{name: "deny rm -rf with target", deny: []Rule{prefixRule("rm", "-rf")}, argv: []string{"rm", "-rf", "/tmp"}, want: DecisionRefuse},
 		{name: "deny rm -rf differing flag", deny: []Rule{prefixRule("rm", "-rf")}, argv: []string{"rm", "-r"}, want: DecisionPrompt},
 
-		// as_basename matches the invoked token's basename, however it is spelled
-		{name: "basename deny plain", deny: []Rule{asBase(prefixRule("sh"))}, argv: []string{"sh", "-c", "x"}, want: DecisionRefuse},
-		{name: "basename deny absolute path", deny: []Rule{asBase(prefixRule("sh"))}, argv: []string{"/bin/sh", "-c", "x"}, canonical: []string{"/bin/dash", "-c", "x"}, want: DecisionRefuse},
-		{name: "basename deny relative path", deny: []Rule{asBase(prefixRule("sh"))}, argv: []string{"./sh", "-c", "x"}, want: DecisionRefuse},
-		{name: "basename allow ignores install path", allow: []Rule{asBase(prefixRule("make"))}, argv: []string{"/tmp/evil/make"}, canonical: []string{"/tmp/evil/make"}, want: DecisionRun},
-		{name: "basename allow exact", allow: []Rule{asBase(exactRule("go", "version"))}, argv: []string{"/usr/local/go/bin/go", "version"}, canonical: []string{"/usr/local/go/bin/go", "version"}, want: DecisionRun},
+		// a bare-name rule matches the invoked basename, however it is spelled
+		{name: "basename deny plain", deny: []Rule{prefixRule("sh")}, argv: []string{"sh", "-c", "x"}, want: DecisionRefuse},
+		{name: "basename deny absolute path", deny: []Rule{prefixRule("sh")}, argv: []string{"/bin/sh", "-c", "x"}, canonical: []string{"/bin/dash", "-c", "x"}, want: DecisionRefuse},
+		{name: "basename deny relative path", deny: []Rule{prefixRule("sh")}, argv: []string{"./sh", "-c", "x"}, want: DecisionRefuse},
+		{name: "basename allow ignores install path", allow: []Rule{prefixRule("make")}, argv: []string{"/tmp/evil/make"}, canonical: []string{"/tmp/evil/make"}, want: DecisionRun},
+		{name: "basename allow exact", allow: []Rule{exactRule("go", "version")}, argv: []string{"/usr/local/go/bin/go", "version"}, canonical: []string{"/usr/local/go/bin/go", "version"}, want: DecisionRun},
 
-		// canonical unavailable: non-basename rules cannot match, basename can
-		{name: "unresolved non-basename allow falls through", allow: []Rule{prefixRule("/opt/foo")}, argv: []string{"foo"}, unresolved: true, want: DecisionPrompt},
-		{name: "unresolved non-basename deny does not fire", deny: []Rule{prefixRule("/tmp/x")}, allow: []Rule{asBase(prefixRule("foo"))}, argv: []string{"foo"}, unresolved: true, want: DecisionRun},
-		{name: "unresolved basename deny still fires", deny: []Rule{asBase(prefixRule("sh"))}, argv: []string{"sh", "-c", "x"}, unresolved: true, want: DecisionRefuse},
+		// canonical unavailable: path rules cannot match, bare-name rules can
+		{name: "unresolved path allow falls through", allow: []Rule{prefixRule("/opt/foo")}, argv: []string{"foo"}, unresolved: true, want: DecisionPrompt},
+		{name: "unresolved path deny does not fire", deny: []Rule{prefixRule("/tmp/x")}, allow: []Rule{prefixRule("foo")}, argv: []string{"foo"}, unresolved: true, want: DecisionRun},
+		{name: "unresolved basename deny still fires", deny: []Rule{prefixRule("sh")}, argv: []string{"sh", "-c", "x"}, unresolved: true, want: DecisionRefuse},
 
 		// deny precedence and layering
 		{name: "deny wins over allow", deny: []Rule{prefixRule("git", "push", "--force")}, allow: []Rule{prefixRule("git")}, argv: []string{"git", "push", "--force"}, want: DecisionRefuse},
@@ -110,14 +116,38 @@ func TestMatch(t *testing.T) {
 		{name: "no match prompts", allow: []Rule{prefixRule("go")}, argv: []string{"cargo", "build"}, want: DecisionPrompt},
 
 		// deny wins across canonical and basename forms
-		{name: "basename deny beats canonical allow", deny: []Rule{asBase(prefixRule("sh"))}, allow: []Rule{prefixRule("/bin/sh")}, argv: []string{"/bin/sh", "-c", "x"}, canonical: []string{"/bin/sh", "-c", "x"}, want: DecisionRefuse},
-		{name: "canonical path deny beats basename allow", deny: []Rule{prefixRule("/tmp/make")}, allow: []Rule{asBase(prefixRule("make"))}, argv: []string{"make"}, canonical: []string{"/tmp/make"}, want: DecisionRefuse},
+		{name: "basename deny beats canonical allow", deny: []Rule{prefixRule("sh")}, allow: []Rule{prefixRule("/bin/sh")}, argv: []string{"/bin/sh", "-c", "x"}, canonical: []string{"/bin/sh", "-c", "x"}, want: DecisionRefuse},
+		{name: "canonical path deny beats basename allow", deny: []Rule{prefixRule("/tmp/make")}, allow: []Rule{prefixRule("make")}, argv: []string{"make"}, canonical: []string{"/tmp/make"}, want: DecisionRefuse},
 
 		// deny message propagation
 		{name: "deny message surfaced", deny: []Rule{{Prefix: []string{"rm", "-rf"}, Message: "delete specific paths", kind: KindPrefix}}, argv: []string{"rm", "-rf", "/"}, want: DecisionRefuse, wantMessage: "delete specific paths"},
 	}
 
 	for _, tt := range staticTests {
+		t.Run(tt.name, func(t *testing.T) {
+			runMatchCase(t, tt)
+		})
+	}
+}
+
+// TestMatchRelativeTokens covers prefix/exact rules whose first token is a
+// relative path. The token resolves against the project root, then matches the
+// subject's canonical path; it never consults the per-call cwd, so the rule means
+// the same file regardless of where the command is run.
+func TestMatchRelativeTokens(t *testing.T) {
+	t.Parallel()
+
+	tests := []matchTest{
+		{name: "relative allow matches under project root", root: "/proj", allow: []Rule{prefixRule("./bin/tool")}, argv: []string{"./bin/tool"}, canonical: []string{"/proj/bin/tool"}, want: DecisionRun},
+		{name: "relative allow no leading dot", root: "/proj", allow: []Rule{prefixRule("zig-out/bin/1z")}, argv: []string{"zig-out/bin/1z"}, canonical: []string{"/proj/zig-out/bin/1z"}, want: DecisionRun},
+		{name: "relative allow other root no match", root: "/proj", allow: []Rule{prefixRule("./bin/tool")}, argv: []string{"./bin/tool"}, canonical: []string{"/other/bin/tool"}, want: DecisionPrompt},
+		{name: "relative allow with tail", root: "/proj", allow: []Rule{prefixRule("./run.sh")}, argv: []string{"./run.sh", "--fast"}, canonical: []string{"/proj/run.sh", "--fast"}, want: DecisionRun},
+		{name: "relative deny fires", root: "/proj", deny: []Rule{prefixRule("./scripts/danger.sh")}, argv: []string{"./scripts/danger.sh"}, canonical: []string{"/proj/scripts/danger.sh"}, want: DecisionRefuse},
+		{name: "relative exact resolves", root: "/proj", allow: []Rule{exactRule("./bin/tool", "--once")}, argv: []string{"./bin/tool", "--once"}, canonical: []string{"/proj/bin/tool", "--once"}, want: DecisionRun},
+		{name: "relative unresolved falls through", root: "/proj", allow: []Rule{prefixRule("./bin/tool")}, argv: []string{"./bin/tool"}, unresolved: true, want: DecisionPrompt},
+	}
+
+	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			runMatchCase(t, tt)
 		})
@@ -148,7 +178,8 @@ func TestMatchPatterns(t *testing.T) {
 		{name: "regex allow opt directory", allow: []Rule{regexRule(t, `^/opt/foo/bin/`)}, argv: []string{"foo"}, canonical: []string{"/opt/foo/bin/foo"}, want: DecisionRun},
 		{name: "regex path bare token no match", allow: []Rule{regexRule(t, `^go test`)}, argv: []string{"go", "test"}, canonical: []string{"/usr/bin/go", "test"}, want: DecisionPrompt},
 
-		// as_basename glob/regex match the basename join
+		// as_basename glob/regex match the basename join, the only way to express
+		// name-based matching for a pattern rule
 		{name: "basename regex matches by name", allow: []Rule{asBase(regexRule(t, `^go test`))}, argv: []string{"go", "test"}, canonical: []string{"/usr/bin/go", "test"}, want: DecisionRun},
 		{name: "basename regex deny sudo by name", deny: []Rule{asBase(regexRule(t, `^sudo(\s|$)`))}, argv: []string{"/usr/bin/sudo", "rm"}, canonical: []string{"/usr/bin/sudo", "rm"}, want: DecisionRefuse},
 		{name: "basename glob by name", allow: []Rule{asBase(globRule(t, "kubectl get *"))}, argv: []string{"/usr/local/bin/kubectl", "get", "pods"}, canonical: []string{"/usr/local/bin/kubectl", "get", "pods"}, want: DecisionRun},
@@ -177,7 +208,13 @@ func subjectFor(tt matchTest) Subject {
 
 func runMatchCase(t *testing.T, tt matchTest) {
 	t.Helper()
-	rs := &Ruleset{Mode: tt.mode, Deny: tt.deny, Allow: tt.allow}
+	rs := &Ruleset{Mode: tt.mode, Deny: slices.Clone(tt.deny), Allow: slices.Clone(tt.allow)}
+	for i := range rs.Deny {
+		compileMatch(&rs.Deny[i], tt.root)
+	}
+	for i := range rs.Allow {
+		compileMatch(&rs.Allow[i], tt.root)
+	}
 	got := rs.Match(subjectFor(tt))
 	if got.Decision != tt.want {
 		t.Fatalf("Match(%v) decision = %v, want %v", tt.argv, got.Decision, tt.want)

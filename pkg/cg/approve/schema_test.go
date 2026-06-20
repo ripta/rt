@@ -106,6 +106,40 @@ deny:
 		wantErr: ErrPermitOnDeny,
 	},
 	{
+		name: "as_basename on prefix rejected",
+		yaml: `version: 1
+allow:
+  - prefix: [make]
+    as_basename: true
+`,
+		wantErr: ErrAsBasenameOnTokens,
+	},
+	{
+		name: "as_basename on exact rejected",
+		yaml: `version: 1
+allow:
+  - exact: [git, status]
+    as_basename: true
+`,
+		wantErr: ErrAsBasenameOnTokens,
+	},
+	{
+		name: "as_basename on glob ok",
+		yaml: `version: 1
+allow:
+  - glob: 'kubectl get *'
+    as_basename: true
+`,
+	},
+	{
+		name: "as_basename on regex ok",
+		yaml: `version: 1
+deny:
+  - regex: '^sudo(\s|$)'
+    as_basename: true
+`,
+	},
+	{
 		name: "empty glob is a present key",
 		yaml: `version: 1
 allow:

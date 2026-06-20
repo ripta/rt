@@ -9,12 +9,14 @@ import (
 )
 
 type suggestPrefixTest struct {
-	Name string
-	Argv []string
-	Want []string
+	Name     string
+	Argv     []string
+	ExecPath string
+	Want     []string
 }
 
 var suggestPrefixTests = []suggestPrefixTest{
+	// An empty ExecPath falls back to argv[0] as written.
 	{Name: "single program", Argv: []string{"make"}, Want: []string{"make"}},
 	{Name: "multi-verb make", Argv: []string{"make", "test"}, Want: []string{"make", "test"}},
 	{Name: "make multiple targets", Argv: []string{"make", "foo", "bar"}, Want: []string{"make", "foo"}},
@@ -28,6 +30,12 @@ var suggestPrefixTests = []suggestPrefixTest{
 	{Name: "multi-verb path basename", Argv: []string{"/usr/bin/kubectl", "get", "pods"}, Want: []string{"/usr/bin/kubectl", "get"}},
 	{Name: "multi-verb no subcommand", Argv: []string{"go"}, Want: []string{"go"}},
 	{Name: "empty", Argv: nil, Want: nil},
+
+	// A resolved ExecPath pins the canonical path as the strict first token while
+	// the multi-verb decision still reads the invoked program's basename.
+	{Name: "exec path single", Argv: []string{"make"}, ExecPath: "/opt/homebrew/bin/make", Want: []string{"/opt/homebrew/bin/make"}},
+	{Name: "exec path multi-verb", Argv: []string{"make", "build"}, ExecPath: "/opt/homebrew/bin/make", Want: []string{"/opt/homebrew/bin/make", "build"}},
+	{Name: "exec path flag dropped", Argv: []string{"make", "-j8", "build"}, ExecPath: "/opt/homebrew/bin/make", Want: []string{"/opt/homebrew/bin/make"}},
 }
 
 func TestSuggestPrefix(t *testing.T) {
@@ -35,9 +43,9 @@ func TestSuggestPrefix(t *testing.T) {
 
 	for _, tt := range suggestPrefixTests {
 		t.Run(tt.Name, func(t *testing.T) {
-			got := SuggestPrefix(tt.Argv)
+			got := SuggestPrefix(tt.Argv, tt.ExecPath)
 			if !reflect.DeepEqual(got, tt.Want) {
-				t.Errorf("SuggestPrefix(%v) = %v, want %v", tt.Argv, got, tt.Want)
+				t.Errorf("SuggestPrefix(%v, %q) = %v, want %v", tt.Argv, tt.ExecPath, got, tt.Want)
 			}
 		})
 	}
@@ -126,8 +134,8 @@ func TestAppendPreservesCommentsAndQuotesTokens(t *testing.T) {
 	if !strings.Contains(got, "# keep this comment") {
 		t.Errorf("comment not preserved:\n%s", got)
 	}
-	// yes must round-trip as a string, not the boolean true. The rule itself
-	// carries as_basename: true, so check the token rendering specifically.
+	// yes must round-trip as a string, not the boolean true, so check the token
+	// rendering specifically.
 	if !strings.Contains(got, "[weird, yes]") || strings.Contains(got, "[weird, true]") {
 		t.Errorf("token yes mis-rendered:\n%s", got)
 	}

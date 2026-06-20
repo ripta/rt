@@ -215,16 +215,21 @@ deny:
     message: do not run executables from temporary directories
 allow:
   - prefix: [go, test]
-    as_basename: true
+  - prefix: [./scripts/build.sh]
   - regex: '^/opt/foo/bin/[^ ]+(\s|$)'
 ```
 
 In enforce mode the matcher checks deny rules, then allow rules, then prompts;
-deny always wins. Each rule matches by `exact` argv, `prefix` tokens, `glob`,
-or `regex`. `argv[0]` is resolved to an absolute path before matching, so
-path-based rules work however the command was spelled. `as_basename: true`
-matches the program's basename instead, regardless of install path; shells and
-inline-code interpreters are denied by default and cannot be re-allowed.
+deny always wins. Each rule matches by `exact` argv, `prefix` tokens, `glob`, or
+`regex`. `argv[0]` is resolved to an absolute path before matching. For `exact`
+and `prefix` rules the first token's shape decides how it matches: a bare program
+name (`go`) matches the invoked basename however the command was spelled, an
+absolute path pins the exact executable, and a relative path
+(`./scripts/build.sh`) resolves against the project root. `glob` and `regex`
+rules match the canonical absolute join by default and accept `as_basename: true`
+to match the basename join instead; the shape inference covers `exact` and
+`prefix`, so `as_basename` is rejected there. Shells and inline-code interpreters
+are denied by default and cannot be re-allowed.
 
 
 `enc`

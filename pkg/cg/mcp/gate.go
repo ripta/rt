@@ -55,15 +55,16 @@ func (g *gate) check(ctx context.Context, in runInput, resolved *cg.Resolution, 
 	case approve.DecisionRefuse:
 		return refusalError(res.Rule)
 	default:
-		return g.promptOrFailClosed(ctx, in, el)
+		return g.promptOrFailClosed(ctx, in, resolved, el)
 	}
 }
 
 // promptOrFailClosed handles a command that matched neither allow nor deny. A
 // dangerous env override is refused before prompting, because a prompted command
 // has no rule to carry a permit_unsafe_envs exemption. With no elicitor the gate
-// fails closed; otherwise it prompts for approval.
-func (g *gate) promptOrFailClosed(ctx context.Context, in runInput, el elicitor) error {
+// fails closed; otherwise it prompts for approval. resolved carries the canonical
+// executable path the prompt pre-fills as a strict rule.
+func (g *gate) promptOrFailClosed(ctx context.Context, in runInput, resolved *cg.Resolution, el elicitor) error {
 	if bad := (&approve.Rule{}).DisallowedEnvs(in.Env); len(bad) > 0 {
 		return fmt.Errorf("cg_run refused: env override sets %s, which a prompted command cannot permit; add an allow rule with permit_unsafe_envs to %s", strings.Join(bad, ", "), g.store.Project.Path)
 	}
@@ -71,7 +72,7 @@ func (g *gate) promptOrFailClosed(ctx context.Context, in runInput, el elicitor)
 		return g.failClosedError()
 	}
 
-	return g.prompt(ctx, in, el)
+	return g.prompt(ctx, in, resolved, el)
 }
 
 // refusalError builds the error for a deny match, appending the rule's message
