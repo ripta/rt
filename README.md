@@ -219,17 +219,37 @@ allow:
   - regex: '^/opt/foo/bin/[^ ]+(\s|$)'
 ```
 
-In enforce mode the matcher checks deny rules, then allow rules, then prompts;
-deny always wins. Each rule matches by `exact` argv, `prefix` tokens, `glob`, or
-`regex`. `argv[0]` is resolved to an absolute path before matching. For `exact`
-and `prefix` rules the first token's shape decides how it matches: a bare program
-name (`go`) matches the invoked basename however the command was spelled, an
-absolute path pins the exact executable, and a relative path
-(`./scripts/build.sh`) resolves against the project root. `glob` and `regex`
+In enforce mode the matcher checks deny rules, then allow rules, then restrict
+rules, then prompts; deny always wins. Each rule matches by `exact` argv, `prefix`
+tokens, `glob`, or `regex`. `argv[0]` is resolved to an absolute path before
+matching. For `exact` and `prefix` rules the first token's shape decides how it
+matches: a bare program name (`go`) matches the invoked basename however the
+command was spelled, an absolute path pins the exact executable, and a relative
+path (`./scripts/build.sh`) resolves against the project root. `glob` and `regex`
 rules match the canonical absolute join by default and accept `as_basename: true`
 to match the basename join instead; the shape inference covers `exact` and
 `prefix`, so `as_basename` is rejected there. Shells and inline-code interpreters
 are denied by default and cannot be re-allowed.
+
+A `restrict` section adds a fourth tier below `allow`: a command that matches a
+`restrict` rule but no `allow` rule is refused rather than prompted, so a policy
+can enumerate the safe subset of a tool and fail the rest closed within that
+scope. The tiers run `deny` > `allow` > `restrict` > `prompt`, so an `allow`
+carves a command out of a `restrict` scope while an explicit `deny` still beats
+everything. `restrict` rules take the same four kinds as `allow` and `deny` and
+accept an optional `message`.
+
+```yaml
+allow:
+  - prefix: [git, show]
+  - prefix: [git, log]
+restrict:
+  - prefix: [git]
+    message: only read-only git is permitted here
+```
+
+Here `git show` and `git log` run, every other `git` subcommand is refused with
+the message, and a command outside the `git` scope still prompts.
 
 
 `enc`

@@ -59,9 +59,10 @@ type matchTest struct {
 	// fails. It takes precedence over canonical.
 	unresolved bool
 	// root is the project root relative rule tokens resolve against.
-	root        string
-	want        Decision
-	wantMessage string
+	root           string
+	want           Decision
+	wantMessage    string
+	wantRestricted bool
 }
 
 func TestMatch(t *testing.T) {
@@ -124,19 +125,20 @@ func TestMatch(t *testing.T) {
 		{name: "deny message surfaced", deny: []Rule{{Prefix: []string{"rm", "-rf"}, Message: "delete specific paths", kind: KindPrefix}}, argv: []string{"rm", "-rf", "/"}, want: DecisionRefuse, wantMessage: "delete specific paths"},
 
 		// restrict tier: an in-scope command refuses, out of scope still prompts
-		{name: "restrict prefix refuses in scope", restrict: []Rule{prefixRule("git")}, argv: []string{"git", "push"}, want: DecisionRefuse},
+		{name: "restrict prefix refuses in scope", restrict: []Rule{prefixRule("git")}, argv: []string{"git", "push"}, want: DecisionRefuse, wantRestricted: true},
 		{name: "restrict prefix out of scope prompts", restrict: []Rule{prefixRule("git")}, argv: []string{"make"}, want: DecisionPrompt},
-		{name: "restrict exact refuses in scope", restrict: []Rule{exactRule("git", "push")}, argv: []string{"git", "push"}, want: DecisionRefuse},
+		{name: "restrict exact refuses in scope", restrict: []Rule{exactRule("git", "push")}, argv: []string{"git", "push"}, want: DecisionRefuse, wantRestricted: true},
 
 		// allow carves out of restrict; the unmatched rest of the scope refuses
 		{name: "allow carves out of restrict", allow: []Rule{prefixRule("git", "show")}, restrict: []Rule{prefixRule("git")}, argv: []string{"git", "show", "HEAD"}, want: DecisionRun},
-		{name: "restrict refuses uncarved command", allow: []Rule{prefixRule("git", "show")}, restrict: []Rule{prefixRule("git")}, argv: []string{"git", "push"}, want: DecisionRefuse},
+		{name: "restrict refuses uncarved command", allow: []Rule{prefixRule("git", "show")}, restrict: []Rule{prefixRule("git")}, argv: []string{"git", "push"}, want: DecisionRefuse, wantRestricted: true},
 
-		// deny still wins over an allow that would carve out of restrict
+		// deny still wins over an allow that would carve out of restrict; a deny
+		// refusal is not flagged restricted
 		{name: "deny beats allow carve and restrict", deny: []Rule{prefixRule("git", "push")}, allow: []Rule{prefixRule("git")}, restrict: []Rule{prefixRule("git")}, argv: []string{"git", "push"}, want: DecisionRefuse},
 
 		// restrict message propagation
-		{name: "restrict message surfaced", restrict: []Rule{{Prefix: []string{"git"}, Message: "only read-only git is permitted here", kind: KindPrefix}}, argv: []string{"git", "push"}, want: DecisionRefuse, wantMessage: "only read-only git is permitted here"},
+		{name: "restrict message surfaced", restrict: []Rule{{Prefix: []string{"git"}, Message: "only read-only git is permitted here", kind: KindPrefix}}, argv: []string{"git", "push"}, want: DecisionRefuse, wantMessage: "only read-only git is permitted here", wantRestricted: true},
 	}
 
 	for _, tt := range staticTests {
@@ -201,8 +203,8 @@ func TestMatchPatterns(t *testing.T) {
 		{name: "basename glob by name", allow: []Rule{asBase(globRule(t, "kubectl get *"))}, argv: []string{"/usr/local/bin/kubectl", "get", "pods"}, canonical: []string{"/usr/local/bin/kubectl", "get", "pods"}, want: DecisionRun},
 
 		// restrict tier with pattern kinds
-		{name: "restrict glob refuses in scope", restrict: []Rule{globRule(t, "git *")}, argv: []string{"git", "push"}, want: DecisionRefuse},
-		{name: "restrict regex refuses in scope", restrict: []Rule{regexRule(t, `^git `)}, argv: []string{"git", "push"}, want: DecisionRefuse},
+		{name: "restrict glob refuses in scope", restrict: []Rule{globRule(t, "git *")}, argv: []string{"git", "push"}, want: DecisionRefuse, wantRestricted: true},
+		{name: "restrict regex refuses in scope", restrict: []Rule{regexRule(t, `^git `)}, argv: []string{"git", "push"}, want: DecisionRefuse, wantRestricted: true},
 		{name: "restrict regex out of scope prompts", restrict: []Rule{regexRule(t, `^git `)}, argv: []string{"make"}, want: DecisionPrompt},
 	}
 
@@ -242,6 +244,9 @@ func runMatchCase(t *testing.T, tt matchTest) {
 	got := rs.Match(subjectFor(tt))
 	if got.Decision != tt.want {
 		t.Fatalf("Match(%v) decision = %v, want %v", tt.argv, got.Decision, tt.want)
+	}
+	if got.Restricted != tt.wantRestricted {
+		t.Errorf("Match(%v) restricted = %v, want %v", tt.argv, got.Restricted, tt.wantRestricted)
 	}
 	if tt.wantMessage != "" {
 		if got.Rule == nil {

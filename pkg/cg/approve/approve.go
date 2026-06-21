@@ -166,9 +166,14 @@ const (
 // matched deny, allow, or restrict rule, and is nil for allow-all, deny-all, and
 // prompt. Callers read Rule.Message on a deny or restrict and
 // Rule.PermitUnsafeEnvs on an allow.
+//
+// Restricted reports that a DecisionRefuse came from the restrict tier rather
+// than a deny rule, so callers can name the rule kind in a refusal message. It is
+// false for every other verdict, including a deny refusal.
 type MatchResult struct {
-	Decision Decision
-	Rule     *Rule
+	Decision   Decision
+	Rule       *Rule
+	Restricted bool
 }
 
 // Loader and merge errors. They are wrapped with the file path and, where a

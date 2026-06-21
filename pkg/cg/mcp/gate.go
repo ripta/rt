@@ -53,7 +53,7 @@ func (g *gate) check(ctx context.Context, in runInput, resolved *cg.Resolution, 
 		}
 		return nil
 	case approve.DecisionRefuse:
-		return refusalError(res.Rule)
+		return refusalError(res)
 	default:
 		return g.promptOrFailClosed(ctx, in, resolved, el)
 	}
@@ -75,13 +75,18 @@ func (g *gate) promptOrFailClosed(ctx context.Context, in runInput, resolved *cg
 	return g.prompt(ctx, in, resolved, el)
 }
 
-// refusalError builds the error for a deny match, appending the rule's message
-// when set so the agent sees why the command was blocked.
-func refusalError(rule *approve.Rule) error {
-	if rule != nil && rule.Message != "" {
-		return fmt.Errorf("cg_run refused: command matches a deny rule: %s", rule.Message)
+// refusalError builds the error for a deny or restrict match, naming the rule
+// kind and appending the rule's message when set so the agent sees why the
+// command was blocked.
+func refusalError(res approve.MatchResult) error {
+	kind := "deny"
+	if res.Restricted {
+		kind = "restrict"
 	}
-	return fmt.Errorf("cg_run refused: command matches a deny rule")
+	if res.Rule != nil && res.Rule.Message != "" {
+		return fmt.Errorf("cg_run refused: command matches a %s rule: %s", kind, res.Rule.Message)
+	}
+	return fmt.Errorf("cg_run refused: command matches a %s rule", kind)
 }
 
 // failClosedError builds the error for a command that matched neither allow nor

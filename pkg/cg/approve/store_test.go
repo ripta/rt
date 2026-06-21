@@ -204,8 +204,8 @@ func TestLoadProjectModeOverridesGlobal(t *testing.T) {
 func TestLoadUnionsLayers(t *testing.T) {
 	t.Parallel()
 
-	global := writeGlobal(t, "version: 1\ndeny:\n  - prefix: [git, push, --force]\nallow:\n  - prefix: [go, test]\n")
-	root := writeProject(t, "version: 1\ndeny:\n  - prefix: [terraform, destroy]\nallow:\n  - prefix: [make]\n")
+	global := writeGlobal(t, "version: 1\ndeny:\n  - prefix: [git, push, --force]\nallow:\n  - prefix: [go, test]\nrestrict:\n  - prefix: [git]\n")
+	root := writeProject(t, "version: 1\ndeny:\n  - prefix: [terraform, destroy]\nallow:\n  - prefix: [make]\nrestrict:\n  - prefix: [terraform]\n")
 
 	s, err := Load(LoadOptions{GlobalPath: global, ProjectRoot: root})
 	if err != nil {
@@ -219,6 +219,32 @@ func TestLoadUnionsLayers(t *testing.T) {
 	}
 	if len(rs.Allow) != 2 {
 		t.Errorf("allow count = %d, want 2", len(rs.Allow))
+	}
+	if len(rs.Restrict) != 2 {
+		t.Errorf("restrict count = %d, want 2", len(rs.Restrict))
+	}
+}
+
+// TestLoadRestrictCrossLayer covers the settled cross-layer precedence: a project
+// allow carves out of a global restrict because allow (tier 3) beats restrict
+// (tier 4) regardless of which layer each rule came from.
+func TestLoadRestrictCrossLayer(t *testing.T) {
+	t.Parallel()
+
+	global := writeGlobal(t, "version: 1\nrestrict:\n  - prefix: [git]\n")
+	root := writeProject(t, "version: 1\nallow:\n  - prefix: [git, show]\n")
+
+	s, err := Load(LoadOptions{GlobalPath: global, ProjectRoot: root})
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+
+	rs := s.Ruleset()
+	if got := rs.Match(identitySubject([]string{"git", "show", "HEAD"})); got.Decision != DecisionRun {
+		t.Errorf("git show decision = %v, want run (project allow carves out of global restrict)", got.Decision)
+	}
+	if got := rs.Match(identitySubject([]string{"git", "push"})); got.Decision != DecisionRefuse || !got.Restricted {
+		t.Errorf("git push = {%v, restricted=%v}, want refuse via restrict", got.Decision, got.Restricted)
 	}
 }
 

@@ -166,10 +166,12 @@ func loadLayer(path string) (Layer, error) {
 }
 
 // buildRuleset merges the two layers into the frozen ruleset the matcher
-// evaluates. The project mode overrides the global mode; allow and deny entries
-// from both layers are unioned. The built-in default-deny set leads the deny
-// list, so it cannot be re-allowed, and deny is evaluated before allow, which
-// gives deny precedence across layers.
+// evaluates. The project mode overrides the global mode; deny, allow, and
+// restrict entries from both layers are unioned. The built-in default-deny set
+// leads the deny list, so it cannot be re-allowed, and deny is evaluated before
+// allow, which gives deny precedence across layers. Restrict is evaluated after
+// allow and the slices carry no layer provenance, so any allow from either layer
+// carves out of any restrict from either layer.
 func buildRuleset(global, project Layer, projectRoot string) (*Ruleset, error) {
 	rs := &Ruleset{Mode: ModeEnforce}
 
@@ -184,10 +186,12 @@ func buildRuleset(global, project Layer, projectRoot string) (*Ruleset, error) {
 	if global.Doc != nil {
 		rs.Deny = append(rs.Deny, global.Doc.Deny...)
 		rs.Allow = append(rs.Allow, global.Doc.Allow...)
+		rs.Restrict = append(rs.Restrict, global.Doc.Restrict...)
 	}
 	if project.Doc != nil {
 		rs.Deny = append(rs.Deny, project.Doc.Deny...)
 		rs.Allow = append(rs.Allow, project.Doc.Allow...)
+		rs.Restrict = append(rs.Restrict, project.Doc.Restrict...)
 	}
 
 	for i := range rs.Deny {
@@ -195,6 +199,9 @@ func buildRuleset(global, project Layer, projectRoot string) (*Ruleset, error) {
 	}
 	for i := range rs.Allow {
 		compileMatch(&rs.Allow[i], projectRoot)
+	}
+	for i := range rs.Restrict {
+		compileMatch(&rs.Restrict[i], projectRoot)
 	}
 
 	return rs, nil

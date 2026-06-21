@@ -93,6 +93,51 @@ func TestGateDenyRefusesWithMessage(t *testing.T) {
 	}
 }
 
+func TestGateRestrictRefusesWithMessage(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+
+	g := newTestGate(t, "version: 1\nrestrict:\n  - prefix: [echo]\n    message: only echo hi is permitted here\n", false)
+	_, _, err := handleRun(context.Background(), nil, g, nil, runInput{
+		Command: []string{"echo", "bye"},
+	})
+	if err == nil {
+		t.Fatalf("expected refusal for in-scope restricted command")
+	}
+	if !strings.Contains(err.Error(), "matches a restrict rule") {
+		t.Errorf("err = %v, want it to name the restrict rule", err)
+	}
+	if !strings.Contains(err.Error(), "only echo hi is permitted here") {
+		t.Errorf("err = %v, want the rule message surfaced", err)
+	}
+}
+
+func TestGateRestrictAllowCarvesOut(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+
+	// allow carves echo hi out of the echo restrict scope; echo bye stays refused.
+	g := newTestGate(t, "version: 1\nallow:\n  - prefix: [echo, hi]\nrestrict:\n  - prefix: [echo]\n", false)
+
+	_, out, err := handleRun(context.Background(), nil, g, nil, runInput{
+		Command: []string{"echo", "hi"},
+	})
+	if err != nil {
+		t.Fatalf("handleRun(echo hi): %v", err)
+	}
+	if out.ExitCode == nil || *out.ExitCode != 0 {
+		t.Errorf("echo hi ExitCode = %v, want 0", out.ExitCode)
+	}
+
+	_, _, err = handleRun(context.Background(), nil, g, nil, runInput{
+		Command: []string{"echo", "bye"},
+	})
+	if err == nil {
+		t.Fatalf("expected echo bye to be refused by the restrict scope")
+	}
+	if !strings.Contains(err.Error(), "matches a restrict rule") {
+		t.Errorf("err = %v, want it to name the restrict rule", err)
+	}
+}
+
 func TestGateBuiltinDenyRefuses(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 

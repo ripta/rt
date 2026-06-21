@@ -57,7 +57,7 @@ func (rs *Ruleset) Match(subj Subject) MatchResult {
 	}
 	for i := range rs.Restrict {
 		if ruleMatches(&rs.Restrict[i], canonical, basename) {
-			return MatchResult{Decision: DecisionRefuse, Rule: &rs.Restrict[i]}
+			return MatchResult{Decision: DecisionRefuse, Rule: &rs.Restrict[i], Restricted: true}
 		}
 	}
 
