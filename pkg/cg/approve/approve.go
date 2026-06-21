@@ -45,9 +45,10 @@ const (
 	KindRegex
 )
 
-// Rule is one allow or deny entry. Exactly one of Exact/Prefix/Glob/Regex is
-// populated after validation; kind records which. Message is valid only on deny
-// rules and PermitUnsafeEnvs only on allow rules.
+// Rule is one allow, deny, or restrict entry. Exactly one of
+// Exact/Prefix/Glob/Regex is populated after validation; kind records which.
+// Message is valid on deny and restrict rules and PermitUnsafeEnvs only on allow
+// rules.
 //
 // For prefix and exact rules the match form is inferred from the shape of the
 // first token: a bare program name matches the invoked basename, while an
@@ -82,10 +83,11 @@ func (r *Rule) Kind() RuleKind { return r.kind }
 
 // Document is the typed decode of one approve.yaml layer.
 type Document struct {
-	Version int    `yaml:"version"`
-	Mode    Mode   `yaml:"mode,omitempty"`
-	Deny    []Rule `yaml:"deny,omitempty"`
-	Allow   []Rule `yaml:"allow,omitempty"`
+	Version  int    `yaml:"version"`
+	Mode     Mode   `yaml:"mode,omitempty"`
+	Deny     []Rule `yaml:"deny,omitempty"`
+	Allow    []Rule `yaml:"allow,omitempty"`
+	Restrict []Rule `yaml:"restrict,omitempty"`
 }
 
 // Layer is one decoded file plus its provenance. Node and Snapshot are held for
@@ -103,9 +105,10 @@ type Layer struct {
 // at load and never mutated; the matcher consults only this and never touches
 // disk.
 type Ruleset struct {
-	Mode  Mode
-	Deny  []Rule
-	Allow []Rule
+	Mode     Mode
+	Deny     []Rule
+	Allow    []Rule
+	Restrict []Rule
 }
 
 // Store owns the two layers and the live ruleset. It performs disk I/O at load
@@ -152,15 +155,17 @@ type Decision int
 const (
 	// DecisionRun means the command is allowed (allow-all or an allow match).
 	DecisionRun Decision = iota
-	// DecisionRefuse means the command is blocked (deny-all or a deny match).
+	// DecisionRefuse means the command is blocked (deny-all, a deny match, or an
+	// in-scope restrict match with no allow carve-out).
 	DecisionRefuse
 	// DecisionPrompt means nothing matched; the caller should elicit approval.
 	DecisionPrompt
 )
 
 // MatchResult carries the verdict plus the rule that produced it. Rule is the
-// matched deny or allow rule, and is nil for allow-all, deny-all, and prompt.
-// Callers read Rule.Message on a deny and Rule.PermitUnsafeEnvs on an allow.
+// matched deny, allow, or restrict rule, and is nil for allow-all, deny-all, and
+// prompt. Callers read Rule.Message on a deny or restrict and
+// Rule.PermitUnsafeEnvs on an allow.
 type MatchResult struct {
 	Decision Decision
 	Rule     *Rule
@@ -174,6 +179,6 @@ var (
 	ErrNoRuleKind         = errors.New("rule has no rule-kind key (need one of exact, prefix, glob, or regex)")
 	ErrMultipleRuleKinds  = errors.New("rule has more than one rule-kind key")
 	ErrMessageOnAllow     = errors.New("message is not valid on an allow rule; use a YAML comment instead")
-	ErrPermitOnDeny       = errors.New("permit_unsafe_envs is not valid on a deny rule")
+	ErrPermitNotOnAllow   = errors.New("permit_unsafe_envs is valid only on an allow rule")
 	ErrAsBasenameOnTokens = errors.New("as_basename is not valid on a prefix or exact rule; the first token's shape already settles the form (bare name matches the basename, a path matches the canonical path)")
 )

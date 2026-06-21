@@ -201,9 +201,10 @@ func (s *Store) appendLiveAllow(tokens []string) {
 	compileMatch(&rule, s.projectRoot)
 	cur := s.rules.Load()
 	next := &Ruleset{
-		Mode:  cur.Mode,
-		Deny:  cur.Deny,
-		Allow: append(slices.Clone(cur.Allow), rule),
+		Mode:     cur.Mode,
+		Deny:     cur.Deny,
+		Allow:    append(slices.Clone(cur.Allow), rule),
+		Restrict: cur.Restrict,
 	}
 	s.rules.Store(next)
 }

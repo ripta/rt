@@ -18,10 +18,13 @@ type matchForm struct {
 }
 
 // Match evaluates a subject against the frozen ruleset and returns the verdict.
-// mode allow-all and deny-all short-circuit; otherwise the first matching deny
-// rule refuses, the first matching allow rule runs, and no match prompts. Deny is
-// evaluated in full before allow, so a deny match always wins, including across
-// layers.
+// mode allow-all and deny-all short-circuit; otherwise the tiers are consulted in
+// order deny > allow > restrict > prompt: the first matching deny rule refuses,
+// then the first matching allow rule runs, then the first matching restrict rule
+// refuses an in-scope command with no allow carve-out, and an unmatched command
+// prompts. Deny is evaluated in full before allow, so a deny match always wins,
+// and allow is evaluated before restrict, so an allow carves out of a restrict
+// scope. Both relationships hold across layers.
 //
 // Each rule matches either the canonical form or the basename form, decided at
 // load by compileMatch from the rule's shape. When the subject has no canonical
@@ -50,6 +53,11 @@ func (rs *Ruleset) Match(subj Subject) MatchResult {
 	for i := range rs.Allow {
 		if ruleMatches(&rs.Allow[i], canonical, basename) {
 			return MatchResult{Decision: DecisionRun, Rule: &rs.Allow[i]}
+		}
+	}
+	for i := range rs.Restrict {
+		if ruleMatches(&rs.Restrict[i], canonical, basename) {
+			return MatchResult{Decision: DecisionRefuse, Rule: &rs.Restrict[i]}
 		}
 	}
 

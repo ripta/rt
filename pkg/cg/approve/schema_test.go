@@ -103,7 +103,34 @@ deny:
   - prefix: [make]
     permit_unsafe_envs: [PATH]
 `,
-		wantErr: ErrPermitOnDeny,
+		wantErr: ErrPermitNotOnAllow,
+	},
+	{
+		name: "restrict with all four kinds ok",
+		yaml: `version: 1
+restrict:
+  - exact: [git, status]
+  - prefix: [git]
+  - glob: 'kubectl get *'
+  - regex: '^git '
+`,
+	},
+	{
+		name: "restrict with message ok",
+		yaml: `version: 1
+restrict:
+  - prefix: [git]
+    message: only read-only git is permitted here
+`,
+	},
+	{
+		name: "permit_unsafe_envs on restrict rejected",
+		yaml: `version: 1
+restrict:
+  - prefix: [git]
+    permit_unsafe_envs: [PATH]
+`,
+		wantErr: ErrPermitNotOnAllow,
 	},
 	{
 		name: "as_basename on prefix rejected",

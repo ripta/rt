@@ -47,11 +47,12 @@ func identitySubject(argv []string) Subject {
 }
 
 type matchTest struct {
-	name  string
-	mode  Mode
-	deny  []Rule
-	allow []Rule
-	argv  []string
+	name     string
+	mode     Mode
+	deny     []Rule
+	allow    []Rule
+	restrict []Rule
+	argv     []string
 	// canonical overrides the canonical form; when nil it defaults to argv.
 	canonical []string
 	// unresolved leaves the canonical form unavailable, as when canonicalization
@@ -121,6 +122,21 @@ func TestMatch(t *testing.T) {
 
 		// deny message propagation
 		{name: "deny message surfaced", deny: []Rule{{Prefix: []string{"rm", "-rf"}, Message: "delete specific paths", kind: KindPrefix}}, argv: []string{"rm", "-rf", "/"}, want: DecisionRefuse, wantMessage: "delete specific paths"},
+
+		// restrict tier: an in-scope command refuses, out of scope still prompts
+		{name: "restrict prefix refuses in scope", restrict: []Rule{prefixRule("git")}, argv: []string{"git", "push"}, want: DecisionRefuse},
+		{name: "restrict prefix out of scope prompts", restrict: []Rule{prefixRule("git")}, argv: []string{"make"}, want: DecisionPrompt},
+		{name: "restrict exact refuses in scope", restrict: []Rule{exactRule("git", "push")}, argv: []string{"git", "push"}, want: DecisionRefuse},
+
+		// allow carves out of restrict; the unmatched rest of the scope refuses
+		{name: "allow carves out of restrict", allow: []Rule{prefixRule("git", "show")}, restrict: []Rule{prefixRule("git")}, argv: []string{"git", "show", "HEAD"}, want: DecisionRun},
+		{name: "restrict refuses uncarved command", allow: []Rule{prefixRule("git", "show")}, restrict: []Rule{prefixRule("git")}, argv: []string{"git", "push"}, want: DecisionRefuse},
+
+		// deny still wins over an allow that would carve out of restrict
+		{name: "deny beats allow carve and restrict", deny: []Rule{prefixRule("git", "push")}, allow: []Rule{prefixRule("git")}, restrict: []Rule{prefixRule("git")}, argv: []string{"git", "push"}, want: DecisionRefuse},
+
+		// restrict message propagation
+		{name: "restrict message surfaced", restrict: []Rule{{Prefix: []string{"git"}, Message: "only read-only git is permitted here", kind: KindPrefix}}, argv: []string{"git", "push"}, want: DecisionRefuse, wantMessage: "only read-only git is permitted here"},
 	}
 
 	for _, tt := range staticTests {
@@ -183,6 +199,11 @@ func TestMatchPatterns(t *testing.T) {
 		{name: "basename regex matches by name", allow: []Rule{asBase(regexRule(t, `^go test`))}, argv: []string{"go", "test"}, canonical: []string{"/usr/bin/go", "test"}, want: DecisionRun},
 		{name: "basename regex deny sudo by name", deny: []Rule{asBase(regexRule(t, `^sudo(\s|$)`))}, argv: []string{"/usr/bin/sudo", "rm"}, canonical: []string{"/usr/bin/sudo", "rm"}, want: DecisionRefuse},
 		{name: "basename glob by name", allow: []Rule{asBase(globRule(t, "kubectl get *"))}, argv: []string{"/usr/local/bin/kubectl", "get", "pods"}, canonical: []string{"/usr/local/bin/kubectl", "get", "pods"}, want: DecisionRun},
+
+		// restrict tier with pattern kinds
+		{name: "restrict glob refuses in scope", restrict: []Rule{globRule(t, "git *")}, argv: []string{"git", "push"}, want: DecisionRefuse},
+		{name: "restrict regex refuses in scope", restrict: []Rule{regexRule(t, `^git `)}, argv: []string{"git", "push"}, want: DecisionRefuse},
+		{name: "restrict regex out of scope prompts", restrict: []Rule{regexRule(t, `^git `)}, argv: []string{"make"}, want: DecisionPrompt},
 	}
 
 	for _, tt := range tests {
@@ -208,12 +229,15 @@ func subjectFor(tt matchTest) Subject {
 
 func runMatchCase(t *testing.T, tt matchTest) {
 	t.Helper()
-	rs := &Ruleset{Mode: tt.mode, Deny: slices.Clone(tt.deny), Allow: slices.Clone(tt.allow)}
+	rs := &Ruleset{Mode: tt.mode, Deny: slices.Clone(tt.deny), Allow: slices.Clone(tt.allow), Restrict: slices.Clone(tt.restrict)}
 	for i := range rs.Deny {
 		compileMatch(&rs.Deny[i], tt.root)
 	}
 	for i := range rs.Allow {
 		compileMatch(&rs.Allow[i], tt.root)
+	}
+	for i := range rs.Restrict {
+		compileMatch(&rs.Restrict[i], tt.root)
 	}
 	got := rs.Match(subjectFor(tt))
 	if got.Decision != tt.want {
