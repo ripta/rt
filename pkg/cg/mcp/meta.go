@@ -35,9 +35,9 @@ type metaFields struct {
 // the embedded meta fields are populated only when the run has finished;
 // Debug is populated only when the run failed to start.
 type metaOutput struct {
-	ID    string          `json:"id"`
-	State string          `json:"state"`
-	Debug *cg.StartDebug  `json:"debug,omitempty"`
+	ID    string         `json:"id"`
+	State string         `json:"state"`
+	Debug *cg.StartDebug `json:"debug,omitempty"`
 	metaFields
 }
 

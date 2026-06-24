@@ -343,22 +343,22 @@ type writeLinesProcessorTest struct {
 
 var writeLinesProcessorTests = []writeLinesProcessorTest{
 	{
-		name: "JSON lines processed",
-		proc: NewJSONProcessor(JSONProcessorOptions{MessageKey: "message"}),
+		name:      "JSON lines processed",
+		proc:      NewJSONProcessor(JSONProcessorOptions{MessageKey: "message"}),
 		indicator: IndicatorOut,
 		input:     "{\"message\":\"hello\"}\n{\"message\":\"world\"}\n",
 		want:      "T O: hello\nT O: world\n",
 	},
 	{
-		name: "non-JSON passes through",
-		proc: NewJSONProcessor(JSONProcessorOptions{MessageKey: "message"}),
+		name:      "non-JSON passes through",
+		proc:      NewJSONProcessor(JSONProcessorOptions{MessageKey: "message"}),
 		indicator: IndicatorOut,
 		input:     "plain text\n",
 		want:      "T O: plain text\n",
 	},
 	{
-		name: "mixed JSON and non-JSON",
-		proc: NewJSONProcessor(JSONProcessorOptions{MessageKey: "message"}),
+		name:      "mixed JSON and non-JSON",
+		proc:      NewJSONProcessor(JSONProcessorOptions{MessageKey: "message"}),
 		indicator: IndicatorOut,
 		input:     "{\"message\":\"parsed\"}\nnot json\n",
 		want:      "T O: parsed\nT O: not json\n",
