@@ -1,0 +1,3 @@
+# A mistyped subcommand is an unknown-command error, not a program execution.
+! exec cg prnue
+stderr 'unknown command'

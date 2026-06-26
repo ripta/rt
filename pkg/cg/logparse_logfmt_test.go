@@ -245,6 +245,7 @@ func TestCommandLogParseLogfmt(t *testing.T) {
 	}
 
 	out, err := runCgCommand(
+		"run",
 		"--format", "T ",
 		"--log-parse", "logfmt",
 		"--",
@@ -270,6 +271,7 @@ func TestCommandLogParseLogfmtWithFields(t *testing.T) {
 	}
 
 	out, err := runCgCommand(
+		"run",
 		"--format", "T ",
 		"--log-parse", "logfmt",
 		"--log-fields", "level",
@@ -291,6 +293,7 @@ func TestCommandLogParseLogfmtBuffered(t *testing.T) {
 	}
 
 	out, err := runCgCommand(
+		"run",
 		"--format", "T ",
 		"--log-parse", "logfmt",
 		"--buffered",
@@ -315,6 +318,7 @@ func TestCommandLogParseLogfmtInvalidValue(t *testing.T) {
 	}
 
 	_, err := runCgCommand(
+		"run",
 		"--format", "T ",
 		"--log-parse", "yaml",
 		"--",

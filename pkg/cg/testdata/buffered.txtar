@@ -1,4 +1,4 @@
-exec cg --buffered -- sh -c 'echo out; echo err >&2'
+exec cg run --buffered -- sh -c 'echo out; echo err >&2'
 stdout '^I: buffered mode, output deferred$'
 stdout '^I: --- stdout ---$'
 stdout '^O: out$'

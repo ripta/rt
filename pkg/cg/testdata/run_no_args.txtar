@@ -1,0 +1,3 @@
+# cg run with no command is a usage error (exit 2)
+! exec cg run
+stderr 'Usage:'

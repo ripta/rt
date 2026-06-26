@@ -102,21 +102,22 @@ explicitly, e.g. `sin(45 * PI / 180)`.
 `cg`
 ----
 
-Run a command and annotate each output line with a stream indicator: `O` for
-stdout, `E` for stderr, `I` for cg's own lifecycle messages. At the end of the
-run, a one-line summary reports the exit code, wall duration, and per-stream
-line counts.
+Run a command with `cg run` and annotate each output line with a stream
+indicator: `O` for stdout, `E` for stderr, `I` for cg's own lifecycle messages.
+At the end of the run, a one-line summary reports the exit code, wall duration,
+and per-stream line counts. Bare `cg` is dispatch-only: it owns the `run`,
+resolution, and `mcp` subcommands and no longer execs programs itself.
 
 ```
 go install github.com/ripta/rt/cmd/cg@latest
 ```
 
 ```
-❯ cg -- echo hello
+❯ cg run -- echo hello
 O: hello
 I: Finished exitcode=0 in 2ms (out=1 err=0)
 
-❯ cg -- sh -c 'echo out; echo err >&2'
+❯ cg run -- sh -c 'echo out; echo err >&2'
 O: out
 E: err
 I: Finished exitcode=0 in 3ms (out=1 err=1)
@@ -131,7 +132,7 @@ and appends a short run ID to the summary line. Resolution subcommands thread
 the ID through follow-up calls:
 
 ```
-❯ cg -c -- sh -c 'echo out; echo err >&2'
+❯ cg run -c -- sh -c 'echo out; echo err >&2'
 I: Finished exitcode=0 in 3ms (out=1 err=1) id=Q3F9K2
 
 ❯ cg out Q3F9K2
@@ -159,15 +160,17 @@ M7P4QX  exit=42  2ms     sh -c 'exit 42'
 ❯ cg prune --dry-run
 ```
 
-`-v` / `--verbose` prefixes every line with a timestamp and adds a started/finished
-preamble; `--format` controls the layout using Go's `time.Format` syntax.
-`--buffered` defers child output until the command finishes, grouping by stream.
-`--log-parse json|logfmt` reformats structured log lines inline.
+`cg run` takes the execution flags. `-v` / `--verbose` prefixes every line with a
+timestamp and adds a started/finished preamble; `--format` controls the layout
+using Go's `time.Format` syntax. `--buffered` defers child output until the
+command finishes, grouping by stream. `--log-parse json|logfmt` reformats
+structured log lines inline. cg flags must precede the command; everything after
+the first positional or `--` is passed through to the child untouched.
 
 `cg mcp` starts a stdio MCP server that exposes the capture-run model as native
 tools, using the same on-disk storage the shell subcommands use — a run started
-with `cg -c` is visible to `cg_list`, and a run started by `cg_run` is visible
-to `cg ls`. Register with Claude Code:
+with `cg run -c` is visible to `cg_list`, and a run started by `cg_run` is
+visible to `cg ls`. Register with Claude Code:
 
 ```
 claude mcp add cg cg mcp

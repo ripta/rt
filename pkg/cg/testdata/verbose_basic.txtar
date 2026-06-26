@@ -1,4 +1,4 @@
-exec cg -v --format 'T ' -- echo hello
+exec cg run -v --format 'T ' -- echo hello
 stdout '^T I: cg '
 stdout '^T I: prefix='
 stdout '^T I: Started echo hello$'

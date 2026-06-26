@@ -264,7 +264,7 @@ func TestCommandBufferedGroupsOutput(t *testing.T) {
 		t.Skip("skipping integration test")
 	}
 
-	out, err := runCgCommand("--buffered", "--", "sh", "-c", "echo out; echo err >&2")
+	out, err := runCgCommand("run", "--buffered", "--", "sh", "-c", "echo out; echo err >&2")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -327,7 +327,7 @@ func TestCommandBufferedEmptyStream(t *testing.T) {
 		t.Skip("skipping integration test")
 	}
 
-	out, err := runCgCommand("--buffered", "--", "echo", "hello")
+	out, err := runCgCommand("run", "--buffered", "--", "echo", "hello")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -348,7 +348,7 @@ func TestCommandBufferedNoOutput(t *testing.T) {
 		t.Skip("skipping integration test")
 	}
 
-	out, err := runCgCommand("--buffered", "--", "true")
+	out, err := runCgCommand("run", "--buffered", "--", "true")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -369,7 +369,7 @@ func TestCommandBufferedExitCode(t *testing.T) {
 		t.Skip("skipping integration test")
 	}
 
-	out, err := runCgCommand("--buffered", "--", "sh", "-c", "echo before_exit; exit 42")
+	out, err := runCgCommand("run", "--buffered", "--", "sh", "-c", "echo before_exit; exit 42")
 	if err == nil {
 		t.Fatal("expected error from exit 42")
 	}
@@ -395,7 +395,7 @@ func TestCommandBufferedWithCapture(t *testing.T) {
 		t.Skip("skipping integration test")
 	}
 
-	out, err := runCgCommand("-v", "--format", "T ", "--buffered", "--capture", "--", "sh", "-c", "echo out; echo err >&2")
+	out, err := runCgCommand("run", "-v", "--format", "T ", "--buffered", "--capture", "--", "sh", "-c", "echo out; echo err >&2")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -457,7 +457,7 @@ func TestCommandBufferedSignalFlush(t *testing.T) {
 	cmd := NewCommand()
 	cmd.SetOut(&outBuf)
 	cmd.SetErr(&outBuf)
-	cmd.SetArgs([]string{"--buffered", "--", "sh", "-c", script})
+	cmd.SetArgs([]string{"run", "--buffered", "--", "sh", "-c", script})
 
 	done := make(chan error, 1)
 	go func() {

@@ -73,7 +73,7 @@ func TestCommandCaptureCreatesFiles(t *testing.T) {
 		t.Skip("skipping integration test")
 	}
 
-	out, err := runCgCommand("--capture", "--", "echo", "hello")
+	out, err := runCgCommand("run", "--capture", "--", "echo", "hello")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -117,7 +117,7 @@ func TestCommandCaptureBriefOmitsLifecycleAndPaths(t *testing.T) {
 		t.Skip("skipping integration test")
 	}
 
-	out, err := runCgCommand("--capture", "--", "echo", "hello")
+	out, err := runCgCommand("run", "--capture", "--", "echo", "hello")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -146,7 +146,7 @@ func TestCommandCaptureVerboseEmitsPaths(t *testing.T) {
 		t.Skip("skipping integration test")
 	}
 
-	out, err := runCgCommand("-v", "--format", "T ", "--capture", "--", "echo", "hello")
+	out, err := runCgCommand("run", "-v", "--format", "T ", "--capture", "--", "echo", "hello")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -172,7 +172,7 @@ func TestCommandCaptureShortFlag(t *testing.T) {
 		t.Skip("skipping integration test")
 	}
 
-	out, err := runCgCommand("-c", "--", "echo", "hello")
+	out, err := runCgCommand("run", "-c", "--", "echo", "hello")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -197,7 +197,7 @@ func TestCommandCaptureSeparateStreams(t *testing.T) {
 		t.Skip("skipping integration test")
 	}
 
-	out, err := runCgCommand("--capture", "--", "sh", "-c", "echo out; echo err >&2")
+	out, err := runCgCommand("run", "--capture", "--", "sh", "-c", "echo out; echo err >&2")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -231,7 +231,7 @@ func TestCommandCaptureWritesMeta(t *testing.T) {
 		t.Skip("skipping integration test")
 	}
 
-	out, err := runCgCommand("--capture", "--", "echo", "hello")
+	out, err := runCgCommand("run", "--capture", "--", "echo", "hello")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -277,7 +277,7 @@ func TestCommandCaptureEmptyStreams(t *testing.T) {
 		t.Skip("skipping integration test")
 	}
 
-	out, err := runCgCommand("--capture", "--", "true")
+	out, err := runCgCommand("run", "--capture", "--", "true")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

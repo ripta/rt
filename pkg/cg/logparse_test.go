@@ -452,6 +452,7 @@ func TestCommandLogParseJSON(t *testing.T) {
 	}
 
 	out, err := runCgCommand(
+		"run",
 		"--format", "T ",
 		"--log-parse", "json",
 		"--",
@@ -478,6 +479,7 @@ func TestCommandLogParseNonJSON(t *testing.T) {
 	}
 
 	out, err := runCgCommand(
+		"run",
 		"--format", "T ",
 		"--log-parse", "json",
 		"--",
@@ -498,6 +500,7 @@ func TestCommandLogFieldsWithoutParse(t *testing.T) {
 	}
 
 	_, err := runCgCommand(
+		"run",
 		"--format", "T ",
 		"--log-fields", "level",
 		"--",
@@ -522,6 +525,7 @@ func TestCommandLogParseInvalid(t *testing.T) {
 	}
 
 	_, err := runCgCommand(
+		"run",
 		"--format", "T ",
 		"--log-parse", "xml",
 		"--",
@@ -546,6 +550,7 @@ func TestCommandLogParseWithFields(t *testing.T) {
 	}
 
 	out, err := runCgCommand(
+		"run",
 		"--format", "T ",
 		"--log-parse", "json",
 		"--log-fields", "level",
@@ -567,6 +572,7 @@ func TestCommandLogParseBuffered(t *testing.T) {
 	}
 
 	out, err := runCgCommand(
+		"run",
 		"--format", "T ",
 		"--log-parse", "json",
 		"--buffered",
