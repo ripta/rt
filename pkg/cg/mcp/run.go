@@ -50,6 +50,10 @@ type runOutput struct {
 	ExcerptFrom   string `json:"excerpt_from,omitempty"`
 	Truncated     bool   `json:"truncated"`
 	StartError    string `json:"start_error,omitempty"`
+	// RememberWarning reports a remembered rule that failed to persist; the
+	// command still ran. It rides here rather than the server's stderr, which an
+	// MCP host would bleed onto the screen.
+	RememberWarning string `json:"remember_warning,omitempty"`
 }
 
 func registerRun(s *mcpsdk.Server, reg *runRegistry, g *gate) {
@@ -72,7 +76,8 @@ func handleRun(ctx context.Context, reg *runRegistry, g *gate, el elicitor, in r
 
 	resolved, _ := cg.ResolveCommand(in.Command, in.Cwd)
 
-	if err := g.check(ctx, in, resolved, el); err != nil {
+	warning, err := g.check(ctx, in, resolved, el)
+	if err != nil {
 		return nil, runOutput{}, err
 	}
 
@@ -108,7 +113,9 @@ func handleRun(ctx context.Context, reg *runRegistry, g *gate, el elicitor, in r
 	}
 
 	if !wait {
-		return nil, runOutput{ID: run.ID, Started: true}, nil
+		out := runOutput{ID: run.ID, Started: true}
+		out.RememberWarning = warning
+		return nil, out, nil
 	}
 
 	timeoutMs := in.WaitTimeoutMs
@@ -121,9 +128,13 @@ func handleRun(ctx context.Context, reg *runRegistry, g *gate, el elicitor, in r
 
 	select {
 	case <-run.Done:
-		return nil, finishedOutput(run, excerpt, in.ExcerptFrom), nil
+		out := finishedOutput(run, excerpt, in.ExcerptFrom)
+		out.RememberWarning = warning
+		return nil, out, nil
 	case <-timer.C:
-		return nil, timedOutOutput(run, excerpt, in.ExcerptFrom), nil
+		out := timedOutOutput(run, excerpt, in.ExcerptFrom)
+		out.RememberWarning = warning
+		return nil, out, nil
 	case <-ctx.Done():
 		return nil, runOutput{}, ctx.Err()
 	}

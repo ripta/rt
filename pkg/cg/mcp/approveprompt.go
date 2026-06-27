@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"os"
 	"strings"
 
 	jsonschema "github.com/google/jsonschema-go/jsonschema"
@@ -16,10 +14,6 @@ import (
 	"github.com/ripta/rt/pkg/cg"
 	"github.com/ripta/rt/pkg/cg/approve"
 )
-
-// stderr is where best-effort persistence diagnostics go. It is a package
-// variable so tests can capture the messages.
-var stderr io.Writer = os.Stderr
 
 const (
 	actionAccept = "accept"
@@ -41,14 +35,17 @@ const (
 // file and swaps it into the live matcher. Decline and cancel refuse this once.
 // The suggestion pre-fills the canonical executable path resolved for the run, so
 // a remembered rule is strict by default; the user can edit it down to a name.
-func (g *gate) prompt(ctx context.Context, in runInput, resolved *cg.Resolution, el elicitor) error {
+//
+// A non-empty first return is a best-effort persistence diagnostic the caller
+// surfaces in the tool result; the command was still approved and runs.
+func (g *gate) prompt(ctx context.Context, in runInput, resolved *cg.Resolution, el elicitor) (string, error) {
 	suggestion := approve.SuggestPrefix(in.Command, resolved.ExecPath())
 	res, err := el.Elicit(ctx, &mcpsdk.ElicitParams{
 		Message:         approvalMessage(in),
 		RequestedSchema: approvalSchema(suggestion, g.store.Project.Path),
 	})
 	if err != nil {
-		return fmt.Errorf("cg_run refused: approval prompt failed: %w", err)
+		return "", fmt.Errorf("cg_run refused: approval prompt failed: %w", err)
 	}
 	// A declined or cancelled prompt refuses the command this once and persists
 	// nothing. Elicitation only returns form content on accept, so the remember
@@ -58,46 +55,48 @@ func (g *gate) prompt(ctx context.Context, in runInput, resolved *cg.Resolution,
 	// already carries Accept and Decline buttons, and duplicating that choice
 	// inside the form is clunky.
 	if res.Action != actionAccept {
-		return fmt.Errorf("cg_run refused: command was declined at the approval prompt")
+		return "", fmt.Errorf("cg_run refused: command was declined at the approval prompt")
 	}
 
 	if remember(res.Content) {
 		tokens, err := parseRuleField(res.Content, suggestion)
 		if err != nil {
-			return fmt.Errorf("cg_run refused: %w", err)
+			return "", fmt.Errorf("cg_run refused: %w", err)
 		}
-		g.persistRemember(ctx, tokens, el)
+		return g.persistRemember(ctx, tokens, el), nil
 	}
 
-	return nil
+	return "", nil
 }
 
 // persistRemember writes the remembered rule, resolving on-disk divergence
 // through a second prompt. Persistence is best-effort: the command was approved,
-// so a write failure or a skipped divergence still lets the run proceed; the
-// problem is reported to the server's stderr.
-func (g *gate) persistRemember(ctx context.Context, tokens []string, el elicitor) {
+// so a write failure or a skipped divergence still lets the run proceed. It
+// returns a diagnostic the caller surfaces in the tool result, or empty on
+// success, rather than writing to the server's stderr, which an MCP host would
+// bleed onto the screen.
+func (g *gate) persistRemember(ctx context.Context, tokens []string, el elicitor) string {
 	changed, current, err := g.store.CheckProjectDivergence()
 	if err != nil {
-		fmt.Fprintf(stderr, "cg_run: skipping remember: %v\n", err)
-		return
+		return fmt.Sprintf("skipping remember: %v", err)
 	}
 
 	strategy := approve.WriteDirect
 	if changed {
 		strategy, err = g.resolveDivergence(ctx, current, el)
 		if err != nil {
-			fmt.Fprintf(stderr, "cg_run: skipping remember: %v\n", err)
-			return
+			return fmt.Sprintf("skipping remember: %v", err)
 		}
 		if strategy < 0 {
-			return
+			return ""
 		}
 	}
 
 	if err := g.store.AppendProjectAllowPrefix(tokens, strategy); err != nil {
-		fmt.Fprintf(stderr, "cg_run: remember write failed: %v\n", err)
+		return fmt.Sprintf("remember write failed: %v", err)
 	}
+
+	return ""
 }
 
 // resolveDivergence prompts the user to reconcile an on-disk change to the

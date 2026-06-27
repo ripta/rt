@@ -1,7 +1,6 @@
 package mcp
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"os"
@@ -312,16 +311,11 @@ func TestPromptDivergenceSkip(t *testing.T) {
 func TestPromptRememberWriteErrorStillRuns(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 
-	var buf bytes.Buffer
-	old := stderr
-	stderr = &buf
-	defer func() { stderr = old }()
-
 	rootDir := t.TempDir()
 	g := newTestGateAt(t, rootDir, "", false)
 	// Force a persistence failure by making the project path a directory, so the
 	// atomic rename onto it fails. The command must still run, and a diagnostic
-	// must be emitted.
+	// must ride back in the result.
 	if err := os.Mkdir(projectFile(rootDir), 0o755); err != nil {
 		t.Fatalf("seed project path as dir: %v", err)
 	}
@@ -336,7 +330,7 @@ func TestPromptRememberWriteErrorStillRuns(t *testing.T) {
 	if out.ExitCode == nil || *out.ExitCode != 0 {
 		t.Errorf("command should run despite write failure; ExitCode = %v", out.ExitCode)
 	}
-	if !strings.Contains(buf.String(), "remember") {
-		t.Errorf("expected a persistence diagnostic on stderr, got %q", buf.String())
+	if !strings.Contains(out.RememberWarning, "remember") {
+		t.Errorf("expected a persistence diagnostic in the result, got %q", out.RememberWarning)
 	}
 }

@@ -37,16 +37,15 @@ func (e *StartFailure) Unwrap() error { return e.Err }
 // inherits the caller's working directory. env entries are appended to
 // os.Environ, so MCP-supplied keys override the parent's.
 //
-// resolved is the executable identity computed for args; when nil, RunCapture
-// resolves it itself. The child execs resolved.ExecPath, the canonical path,
-// while keeping args[0] as the child's argv[0], so a fresh PATH lookup at exec
-// time cannot select a different file than the one the approval gate matched. An
-// unresolved command falls back to args[0] so exec still surfaces the start
-// failure.
+// `resolved` is the executable identity computed for args; when nil,
+// RunCapture resolves it itself. The child execs resolved.ExecPath, the
+// canonical path, while keeping args[0] as the child's argv[0], so a fresh
+// PATH lookup at exec time cannot select a different file than the one the
+// approval gate matched. An unresolved command falls back to args[0] so exec
+// still surfaces the start failure.
 //
-// The child runs in its own process group, so cancelling a caller's context
-// does not kill it. A background goroutine waits for the child, writes
-// meta.json, and closes Done.
+// The child runs in its own session courtesy Setsid. That isolates it in a
+// fresh process group.
 func RunCapture(args []string, resolved *Resolution, cwd string, env map[string]string) (*CaptureRun, error) {
 	if len(args) == 0 {
 		return nil, fmt.Errorf("command is empty")
@@ -69,7 +68,7 @@ func RunCapture(args []string, resolved *Resolution, cwd string, env map[string]
 	child.Dir = cwd
 	child.Stdout = outCounter
 	child.Stderr = errCounter
-	child.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	child.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if len(env) > 0 {
 		child.Env = mergeEnv(os.Environ(), env)
 	}

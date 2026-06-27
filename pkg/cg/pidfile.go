@@ -9,7 +9,8 @@ import (
 )
 
 // PidFilename is the file name within a run directory that holds the child's
-// process-group ID while the run is in flight. The capture paths set Setpgid,
+// process-group ID while the run is in flight. The capture paths make the child
+// a process-group leader (the MCP path via Setsid, the shell path via Setpgid),
 // so the pgid equals the child's pid. cg_cancel reads this to signal the group;
 // it is removed once the run finishes so a completed run carries no stale pid.
 const PidFilename = "pid"
