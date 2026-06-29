@@ -71,8 +71,8 @@ github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZb
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 github.com/r3labs/diff/v3 v3.0.2 h1:yVuxAY1V6MeM4+HNur92xkS39kB/N+cFi2hMkY06BbA=
 github.com/r3labs/diff/v3 v3.0.2/go.mod h1:Cy542hv0BAEmhDYWtGxXRQ4kqRsVIcEjG9gChUlTmkw=
-github.com/ripta/hypercmd v0.6.0 h1:lUxdqhP/cR/Spu8Yi0Ve60Tw8+LYPkBdkhaplDf7fbo=
-github.com/ripta/hypercmd v0.6.0/go.mod h1:8QnmkN5AFLtPDl5LnGExQdSG/CMEhAk9GqBpYJWScrw=
+github.com/ripta/hypercmd v0.7.0 h1:wwR+9CvRZWrhcInEJeqijKe2umjrWK9xNuLR264gMz8=
+github.com/ripta/hypercmd v0.7.0/go.mod h1:43G7Luh6xb1emjVfqQP3SA/R9ohgxA+SsITPp4gzXyY=
 github.com/ripta/reals v0.0.0-20260614185130-b214700ec783 h1:C9fMjkM7wA0VJFYwPf8BCmIxBnqLSqv7KNo88ugJYOo=
 github.com/ripta/reals v0.0.0-20260614185130-b214700ec783/go.mod h1:HJD35VfuiXMIOHm9kFC3c637WX/sznn9gES6ajLTUKk=
 github.com/ripta/unihan v0.0.0-20250404091138-c307c698a880 h1:ZzDUYlZP/LHJmkh+PtgRZHEKa+eNVefq6YR8BnUCQ2I=
