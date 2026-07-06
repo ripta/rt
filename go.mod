@@ -7,7 +7,7 @@ require (
 	github.com/containerd/console v1.0.5
 	github.com/elk-language/go-prompt v1.4.0
 	github.com/go-logfmt/logfmt v0.6.1
-	github.com/google/cel-go v0.28.1
+	github.com/google/cel-go v0.29.1
 	github.com/google/jsonschema-go v0.4.3
 	github.com/gosuri/uilive v0.0.4
 	github.com/hashicorp/hcl/v2 v2.24.0
@@ -28,7 +28,7 @@ require (
 	github.com/zclconf/go-cty v1.18.1
 	golang.org/x/crypto v0.53.0
 	golang.org/x/term v0.44.0
-	golang.org/x/text v0.38.0
+	golang.org/x/text v0.39.0
 	golang.org/x/time v0.15.0
 	google.golang.org/protobuf v1.36.11
 	gopkg.in/yaml.v3 v3.0.1
@@ -63,7 +63,7 @@ require (
 	golang.org/x/oauth2 v0.36.0 // indirect
 	golang.org/x/sync v0.21.0 // indirect
 	golang.org/x/sys v0.46.0 // indirect
-	golang.org/x/tools v0.46.0 // indirect
+	golang.org/x/tools v0.47.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260610212136-7ab31c22f7ad // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260610212136-7ab31c22f7ad // indirect
 )
