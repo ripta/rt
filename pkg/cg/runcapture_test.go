@@ -59,6 +59,35 @@ func TestRunCaptureEcho(t *testing.T) {
 	}
 }
 
+func TestRunCaptureStartInfo(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+
+	run, err := RunCapture([]string{"sh", "-c", "sleep 0.3; echo done"}, nil, "", nil)
+	if err != nil {
+		t.Fatalf("RunCapture: %v", err)
+	}
+
+	// While the child runs, start.json carries the command and start time so
+	// `cg ls` and cg_list can surface an in-flight run.
+	si, err := ReadStartInfo(run.Dir)
+	if err != nil {
+		t.Fatalf("ReadStartInfo while running: %v", err)
+	}
+	if strings.Join(si.Command, " ") != "sh -c sleep 0.3; echo done" {
+		t.Errorf("start command = %q, want the launched argv", si.Command)
+	}
+	if si.StartedAt.IsZero() {
+		t.Error("start time is zero")
+	}
+
+	waitDone(t, run, 5*time.Second)
+
+	// Once meta.json supersedes it, start.json is removed.
+	if _, err := ReadStartInfo(run.Dir); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("ReadStartInfo after finish: err = %v, want ErrNotExist", err)
+	}
+}
+
 func TestRunCaptureNonZeroExit(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 

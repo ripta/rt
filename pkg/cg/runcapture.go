@@ -81,6 +81,7 @@ func RunCapture(args []string, resolved *Resolution, cwd string, env map[string]
 	}
 
 	_ = WritePidFile(cap.Dir, child.Process.Pid)
+	_ = WriteStartInfo(cap.Dir, &StartInfo{Command: args, StartedAt: start.UTC()})
 
 	done := make(chan struct{})
 	go func() {
@@ -105,6 +106,7 @@ func RunCapture(args []string, resolved *Resolution, cwd string, env map[string]
 		}
 		_ = WriteMeta(cap.Dir, meta)
 		RemovePidFile(cap.Dir)
+		RemoveStartInfo(cap.Dir)
 	}()
 
 	return &CaptureRun{ID: cap.ID, Dir: cap.Dir, Done: done}, nil
