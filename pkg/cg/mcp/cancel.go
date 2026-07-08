@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strconv"
-	"strings"
 	"syscall"
 	"time"
 
@@ -13,11 +11,6 @@ import (
 
 	"github.com/ripta/rt/pkg/cg"
 )
-
-// maxSignalNumber bounds numeric signal inputs. Real signal numbers fit well
-// under this; the cap rejects obvious garbage without enumerating every
-// platform's signal table.
-const maxSignalNumber = 64
 
 // cancelInput is the argument shape for `cg_cancel`.
 type cancelInput struct {
@@ -48,11 +41,11 @@ func registerCancel(s *mcpsdk.Server, reg *runRegistry) {
 }
 
 func handleCancel(ctx context.Context, reg *runRegistry, in cancelInput) (*mcpsdk.CallToolResult, cancelOutput, error) {
-	sig, err := parseSignal(in.Signal, syscall.SIGTERM)
+	sig, err := cg.ParseSignal(in.Signal, syscall.SIGTERM)
 	if err != nil {
 		return nil, cancelOutput{}, fmt.Errorf("signal: %w", err)
 	}
-	escSig, err := parseSignal(in.EscalateSignal, syscall.SIGKILL)
+	escSig, err := cg.ParseSignal(in.EscalateSignal, syscall.SIGKILL)
 	if err != nil {
 		return nil, cancelOutput{}, fmt.Errorf("escalate_signal: %w", err)
 	}
@@ -108,30 +101,4 @@ func handleCancel(ctx context.Context, reg *runRegistry, in cancelInput) (*mcpsd
 	out.Escalated = true
 	out.EscalateSignal = int(escSig)
 	return nil, out, nil
-}
-
-// parseSignal maps a signal name or numeric string onto a syscall.Signal. An
-// empty input returns def. Accepted names are SIGTERM, SIGINT, and SIGKILL;
-// numeric values in (0, maxSignalNumber] are accepted directly, which covers
-// signals like SIGQUIT without enumerating every name.
-func parseSignal(name string, def syscall.Signal) (syscall.Signal, error) {
-	s := strings.TrimSpace(name)
-	if s == "" {
-		return def, nil
-	}
-	switch strings.ToUpper(s) {
-	case "SIGTERM":
-		return syscall.SIGTERM, nil
-	case "SIGINT":
-		return syscall.SIGINT, nil
-	case "SIGKILL":
-		return syscall.SIGKILL, nil
-	}
-	if n, err := strconv.Atoi(s); err == nil {
-		if n <= 0 || n > maxSignalNumber {
-			return 0, fmt.Errorf("numeric signal out of range: %d", n)
-		}
-		return syscall.Signal(n), nil
-	}
-	return 0, fmt.Errorf("unsupported signal: %q (want SIGTERM, SIGINT, SIGKILL, or a number)", name)
 }

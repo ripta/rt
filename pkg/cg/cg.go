@@ -29,6 +29,10 @@ func NewCommand() *cobra.Command {
 	c.AddCommand(NewPathsCommand())
 	c.AddCommand(NewLsCommand())
 	c.AddCommand(NewPruneCommand())
+	c.AddCommand(NewMetaCommand())
+	c.AddCommand(NewWaitCommand())
+	c.AddCommand(NewCancelCommand())
+	c.AddCommand(NewGrepCommand())
 
 	return c
 }
