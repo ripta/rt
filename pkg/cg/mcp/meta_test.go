@@ -13,8 +13,7 @@ func TestHandleMetaSuccess(t *testing.T) {
 
 	sig := 15
 	seedRunDir(t, "AAAAAA", &cg.Meta{
-		ID:          "AAAAAA",
-		Command:     []string{"echo", "hi"},
+		RunInfo:     cg.RunInfo{ID: "AAAAAA", Command: []string{"echo", "hi"}},
 		ExitCode:    -1,
 		Signal:      &sig,
 		DurationMs:  12,
@@ -89,5 +88,28 @@ func TestHandleMetaInFlight(t *testing.T) {
 	}
 	if out.StartedAt != nil {
 		t.Errorf("StartedAt = %v, want nil for in-flight", out.StartedAt)
+	}
+}
+
+func TestHandleMetaInFlightWithStartInfo(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+
+	dir := seedRunDir(t, "AAAAAA", nil)
+	if err := cg.WriteStartInfo(dir, &cg.StartInfo{RunInfo: cg.RunInfo{Command: []string{"sleep", "9"}, Cwd: "/work"}}); err != nil {
+		t.Fatalf("WriteStartInfo: %v", err)
+	}
+
+	_, out, err := handleMeta(context.Background(), nil, metaInput{ID: "AAAAAA"})
+	if err != nil {
+		t.Fatalf("handleMeta: %v", err)
+	}
+	if out.State != "running" {
+		t.Errorf("State = %q, want running", out.State)
+	}
+	if out.Cwd != "/work" {
+		t.Errorf("Cwd = %q, want /work from start.json", out.Cwd)
+	}
+	if len(out.Command) != 2 || out.Command[0] != "sleep" {
+		t.Errorf("Command = %v, want start.json command", out.Command)
 	}
 }

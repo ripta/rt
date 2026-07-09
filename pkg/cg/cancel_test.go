@@ -48,7 +48,7 @@ func TestParseSignal(t *testing.T) {
 
 func TestCancelRunAlreadyFinished(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
-	seedRunDir(t, "AAAAAA", &Meta{ID: "AAAAAA", Command: []string{"echo", "hi"}})
+	seedRunDir(t, "AAAAAA", &Meta{RunInfo: RunInfo{ID: "AAAAAA", Command: []string{"echo", "hi"}}})
 
 	res, err := CancelRun(context.Background(), "AAAAAA", CancelOptions{})
 	if err != nil {

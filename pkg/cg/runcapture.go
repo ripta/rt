@@ -60,6 +60,8 @@ func RunCapture(args []string, resolved *Resolution, cwd string, env map[string]
 		return nil, err
 	}
 
+	cwd = effectiveCwd(cwd)
+
 	outCounter := &lineCountingWriter{w: cap.Stdout}
 	errCounter := &lineCountingWriter{w: cap.Stderr}
 
@@ -76,12 +78,13 @@ func RunCapture(args []string, resolved *Resolution, cwd string, env map[string]
 	start := time.Now()
 	if err := child.Start(); err != nil {
 		_ = cap.Close()
-		_ = WriteStartDebug(cap.Dir, buildStartDebug(args, cwd, env, resolved, err))
+		info := RunInfo{ID: cap.ID, Command: args, Cwd: cwd, StartedAt: start.UTC()}
+		_ = WriteStartDebug(cap.Dir, buildStartDebug(info, env, resolved, err))
 		return nil, &StartFailure{RunID: cap.ID, Dir: cap.Dir, Err: fmt.Errorf("starting child: %w", err)}
 	}
 
 	_ = WritePidFile(cap.Dir, child.Process.Pid)
-	_ = WriteStartInfo(cap.Dir, &StartInfo{Command: args, StartedAt: start.UTC()})
+	_ = WriteStartInfo(cap.Dir, &StartInfo{RunInfo: RunInfo{ID: cap.ID, Command: args, Cwd: cwd, StartedAt: start.UTC()}})
 
 	done := make(chan struct{})
 	go func() {
@@ -91,9 +94,7 @@ func RunCapture(args []string, resolved *Resolution, cwd string, env map[string]
 		_ = cap.Close()
 
 		meta := &Meta{
-			ID:          cap.ID,
-			Command:     args,
-			StartedAt:   start.UTC(),
+			RunInfo:     RunInfo{ID: cap.ID, Command: args, Cwd: cwd, StartedAt: start.UTC()},
 			FinishedAt:  start.Add(elapsed).UTC(),
 			DurationMs:  elapsed.Milliseconds(),
 			ExitCode:    ExitCodeFromError(waitErr),
@@ -130,22 +131,18 @@ func (lc *lineCountingWriter) Write(p []byte) (int, error) {
 }
 
 // buildStartDebug assembles the diagnostic payload written to debug.json when
-// child.Start fails. resolved carries the absolute resolved path and the
-// symlink-canonical path when they could be determined, so a post-mortem shows
-// both the original command and the file cg tried to exec.
-func buildStartDebug(args []string, cwd string, env map[string]string, resolved *Resolution, startErr error) *StartDebug {
+// child.Start fails. info carries the shared start-time facts. resolved carries
+// the absolute resolved path and the symlink-canonical path when they could be
+// determined, so a post-mortem shows both the original command and the file cg
+// tried to exec.
+func buildStartDebug(info RunInfo, env map[string]string, resolved *Resolution, startErr error) *StartDebug {
 	d := &StartDebug{
-		Command:    args,
+		RunInfo:    info,
 		StartError: startErr.Error(),
 	}
 	if resolved != nil {
 		d.ResolvedPath = resolved.Resolved
 		d.CanonicalPath = resolved.Canonical
-	}
-	if cwd != "" {
-		d.Cwd = cwd
-	} else if wd, err := os.Getwd(); err == nil {
-		d.Cwd = wd
 	}
 	if v, ok := env["PATH"]; ok {
 		d.Path = v

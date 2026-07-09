@@ -15,7 +15,7 @@ import (
 // stdout and stderr contents.
 func writeStreams(t *testing.T, id, stdout, stderr string) {
 	t.Helper()
-	seedRunDir(t, id, &cg.Meta{ID: id, Command: []string{"echo", "hi"}})
+	seedRunDir(t, id, &cg.Meta{RunInfo: cg.RunInfo{ID: id, Command: []string{"echo", "hi"}}})
 	root := cg.CaptureRoot()
 	if err := os.WriteFile(filepath.Join(root, id, "stdout"), []byte(stdout), 0o644); err != nil {
 		t.Fatalf("writing stdout: %v", err)

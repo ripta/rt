@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"time"
 )
 
 // StartFilename is the file name within a run directory that records a capture's
@@ -18,8 +17,7 @@ const StartFilename = "start.json"
 // child has finished. It lets `cg ls` and cg_list surface the command and a
 // precise elapsed time for a run that is still going.
 type StartInfo struct {
-	Command   []string  `json:"command"`
-	StartedAt time.Time `json:"started_at"`
+	RunInfo
 }
 
 // WriteStartInfo serialises s and writes it to dir/start.json.

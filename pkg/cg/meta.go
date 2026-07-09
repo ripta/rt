@@ -14,9 +14,7 @@ const MetaFilename = "meta.json"
 
 // Meta is the per-run metadata persisted alongside the captured stdout and stderr.
 type Meta struct {
-	ID          string    `json:"id"`
-	Command     []string  `json:"command"`
-	StartedAt   time.Time `json:"started_at"`
+	RunInfo
 	FinishedAt  time.Time `json:"finished_at"`
 	DurationMs  int64     `json:"duration_ms"`
 	ExitCode    int       `json:"exit_code"`

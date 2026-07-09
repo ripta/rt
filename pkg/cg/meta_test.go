@@ -15,9 +15,11 @@ func TestWriteMetaRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	sig := 15
 	want := &Meta{
-		ID:          "Q3F9K2",
-		Command:     []string{"echo", "hi"},
-		StartedAt:   time.Date(2026, 6, 6, 19, 25, 6, int(time.Millisecond), time.UTC),
+		RunInfo: RunInfo{
+			ID:        "Q3F9K2",
+			Command:   []string{"echo", "hi"},
+			StartedAt: time.Date(2026, 6, 6, 19, 25, 6, int(time.Millisecond), time.UTC),
+		},
 		FinishedAt:  time.Date(2026, 6, 6, 19, 25, 6, int(13*time.Millisecond), time.UTC),
 		DurationMs:  12,
 		ExitCode:    0,
@@ -56,9 +58,11 @@ func TestWriteMetaSignalNullWhenAbsent(t *testing.T) {
 
 	dir := t.TempDir()
 	m := &Meta{
-		ID:         "ABC123",
-		Command:    []string{"true"},
-		StartedAt:  time.Unix(0, 0).UTC(),
+		RunInfo: RunInfo{
+			ID:        "ABC123",
+			Command:   []string{"true"},
+			StartedAt: time.Unix(0, 0).UTC(),
+		},
 		FinishedAt: time.Unix(0, 0).UTC(),
 		ExitCode:   0,
 	}
@@ -88,7 +92,7 @@ func TestWriteMetaAtomicNoTmpRemains(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	m := &Meta{ID: "TEST01", Command: []string{"true"}}
+	m := &Meta{RunInfo: RunInfo{ID: "TEST01", Command: []string{"true"}}}
 	if err := WriteMeta(dir, m); err != nil {
 		t.Fatalf("WriteMeta() error = %v", err)
 	}

@@ -159,6 +159,7 @@ func (opts *Options) run(cmd *cobra.Command, args []string) error {
 	}
 
 	var cap *Capture
+	var capCwd string
 	if opts.Capture {
 		cap, err = NewCapture()
 		if err != nil {
@@ -168,8 +169,9 @@ func (opts *Options) run(cmd *cobra.Command, args []string) error {
 		}
 		defer cap.Close()
 
+		capCwd = effectiveCwd("")
 		_ = WritePidFile(cap.Dir, child.Process.Pid)
-		_ = WriteStartInfo(cap.Dir, &StartInfo{Command: args, StartedAt: start.UTC()})
+		_ = WriteStartInfo(cap.Dir, &StartInfo{RunInfo: RunInfo{ID: cap.ID, Command: args, Cwd: capCwd, StartedAt: start.UTC()}})
 
 		if opts.Verbose {
 			if err := writeInfo(fmt.Sprintf("capture.stdout=%s", cap.Stdout.Name())); err != nil {
@@ -270,9 +272,7 @@ func (opts *Options) run(cmd *cobra.Command, args []string) error {
 
 	if cap != nil {
 		meta := &Meta{
-			ID:          cap.ID,
-			Command:     args,
-			StartedAt:   start.UTC(),
+			RunInfo:     RunInfo{ID: cap.ID, Command: args, Cwd: capCwd, StartedAt: start.UTC()},
 			FinishedAt:  start.Add(elapsed).UTC(),
 			DurationMs:  elapsed.Milliseconds(),
 			ExitCode:    code,

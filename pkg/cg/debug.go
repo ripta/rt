@@ -14,12 +14,11 @@ const DebugFilename = "debug.json"
 // StartDebug holds diagnostic information written when a child process fails
 // to start. It is persisted to debug.json alongside stdout and stderr.
 type StartDebug struct {
-	Command       []string `json:"command"`
-	ResolvedPath  string   `json:"resolved_path,omitempty"`
-	CanonicalPath string   `json:"canonical_path,omitempty"`
-	Cwd           string   `json:"cwd,omitempty"`
-	Path          string   `json:"path,omitempty"`
-	StartError    string   `json:"start_error"`
+	RunInfo
+	ResolvedPath  string `json:"resolved_path,omitempty"`
+	CanonicalPath string `json:"canonical_path,omitempty"`
+	Path          string `json:"path,omitempty"`
+	StartError    string `json:"start_error"`
 }
 
 // WriteStartDebug serialises d and writes it to dir/debug.json.

@@ -95,8 +95,8 @@ func TestPruneKeepDefault(t *testing.T) {
 	}
 
 	// Two runs; default keep is 50, so nothing should be evicted.
-	seedRunDir(t, "AAAAAA", &Meta{ID: "AAAAAA", Command: []string{"echo", "a"}})
-	seedRunDir(t, "BBBBBB", &Meta{ID: "BBBBBB", Command: []string{"echo", "b"}})
+	seedRunDir(t, "AAAAAA", &Meta{RunInfo: RunInfo{ID: "AAAAAA", Command: []string{"echo", "a"}}})
+	seedRunDir(t, "BBBBBB", &Meta{RunInfo: RunInfo{ID: "BBBBBB", Command: []string{"echo", "b"}}})
 
 	stdout, _, err := runCgSplit("prune")
 	if err != nil {
@@ -120,9 +120,9 @@ func TestPruneKeepEvictsOldest(t *testing.T) {
 	}
 
 	now := time.Now()
-	dirA := seedRunDir(t, "AAAAAA", &Meta{ID: "AAAAAA", Command: []string{"echo", "a"}})
-	dirB := seedRunDir(t, "BBBBBB", &Meta{ID: "BBBBBB", Command: []string{"echo", "b"}})
-	dirC := seedRunDir(t, "CCCCCC", &Meta{ID: "CCCCCC", Command: []string{"echo", "c"}})
+	dirA := seedRunDir(t, "AAAAAA", &Meta{RunInfo: RunInfo{ID: "AAAAAA", Command: []string{"echo", "a"}}})
+	dirB := seedRunDir(t, "BBBBBB", &Meta{RunInfo: RunInfo{ID: "BBBBBB", Command: []string{"echo", "b"}}})
+	dirC := seedRunDir(t, "CCCCCC", &Meta{RunInfo: RunInfo{ID: "CCCCCC", Command: []string{"echo", "c"}}})
 
 	chtimes(t, dirA, now)
 	chtimes(t, dirB, now.Add(-1*time.Hour))
@@ -154,8 +154,8 @@ func TestPruneDryRun(t *testing.T) {
 	}
 
 	now := time.Now()
-	dirA := seedRunDir(t, "AAAAAA", &Meta{ID: "AAAAAA", Command: []string{"echo", "a"}})
-	dirB := seedRunDir(t, "BBBBBB", &Meta{ID: "BBBBBB", Command: []string{"echo", "b"}})
+	dirA := seedRunDir(t, "AAAAAA", &Meta{RunInfo: RunInfo{ID: "AAAAAA", Command: []string{"echo", "a"}}})
+	dirB := seedRunDir(t, "BBBBBB", &Meta{RunInfo: RunInfo{ID: "BBBBBB", Command: []string{"echo", "b"}}})
 	chtimes(t, dirA, now)
 	chtimes(t, dirB, now.Add(-1*time.Hour))
 
@@ -178,9 +178,9 @@ func TestPruneOlderThan(t *testing.T) {
 	}
 
 	now := time.Now()
-	dirA := seedRunDir(t, "AAAAAA", &Meta{ID: "AAAAAA", Command: []string{"echo", "a"}})
-	dirB := seedRunDir(t, "BBBBBB", &Meta{ID: "BBBBBB", Command: []string{"echo", "b"}})
-	dirC := seedRunDir(t, "CCCCCC", &Meta{ID: "CCCCCC", Command: []string{"echo", "c"}})
+	dirA := seedRunDir(t, "AAAAAA", &Meta{RunInfo: RunInfo{ID: "AAAAAA", Command: []string{"echo", "a"}}})
+	dirB := seedRunDir(t, "BBBBBB", &Meta{RunInfo: RunInfo{ID: "BBBBBB", Command: []string{"echo", "b"}}})
+	dirC := seedRunDir(t, "CCCCCC", &Meta{RunInfo: RunInfo{ID: "CCCCCC", Command: []string{"echo", "c"}}})
 
 	chtimes(t, dirA, now)
 	chtimes(t, dirB, now.Add(-30*time.Minute))
@@ -211,8 +211,8 @@ func TestPruneOlderThanDaySuffix(t *testing.T) {
 	}
 
 	now := time.Now()
-	dirA := seedRunDir(t, "AAAAAA", &Meta{ID: "AAAAAA", Command: []string{"echo", "a"}})
-	dirB := seedRunDir(t, "BBBBBB", &Meta{ID: "BBBBBB", Command: []string{"echo", "b"}})
+	dirA := seedRunDir(t, "AAAAAA", &Meta{RunInfo: RunInfo{ID: "AAAAAA", Command: []string{"echo", "a"}}})
+	dirB := seedRunDir(t, "BBBBBB", &Meta{RunInfo: RunInfo{ID: "BBBBBB", Command: []string{"echo", "b"}}})
 
 	chtimes(t, dirA, now)
 	chtimes(t, dirB, now.Add(-8*24*time.Hour))
@@ -249,8 +249,8 @@ func TestPruneSkipsNonRunEntries(t *testing.T) {
 
 	// One valid run plus one valid-but-older run that should be evicted.
 	now := time.Now()
-	dirA := seedRunDir(t, "AAAAAA", &Meta{ID: "AAAAAA", Command: []string{"echo", "a"}})
-	dirB := seedRunDir(t, "BBBBBB", &Meta{ID: "BBBBBB", Command: []string{"echo", "b"}})
+	dirA := seedRunDir(t, "AAAAAA", &Meta{RunInfo: RunInfo{ID: "AAAAAA", Command: []string{"echo", "a"}}})
+	dirB := seedRunDir(t, "BBBBBB", &Meta{RunInfo: RunInfo{ID: "BBBBBB", Command: []string{"echo", "b"}}})
 	chtimes(t, dirA, now)
 	chtimes(t, dirB, now.Add(-1*time.Hour))
 

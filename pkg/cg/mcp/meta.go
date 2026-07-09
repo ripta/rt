@@ -22,6 +22,7 @@ type metaInput struct {
 // has no meta to report.
 type metaFields struct {
 	Command     []string   `json:"command,omitempty"`
+	Cwd         string     `json:"cwd,omitempty"`
 	StartedAt   *time.Time `json:"started_at,omitempty"`
 	FinishedAt  *time.Time `json:"finished_at,omitempty"`
 	DurationMs  *int64     `json:"duration_ms,omitempty"`
@@ -31,9 +32,9 @@ type metaFields struct {
 	StderrLines *int64     `json:"stderr_lines,omitempty"`
 }
 
-// metaOutput is the result shape for `cg_meta`. State is always populated;
-// the embedded meta fields are populated only when the run has finished;
-// Debug is populated only when the run failed to start.
+// metaOutput is the result shape for `cg_meta`. State is always populated.
+// Running and finished runs carry the shared start-time fields; finished runs
+// add the finish fields; failed runs carry Debug.
 type metaOutput struct {
 	ID    string         `json:"id"`
 	State string         `json:"state"`
@@ -44,7 +45,7 @@ type metaOutput struct {
 func registerMeta(s *mcpsdk.Server) {
 	mcpsdk.AddTool(s, &mcpsdk.Tool{
 		Name:        "cg_meta",
-		Description: "Return the run state and meta.json fields for a capture run. Finished runs return state: \"finished\" with all meta fields. In-flight runs return state: \"running\". Failed-to-start runs return state: \"failed\" with a debug field. Unknown ID is a tool error.",
+		Description: "Return the run state and meta.json fields for a capture run. Finished runs return state: \"finished\" with all meta fields. In-flight runs return state: \"running\" with command, cwd, and started_at from start.json. Failed-to-start runs return state: \"failed\" with a debug field carrying cwd and the resolution diagnostics. Unknown ID is a tool error.",
 	}, handleMeta)
 }
 
@@ -54,7 +55,11 @@ func handleMeta(_ context.Context, _ *mcpsdk.CallToolRequest, in metaInput) (*mc
 	case errors.Is(err, cg.ErrUnknownRunID):
 		return nil, metaOutput{}, fmt.Errorf("unknown run id: %s", in.ID)
 	case errors.Is(err, cg.ErrIncompleteRun):
-		return nil, metaOutput{ID: in.ID, State: stateRunning}, nil
+		out := metaOutput{ID: in.ID, State: stateRunning}
+		if si, siErr := cg.ReadStartInfo(dir); siErr == nil {
+			out.metaFields = metaFieldsFromStart(si)
+		}
+		return nil, out, nil
 	case errors.Is(err, cg.ErrFailedRun):
 		dbg, _ := cg.ReadStartDebug(dir)
 		return nil, metaOutput{ID: in.ID, State: stateFailed, Debug: dbg}, nil
@@ -102,6 +107,7 @@ func metaFieldsFrom(m *cg.Meta) metaFields {
 	stderrLines := m.StderrLines
 	f := metaFields{
 		Command:     m.Command,
+		Cwd:         m.Cwd,
 		StartedAt:   &started,
 		FinishedAt:  &finished,
 		DurationMs:  &dur,
@@ -114,4 +120,14 @@ func metaFieldsFrom(m *cg.Meta) metaFields {
 		f.Signal = &sig
 	}
 	return f
+}
+
+// metaFieldsFromStart builds the shared start-time fields from an in-flight run.
+func metaFieldsFromStart(si *cg.StartInfo) metaFields {
+	started := si.StartedAt
+	return metaFields{
+		Command:   si.Command,
+		Cwd:       si.Cwd,
+		StartedAt: &started,
+	}
 }

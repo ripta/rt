@@ -9,7 +9,7 @@ import (
 
 func TestWaitRunAlreadyFinished(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
-	seedRunDir(t, "AAAAAA", &Meta{ID: "AAAAAA", Command: []string{"echo", "hi"}, ExitCode: 0})
+	seedRunDir(t, "AAAAAA", &Meta{RunInfo: RunInfo{ID: "AAAAAA", Command: []string{"echo", "hi"}}, ExitCode: 0})
 
 	res, err := WaitRun(context.Background(), "AAAAAA", time.Second)
 	if err != nil {
@@ -42,7 +42,7 @@ func TestWaitRunTransition(t *testing.T) {
 
 	go func() {
 		time.Sleep(150 * time.Millisecond)
-		_ = WriteMeta(dir, &Meta{ID: "AAAAAA", Command: []string{"echo", "hi"}, ExitCode: 0})
+		_ = WriteMeta(dir, &Meta{RunInfo: RunInfo{ID: "AAAAAA", Command: []string{"echo", "hi"}}, ExitCode: 0})
 	}()
 
 	res, err := WaitRun(context.Background(), "AAAAAA", 5*time.Second)

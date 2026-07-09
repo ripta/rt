@@ -112,8 +112,7 @@ func TestHandleCancelAlreadyFinished(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 
 	seedRunDir(t, "AAAAAA", &cg.Meta{
-		ID:         "AAAAAA",
-		Command:    []string{"echo", "done"},
+		RunInfo:    cg.RunInfo{ID: "AAAAAA", Command: []string{"echo", "done"}},
 		ExitCode:   0,
 		DurationMs: 5,
 	})

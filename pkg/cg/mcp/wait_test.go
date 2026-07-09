@@ -26,8 +26,7 @@ func TestHandleWaitAlreadyFinished(t *testing.T) {
 
 	exit := 3
 	seedRunDir(t, "AAAAAA", &cg.Meta{
-		ID:         "AAAAAA",
-		Command:    []string{"echo", "done"},
+		RunInfo:    cg.RunInfo{ID: "AAAAAA", Command: []string{"echo", "done"}},
 		ExitCode:   exit,
 		DurationMs: 5,
 	})
@@ -60,8 +59,7 @@ func TestHandleWaitFastPath(t *testing.T) {
 	go func() {
 		time.Sleep(50 * time.Millisecond)
 		if err := cg.WriteMeta(cg.CaptureRoot()+"/AAAAAA", &cg.Meta{
-			ID:         "AAAAAA",
-			Command:    []string{"echo", "fp"},
+			RunInfo:    cg.RunInfo{ID: "AAAAAA", Command: []string{"echo", "fp"}},
 			DurationMs: 9,
 		}); err != nil {
 			t.Errorf("WriteMeta: %v", err)
@@ -95,8 +93,7 @@ func TestHandleWaitSlowPath(t *testing.T) {
 	go func() {
 		time.Sleep(250 * time.Millisecond)
 		_ = cg.WriteMeta(cg.CaptureRoot()+"/AAAAAA", &cg.Meta{
-			ID:         "AAAAAA",
-			Command:    []string{"echo", "sp"},
+			RunInfo:    cg.RunInfo{ID: "AAAAAA", Command: []string{"echo", "sp"}},
 			DurationMs: 11,
 		})
 	}()

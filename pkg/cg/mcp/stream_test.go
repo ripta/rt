@@ -14,7 +14,7 @@ import (
 // seeded first so the file exists and the run looks well-formed.
 func writeStream(t *testing.T, id, name, content string) string {
 	t.Helper()
-	seedRunDir(t, id, &cg.Meta{ID: id, Command: []string{"echo", "hi"}})
+	seedRunDir(t, id, &cg.Meta{RunInfo: cg.RunInfo{ID: id, Command: []string{"echo", "hi"}}})
 	path := filepath.Join(cg.CaptureRoot(), id, name)
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatalf("writing %s: %v", path, err)

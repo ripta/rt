@@ -11,7 +11,7 @@ import (
 // writeStreams seeds a finished run dir with the given stdout and stderr.
 func writeStreams(t *testing.T, id, stdout, stderr string) {
 	t.Helper()
-	dir := seedRunDir(t, id, &Meta{ID: id, Command: []string{"echo", "hi"}})
+	dir := seedRunDir(t, id, &Meta{RunInfo: RunInfo{ID: id, Command: []string{"echo", "hi"}}})
 	if err := os.WriteFile(filepath.Join(dir, "stdout"), []byte(stdout), 0o644); err != nil {
 		t.Fatalf("writing stdout: %v", err)
 	}

@@ -127,7 +127,7 @@ func TestOutCommandIncompleteRun(t *testing.T) {
 
 func TestOutCommand(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
-	dir := seedRunDir(t, "ABCDEF", &Meta{ID: "ABCDEF", Command: []string{"echo", "hi"}})
+	dir := seedRunDir(t, "ABCDEF", &Meta{RunInfo: RunInfo{ID: "ABCDEF", Command: []string{"echo", "hi"}}})
 
 	stdout, stderr, err := runCgSplit("out", "ABCDEF")
 	if err != nil {
@@ -141,7 +141,7 @@ func TestOutCommand(t *testing.T) {
 
 func TestErrCommand(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
-	dir := seedRunDir(t, "ABCDEF", &Meta{ID: "ABCDEF", Command: []string{"echo", "hi"}})
+	dir := seedRunDir(t, "ABCDEF", &Meta{RunInfo: RunInfo{ID: "ABCDEF", Command: []string{"echo", "hi"}}})
 
 	stdout, stderr, err := runCgSplit("err", "ABCDEF")
 	if err != nil {
@@ -155,7 +155,7 @@ func TestErrCommand(t *testing.T) {
 
 func TestPathsCommand(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
-	dir := seedRunDir(t, "ABCDEF", &Meta{ID: "ABCDEF", Command: []string{"echo", "hi"}})
+	dir := seedRunDir(t, "ABCDEF", &Meta{RunInfo: RunInfo{ID: "ABCDEF", Command: []string{"echo", "hi"}}})
 
 	stdout, stderr, err := runCgSplit("paths", "ABCDEF")
 	if err != nil {
@@ -188,15 +188,13 @@ func TestLsCommand(t *testing.T) {
 
 	// Newer entry with valid meta.
 	dirNew := seedRunDir(t, "AAAAAA", &Meta{
-		ID:         "AAAAAA",
-		Command:    []string{"echo", "new"},
+		RunInfo:    RunInfo{ID: "AAAAAA", Command: []string{"echo", "new"}},
 		ExitCode:   0,
 		DurationMs: 12,
 	})
 	// Older entry with valid meta and non-zero exit.
 	dirOld := seedRunDir(t, "BBBBBB", &Meta{
-		ID:         "BBBBBB",
-		Command:    []string{"sh", "-c", "exit 2"},
+		RunInfo:    RunInfo{ID: "BBBBBB", Command: []string{"sh", "-c", "exit 2"}},
 		ExitCode:   2,
 		DurationMs: 1234,
 	})
@@ -246,7 +244,7 @@ func TestFormatLsRowRunning(t *testing.T) {
 	now := time.Now()
 	row := lsRow{
 		id:    "DDDDDD",
-		start: &StartInfo{Command: []string{"sleep", "30"}, StartedAt: now.Add(-90 * time.Second)},
+		start: &StartInfo{RunInfo: RunInfo{Command: []string{"sleep", "30"}, StartedAt: now.Add(-90 * time.Second)}},
 	}
 	got := formatLsRow(row, now)
 	want := "DDDDDD\trunning\t1m30s\tsleep 30"
@@ -272,8 +270,8 @@ func TestLsCommandLimit(t *testing.T) {
 		t.Fatalf("mkdir root: %v", err)
 	}
 
-	dirA := seedRunDir(t, "AAAAAA", &Meta{ID: "AAAAAA", Command: []string{"echo", "a"}})
-	dirB := seedRunDir(t, "BBBBBB", &Meta{ID: "BBBBBB", Command: []string{"echo", "b"}})
+	dirA := seedRunDir(t, "AAAAAA", &Meta{RunInfo: RunInfo{ID: "AAAAAA", Command: []string{"echo", "a"}}})
+	dirB := seedRunDir(t, "BBBBBB", &Meta{RunInfo: RunInfo{ID: "BBBBBB", Command: []string{"echo", "b"}}})
 
 	now := time.Now()
 	if err := os.Chtimes(dirA, now, now); err != nil {
@@ -304,7 +302,7 @@ func TestLsCommandRunningReadsStartInfo(t *testing.T) {
 	}
 
 	dir := seedRunDir(t, "DDDDDD", nil)
-	if err := WriteStartInfo(dir, &StartInfo{Command: []string{"sleep", "30"}, StartedAt: time.Now().Add(-5 * time.Second)}); err != nil {
+	if err := WriteStartInfo(dir, &StartInfo{RunInfo: RunInfo{Command: []string{"sleep", "30"}, StartedAt: time.Now().Add(-5 * time.Second)}}); err != nil {
 		t.Fatalf("WriteStartInfo: %v", err)
 	}
 
@@ -328,8 +326,7 @@ func TestLsCommandSignaledMeta(t *testing.T) {
 
 	sig := 15
 	seedRunDir(t, "AAAAAA", &Meta{
-		ID:         "AAAAAA",
-		Command:    []string{"sleep", "10"},
+		RunInfo:    RunInfo{ID: "AAAAAA", Command: []string{"sleep", "10"}},
 		ExitCode:   -1,
 		Signal:     &sig,
 		DurationMs: 5,

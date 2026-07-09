@@ -9,7 +9,7 @@ import (
 
 func TestRunMetaFinished(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
-	seedRunDir(t, "AAAAAA", &Meta{ID: "AAAAAA", Command: []string{"echo", "hi"}, ExitCode: 0, DurationMs: 12, StdoutLines: 1})
+	seedRunDir(t, "AAAAAA", &Meta{RunInfo: RunInfo{ID: "AAAAAA", Command: []string{"echo", "hi"}}, ExitCode: 0, DurationMs: 12, StdoutLines: 1})
 
 	res, err := RunMeta("AAAAAA")
 	if err != nil {
@@ -28,7 +28,10 @@ func TestRunMetaFinished(t *testing.T) {
 
 func TestRunMetaRunning(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
-	seedRunDir(t, "AAAAAA", nil)
+	dir := seedRunDir(t, "AAAAAA", nil)
+	if err := WriteStartInfo(dir, &StartInfo{RunInfo: RunInfo{Command: []string{"sleep", "9"}, Cwd: "/work"}}); err != nil {
+		t.Fatalf("WriteStartInfo: %v", err)
+	}
 
 	res, err := RunMeta("AAAAAA")
 	if err != nil {
@@ -40,12 +43,18 @@ func TestRunMetaRunning(t *testing.T) {
 	if res.ExitCode != nil {
 		t.Errorf("exit_code = %v, want nil for running run", res.ExitCode)
 	}
+	if res.Cwd != "/work" {
+		t.Errorf("cwd = %q, want /work from start.json", res.Cwd)
+	}
+	if len(res.Command) != 2 || res.Command[0] != "sleep" {
+		t.Errorf("command = %v, want start.json command", res.Command)
+	}
 }
 
 func TestRunMetaFailed(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 	dir := seedRunDir(t, "AAAAAA", nil)
-	if err := WriteStartDebug(dir, &StartDebug{Command: []string{"nope"}, StartError: "boom"}); err != nil {
+	if err := WriteStartDebug(dir, &StartDebug{RunInfo: RunInfo{Command: []string{"nope"}}, StartError: "boom"}); err != nil {
 		t.Fatalf("WriteStartDebug: %v", err)
 	}
 
@@ -83,7 +92,7 @@ func TestMetaCommandUnknownID(t *testing.T) {
 
 func TestMetaCommandFinishedJSON(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
-	seedRunDir(t, "AAAAAA", &Meta{ID: "AAAAAA", Command: []string{"echo", "hi"}, StartedAt: time.Unix(0, 0).UTC()})
+	seedRunDir(t, "AAAAAA", &Meta{RunInfo: RunInfo{ID: "AAAAAA", Command: []string{"echo", "hi"}, StartedAt: time.Unix(0, 0).UTC()}})
 
 	stdout, _, err := runCgSplit("meta", "AAAAAA")
 	if err != nil {

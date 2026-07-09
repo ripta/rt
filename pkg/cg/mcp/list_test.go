@@ -52,13 +52,11 @@ func TestHandleListDefaultsToFinished(t *testing.T) {
 	}
 
 	dirNew := seedRunDir(t, "AAAAAA", &cg.Meta{
-		ID:         "AAAAAA",
-		Command:    []string{"echo", "new"},
+		RunInfo:    cg.RunInfo{ID: "AAAAAA", Command: []string{"echo", "new"}},
 		DurationMs: 12,
 	})
 	dirOld := seedRunDir(t, "BBBBBB", &cg.Meta{
-		ID:         "BBBBBB",
-		Command:    []string{"echo", "old"},
+		RunInfo:    cg.RunInfo{ID: "BBBBBB", Command: []string{"echo", "old"}},
 		ExitCode:   2,
 		DurationMs: 1234,
 	})
@@ -108,8 +106,7 @@ func TestHandleListStateAll(t *testing.T) {
 	}
 
 	dirFin := seedRunDir(t, "AAAAAA", &cg.Meta{
-		ID:         "AAAAAA",
-		Command:    []string{"echo", "done"},
+		RunInfo:    cg.RunInfo{ID: "AAAAAA", Command: []string{"echo", "done"}},
 		DurationMs: 7,
 	})
 	dirRun := seedRunDir(t, "CCCCCC", nil)
@@ -166,7 +163,7 @@ func TestHandleListStateRunning(t *testing.T) {
 		t.Fatalf("mkdir root: %v", err)
 	}
 
-	seedRunDir(t, "AAAAAA", &cg.Meta{ID: "AAAAAA", Command: []string{"echo", "done"}})
+	seedRunDir(t, "AAAAAA", &cg.Meta{RunInfo: cg.RunInfo{ID: "AAAAAA", Command: []string{"echo", "done"}}})
 	seedRunDir(t, "CCCCCC", nil)
 
 	_, out, err := handleList(context.Background(), nil, listInput{State: "running"})
@@ -189,7 +186,7 @@ func TestHandleListRunningReadsStartInfo(t *testing.T) {
 
 	dir := seedRunDir(t, "CCCCCC", nil)
 	started := time.Now().Add(-2 * time.Minute).UTC()
-	if err := cg.WriteStartInfo(dir, &cg.StartInfo{Command: []string{"sleep", "30"}, StartedAt: started}); err != nil {
+	if err := cg.WriteStartInfo(dir, &cg.StartInfo{RunInfo: cg.RunInfo{Command: []string{"sleep", "30"}, StartedAt: started}}); err != nil {
 		t.Fatalf("WriteStartInfo: %v", err)
 	}
 
@@ -249,8 +246,8 @@ func TestHandleListLimit(t *testing.T) {
 		t.Fatalf("mkdir root: %v", err)
 	}
 
-	dirA := seedRunDir(t, "AAAAAA", &cg.Meta{ID: "AAAAAA", Command: []string{"echo", "a"}})
-	dirB := seedRunDir(t, "BBBBBB", &cg.Meta{ID: "BBBBBB", Command: []string{"echo", "b"}})
+	dirA := seedRunDir(t, "AAAAAA", &cg.Meta{RunInfo: cg.RunInfo{ID: "AAAAAA", Command: []string{"echo", "a"}}})
+	dirB := seedRunDir(t, "BBBBBB", &cg.Meta{RunInfo: cg.RunInfo{ID: "BBBBBB", Command: []string{"echo", "b"}}})
 
 	now := time.Now()
 	if err := os.Chtimes(dirA, now, now); err != nil {

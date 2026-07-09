@@ -33,8 +33,8 @@ func TestHandlePruneKeepDefault(t *testing.T) {
 	if err := os.MkdirAll(cg.CaptureRoot(), 0o755); err != nil {
 		t.Fatalf("mkdir root: %v", err)
 	}
-	seedRunDir(t, "AAAAAA", &cg.Meta{ID: "AAAAAA", Command: []string{"echo", "a"}})
-	seedRunDir(t, "BBBBBB", &cg.Meta{ID: "BBBBBB", Command: []string{"echo", "b"}})
+	seedRunDir(t, "AAAAAA", &cg.Meta{RunInfo: cg.RunInfo{ID: "AAAAAA", Command: []string{"echo", "a"}}})
+	seedRunDir(t, "BBBBBB", &cg.Meta{RunInfo: cg.RunInfo{ID: "BBBBBB", Command: []string{"echo", "b"}}})
 
 	_, out, err := handlePrune(context.Background(), nil, pruneInput{})
 	if err != nil {
@@ -57,9 +57,9 @@ func TestHandlePruneKeepEvictsOldest(t *testing.T) {
 	}
 
 	now := time.Now()
-	dirA := seedRunDir(t, "AAAAAA", &cg.Meta{ID: "AAAAAA", Command: []string{"echo", "a"}})
-	dirB := seedRunDir(t, "BBBBBB", &cg.Meta{ID: "BBBBBB", Command: []string{"echo", "b"}})
-	dirC := seedRunDir(t, "CCCCCC", &cg.Meta{ID: "CCCCCC", Command: []string{"echo", "c"}})
+	dirA := seedRunDir(t, "AAAAAA", &cg.Meta{RunInfo: cg.RunInfo{ID: "AAAAAA", Command: []string{"echo", "a"}}})
+	dirB := seedRunDir(t, "BBBBBB", &cg.Meta{RunInfo: cg.RunInfo{ID: "BBBBBB", Command: []string{"echo", "b"}}})
+	dirC := seedRunDir(t, "CCCCCC", &cg.Meta{RunInfo: cg.RunInfo{ID: "CCCCCC", Command: []string{"echo", "c"}}})
 	if err := os.Chtimes(dirA, now, now); err != nil {
 		t.Fatalf("chtimes a: %v", err)
 	}
@@ -96,8 +96,8 @@ func TestHandlePruneDryRun(t *testing.T) {
 	}
 
 	now := time.Now()
-	dirA := seedRunDir(t, "AAAAAA", &cg.Meta{ID: "AAAAAA", Command: []string{"echo", "a"}})
-	dirB := seedRunDir(t, "BBBBBB", &cg.Meta{ID: "BBBBBB", Command: []string{"echo", "b"}})
+	dirA := seedRunDir(t, "AAAAAA", &cg.Meta{RunInfo: cg.RunInfo{ID: "AAAAAA", Command: []string{"echo", "a"}}})
+	dirB := seedRunDir(t, "BBBBBB", &cg.Meta{RunInfo: cg.RunInfo{ID: "BBBBBB", Command: []string{"echo", "b"}}})
 	if err := os.Chtimes(dirA, now, now); err != nil {
 		t.Fatalf("chtimes a: %v", err)
 	}
@@ -127,9 +127,9 @@ func TestHandlePruneOlderThan(t *testing.T) {
 	}
 
 	now := time.Now()
-	dirA := seedRunDir(t, "AAAAAA", &cg.Meta{ID: "AAAAAA", Command: []string{"echo", "a"}})
-	dirB := seedRunDir(t, "BBBBBB", &cg.Meta{ID: "BBBBBB", Command: []string{"echo", "b"}})
-	dirC := seedRunDir(t, "CCCCCC", &cg.Meta{ID: "CCCCCC", Command: []string{"echo", "c"}})
+	dirA := seedRunDir(t, "AAAAAA", &cg.Meta{RunInfo: cg.RunInfo{ID: "AAAAAA", Command: []string{"echo", "a"}}})
+	dirB := seedRunDir(t, "BBBBBB", &cg.Meta{RunInfo: cg.RunInfo{ID: "BBBBBB", Command: []string{"echo", "b"}}})
+	dirC := seedRunDir(t, "CCCCCC", &cg.Meta{RunInfo: cg.RunInfo{ID: "CCCCCC", Command: []string{"echo", "c"}}})
 	if err := os.Chtimes(dirA, now, now); err != nil {
 		t.Fatalf("chtimes a: %v", err)
 	}
@@ -165,8 +165,8 @@ func TestHandlePruneOlderThanDaySuffix(t *testing.T) {
 	}
 
 	now := time.Now()
-	dirA := seedRunDir(t, "AAAAAA", &cg.Meta{ID: "AAAAAA", Command: []string{"echo", "a"}})
-	dirB := seedRunDir(t, "BBBBBB", &cg.Meta{ID: "BBBBBB", Command: []string{"echo", "b"}})
+	dirA := seedRunDir(t, "AAAAAA", &cg.Meta{RunInfo: cg.RunInfo{ID: "AAAAAA", Command: []string{"echo", "a"}}})
+	dirB := seedRunDir(t, "BBBBBB", &cg.Meta{RunInfo: cg.RunInfo{ID: "BBBBBB", Command: []string{"echo", "b"}}})
 	if err := os.Chtimes(dirA, now, now); err != nil {
 		t.Fatalf("chtimes a: %v", err)
 	}
@@ -222,8 +222,8 @@ func TestHandlePruneSkipsNonRunEntries(t *testing.T) {
 	seedRunDir(t, "INCOMP", nil)
 
 	now := time.Now()
-	dirA := seedRunDir(t, "AAAAAA", &cg.Meta{ID: "AAAAAA", Command: []string{"echo", "a"}})
-	dirB := seedRunDir(t, "BBBBBB", &cg.Meta{ID: "BBBBBB", Command: []string{"echo", "b"}})
+	dirA := seedRunDir(t, "AAAAAA", &cg.Meta{RunInfo: cg.RunInfo{ID: "AAAAAA", Command: []string{"echo", "a"}}})
+	dirB := seedRunDir(t, "BBBBBB", &cg.Meta{RunInfo: cg.RunInfo{ID: "BBBBBB", Command: []string{"echo", "b"}}})
 	if err := os.Chtimes(dirA, now, now); err != nil {
 		t.Fatalf("chtimes a: %v", err)
 	}

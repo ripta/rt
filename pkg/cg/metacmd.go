@@ -13,6 +13,7 @@ import (
 // collapses out of the JSON when the run has not finished.
 type metaFields struct {
 	Command     []string   `json:"command,omitempty"`
+	Cwd         string     `json:"cwd,omitempty"`
 	StartedAt   *time.Time `json:"started_at,omitempty"`
 	FinishedAt  *time.Time `json:"finished_at,omitempty"`
 	DurationMs  *int64     `json:"duration_ms,omitempty"`
@@ -22,7 +23,7 @@ type metaFields struct {
 	StderrLines *int64     `json:"stderr_lines,omitempty"`
 }
 
-// metaFieldsFrom builds metaFields populated from m.
+// metaFieldsFrom builds metaFields populated from a finished run's m.
 func metaFieldsFrom(m *Meta) metaFields {
 	started := m.StartedAt
 	finished := m.FinishedAt
@@ -32,6 +33,7 @@ func metaFieldsFrom(m *Meta) metaFields {
 	stderrLines := m.StderrLines
 	f := metaFields{
 		Command:     m.Command,
+		Cwd:         m.Cwd,
 		StartedAt:   &started,
 		FinishedAt:  &finished,
 		DurationMs:  &dur,
@@ -46,9 +48,19 @@ func metaFieldsFrom(m *Meta) metaFields {
 	return f
 }
 
-// MetaResult is the `cg meta` output. State is always populated; the embedded
-// meta fields are populated only for finished runs; Debug is populated only for
-// runs that failed to start.
+// metaFieldsFromStart builds the shared start-time fields from an in-flight run.
+func metaFieldsFromStart(si *StartInfo) metaFields {
+	started := si.StartedAt
+	return metaFields{
+		Command:   si.Command,
+		Cwd:       si.Cwd,
+		StartedAt: &started,
+	}
+}
+
+// MetaResult is the `cg meta` output. State is always populated. Running and
+// finished runs carry the shared start-time fields; finished runs add the
+// finish fields; failed runs carry Debug.
 type MetaResult struct {
 	ID    string      `json:"id"`
 	State string      `json:"state"`
@@ -58,15 +70,20 @@ type MetaResult struct {
 
 // RunMeta resolves the state and meta.json fields for run id. Finished runs
 // return state "finished" with all meta fields. In-flight runs return state
-// "running". Runs that failed to start return state "failed" with a debug
-// payload. An unknown ID surfaces as ErrUnknownRunID.
+// "running" with the start-time fields from start.json. Runs that failed to
+// start return state "failed" with a debug payload. An unknown ID surfaces as
+// ErrUnknownRunID.
 func RunMeta(id string) (MetaResult, error) {
 	dir, err := LookupRunDir(id)
 	switch {
 	case errors.Is(err, ErrUnknownRunID):
 		return MetaResult{}, err
 	case errors.Is(err, ErrIncompleteRun):
-		return MetaResult{ID: id, State: RunStateRunning}, nil
+		res := MetaResult{ID: id, State: RunStateRunning}
+		if si, siErr := ReadStartInfo(dir); siErr == nil {
+			res.metaFields = metaFieldsFromStart(si)
+		}
+		return res, nil
 	case errors.Is(err, ErrFailedRun):
 		dbg, _ := ReadStartDebug(dir)
 		return MetaResult{ID: id, State: RunStateFailed, Debug: dbg}, nil

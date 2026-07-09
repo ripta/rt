@@ -11,7 +11,7 @@ import (
 
 func TestHandlePathsSuccess(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
-	dir := seedRunDir(t, "AAAAAA", &cg.Meta{ID: "AAAAAA", Command: []string{"echo", "hi"}})
+	dir := seedRunDir(t, "AAAAAA", &cg.Meta{RunInfo: cg.RunInfo{ID: "AAAAAA", Command: []string{"echo", "hi"}}})
 
 	_, out, err := handlePaths(context.Background(), nil, pathsInput{ID: "AAAAAA"})
 	if err != nil {
