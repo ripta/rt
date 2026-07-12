@@ -26,6 +26,14 @@ func TestWriteMetaRoundTrip(t *testing.T) {
 		Signal:      &sig,
 		StdoutLines: 1,
 		StderrLines: 0,
+		Usage: &Usage{
+			Source:               UsageSourceRusageChildren,
+			UserUS:               8000,
+			SystemUS:             3000,
+			MaxRSSBytes:          4404019,
+			MinorFaults:          120,
+			VoluntaryCtxSwitches: 5,
+		},
 	}
 	if err := WriteMeta(dir, want); err != nil {
 		t.Fatalf("WriteMeta() error = %v", err)
@@ -50,6 +58,12 @@ func TestWriteMetaRoundTrip(t *testing.T) {
 	}
 	if !got.FinishedAt.Equal(want.FinishedAt) {
 		t.Errorf("FinishedAt = %v, want %v", got.FinishedAt, want.FinishedAt)
+	}
+	if got.Usage == nil {
+		t.Fatalf("Usage = nil, want %+v", want.Usage)
+	}
+	if *got.Usage != *want.Usage {
+		t.Errorf("Usage = %+v, want %+v", *got.Usage, *want.Usage)
 	}
 }
 

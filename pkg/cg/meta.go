@@ -21,6 +21,7 @@ type Meta struct {
 	Signal      *int      `json:"signal"`
 	StdoutLines int64     `json:"stdout_lines"`
 	StderrLines int64     `json:"stderr_lines"`
+	Usage       *Usage    `json:"usage,omitempty"`
 }
 
 // WriteMeta serialises m and writes it atomically to dir/meta.json via a

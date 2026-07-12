@@ -9,7 +9,7 @@ import (
 
 func TestRunMetaFinished(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
-	seedRunDir(t, "AAAAAA", &Meta{RunInfo: RunInfo{ID: "AAAAAA", Command: []string{"echo", "hi"}}, ExitCode: 0, DurationMs: 12, StdoutLines: 1})
+	seedRunDir(t, "AAAAAA", &Meta{RunInfo: RunInfo{ID: "AAAAAA", Command: []string{"echo", "hi"}}, ExitCode: 0, DurationMs: 12, StdoutLines: 1, Usage: &Usage{Source: UsageSourceRusageChildren, UserUS: 8000, SystemUS: 3000}})
 
 	res, err := RunMeta("AAAAAA")
 	if err != nil {
@@ -23,6 +23,9 @@ func TestRunMetaFinished(t *testing.T) {
 	}
 	if res.DurationMs == nil || *res.DurationMs != 12 {
 		t.Errorf("duration_ms = %v, want 12", res.DurationMs)
+	}
+	if res.Usage == nil || res.Usage.Source != UsageSourceRusageChildren || res.Usage.UserUS != 8000 {
+		t.Errorf("usage = %+v, want source=%s user_us=8000", res.Usage, UsageSourceRusageChildren)
 	}
 }
 
@@ -42,6 +45,9 @@ func TestRunMetaRunning(t *testing.T) {
 	}
 	if res.ExitCode != nil {
 		t.Errorf("exit_code = %v, want nil for running run", res.ExitCode)
+	}
+	if res.Usage != nil {
+		t.Errorf("usage = %+v, want nil for running run", res.Usage)
 	}
 	if res.Cwd != "/work" {
 		t.Errorf("cwd = %q, want /work from start.json", res.Cwd)

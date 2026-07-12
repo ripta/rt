@@ -21,6 +21,7 @@ type metaFields struct {
 	Signal      *int       `json:"signal,omitempty"`
 	StdoutLines *int64     `json:"stdout_lines,omitempty"`
 	StderrLines *int64     `json:"stderr_lines,omitempty"`
+	Usage       *Usage     `json:"usage,omitempty"`
 }
 
 // metaFieldsFrom builds metaFields populated from a finished run's m.
@@ -40,6 +41,7 @@ func metaFieldsFrom(m *Meta) metaFields {
 		ExitCode:    &exit,
 		StdoutLines: &stdoutLines,
 		StderrLines: &stderrLines,
+		Usage:       m.Usage,
 	}
 	if m.Signal != nil {
 		sig := *m.Signal

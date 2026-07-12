@@ -49,14 +49,15 @@ func formatDuration(d time.Duration) string {
 }
 
 // formatFinish builds the end-of-run summary line. When signaled is true, the
-// head is rendered as signal=<sig>; otherwise exitcode=<code>. A non-empty id
-// is appended as ` id=<ID>` for runs that produced a capture.
-func formatFinish(code int, signaled bool, sig int, d time.Duration, outLines, errLines int64, id string) string {
+// head is rendered as signal=<sig>; otherwise exitcode=<code>. The compact
+// cpu=user/sys token from u rides the line in every mode. A non-empty id is
+// appended as ` id=<ID>` for runs that produced a capture.
+func formatFinish(code int, signaled bool, sig int, d time.Duration, u Usage, outLines, errLines int64, id string) string {
 	head := fmt.Sprintf("exitcode=%d", code)
 	if signaled {
 		head = fmt.Sprintf("signal=%d", sig)
 	}
-	line := fmt.Sprintf("Finished %s in %s (out=%d err=%d)", head, formatDuration(d), outLines, errLines)
+	line := fmt.Sprintf("Finished %s in %s %s (out=%d err=%d)", head, formatDuration(d), u.cpuToken(), outLines, errLines)
 	if id != "" {
 		line += " id=" + id
 	}
@@ -154,7 +155,7 @@ func (opts *Options) run(cmd *cobra.Command, args []string) error {
 	start := time.Now()
 	if err := child.Start(); err != nil {
 		code := ExitCodeFromError(err)
-		_ = writeInfo(formatFinish(code, false, 0, time.Since(start), 0, 0, ""))
+		_ = writeInfo(formatFinish(code, false, 0, time.Since(start), Usage{}, 0, 0, ""))
 		return &ExitError{Code: code}
 	}
 
@@ -257,6 +258,8 @@ func (opts *Options) run(cmd *cobra.Command, args []string) error {
 	outLines := outCounter.n.Load()
 	errLines := errCounter.n.Load()
 
+	usage := collectUsage(child)
+
 	id := ""
 	if cap != nil {
 		id = cap.ID
@@ -268,7 +271,11 @@ func (opts *Options) run(cmd *cobra.Command, args []string) error {
 	if signaled {
 		sig = int(ws.Signal())
 	}
-	_ = writeInfo(formatFinish(code, signaled, sig, elapsed, outLines, errLines, id))
+	_ = writeInfo(formatFinish(code, signaled, sig, elapsed, usage, outLines, errLines, id))
+
+	if opts.Verbose {
+		_ = writeInfo(formatUsage(usage))
+	}
 
 	if cap != nil {
 		meta := &Meta{
@@ -278,6 +285,7 @@ func (opts *Options) run(cmd *cobra.Command, args []string) error {
 			ExitCode:    code,
 			StdoutLines: outLines,
 			StderrLines: errLines,
+			Usage:       &usage,
 		}
 		if signaled {
 			meta.Signal = &sig

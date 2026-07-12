@@ -1,2 +1,2 @@
 ! exec cg run -- __nonexistent_command_for_cg_test__
-stdout '^I: Finished exitcode=127 in [0-9.]+(ns|us|µs|ms|s) \(out=0 err=0\)$'
+stdout '^I: Finished exitcode=127 in [0-9.]+(ns|us|µs|ms|s) cpu=\S+/\S+ \(out=0 err=0\)$'

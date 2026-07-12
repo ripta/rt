@@ -30,6 +30,7 @@ type metaFields struct {
 	Signal      *int       `json:"signal,omitempty"`
 	StdoutLines *int64     `json:"stdout_lines,omitempty"`
 	StderrLines *int64     `json:"stderr_lines,omitempty"`
+	Usage       *cg.Usage  `json:"usage,omitempty"`
 }
 
 // metaOutput is the result shape for `cg_meta`. State is always populated.
@@ -114,6 +115,7 @@ func metaFieldsFrom(m *cg.Meta) metaFields {
 		ExitCode:    &exit,
 		StdoutLines: &stdoutLines,
 		StderrLines: &stderrLines,
+		Usage:       m.Usage,
 	}
 	if m.Signal != nil {
 		sig := *m.Signal

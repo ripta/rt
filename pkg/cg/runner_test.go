@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-var finishLineRE = regexp.MustCompile(`Finished (exitcode=\d+|signal=\d+) in [0-9.]+(?:ns|us|µs|ms|s) \(out=(\d+) err=(\d+)\)`)
+var finishLineRE = regexp.MustCompile(`Finished (exitcode=\d+|signal=\d+) in [0-9.]+(?:ns|us|µs|ms|s) cpu=\S+/\S+ \(out=(\d+) err=(\d+)\)`)
 
 type exitCodeFromErrorTest struct {
 	name string
@@ -250,14 +250,13 @@ func TestCommandLifecycleMessagesVerbose(t *testing.T) {
 		t.Errorf("line 3 = %q, want %q", lines[3], "T O: hello")
 	}
 
-	// Last line: Finished
-	last := lines[len(lines)-1]
-	if !strings.HasPrefix(last, "T I: ") {
-		t.Errorf("last line = %q, want %q prefix", last, "T I: ")
+	finished := lines[len(lines)-2]
+	if !strings.HasPrefix(finished, "T I: ") {
+		t.Errorf("finish line = %q, want %q prefix", finished, "T I: ")
 	}
-	m := finishLineRE.FindStringSubmatch(last)
+	m := finishLineRE.FindStringSubmatch(finished)
 	if m == nil {
-		t.Fatalf("last line %q does not match finish line format", last)
+		t.Fatalf("finish line %q does not match finish line format", finished)
 	}
 	if m[1] != "exitcode=0" {
 		t.Errorf("finish line head = %q, want %q", m[1], "exitcode=0")
@@ -267,6 +266,14 @@ func TestCommandLifecycleMessagesVerbose(t *testing.T) {
 	}
 	if m[3] != "0" {
 		t.Errorf("finish line err= = %q, want %q", m[3], "0")
+	}
+
+	usage := lines[len(lines)-1]
+	if !strings.HasPrefix(usage, "T I: Usage user=") {
+		t.Errorf("usage line = %q, want prefix %q", usage, "T I: Usage user=")
+	}
+	if !strings.Contains(usage, "source=rusage_children") {
+		t.Errorf("usage line = %q, want to contain %q", usage, "source=rusage_children")
 	}
 }
 
@@ -641,6 +648,7 @@ type formatFinishTest struct {
 	signaled bool
 	sig      int
 	dur      time.Duration
+	usage    Usage
 	outLines int64
 	errLines int64
 	id       string
@@ -652,31 +660,39 @@ var formatFinishTests = []formatFinishTest{
 		name: "exit code 0",
 		code: 0, signaled: false, sig: 0,
 		dur: 12 * time.Millisecond, outLines: 1, errLines: 0,
-		want: "Finished exitcode=0 in 12ms (out=1 err=0)",
+		want: "Finished exitcode=0 in 12ms cpu=0s/0s (out=1 err=0)",
 	},
 	{
 		name: "exit code non-zero",
 		code: 42, signaled: false, sig: 0,
 		dur: 1234 * time.Millisecond, outLines: 0, errLines: 0,
-		want: "Finished exitcode=42 in 1.23s (out=0 err=0)",
+		want: "Finished exitcode=42 in 1.23s cpu=0s/0s (out=0 err=0)",
 	},
 	{
 		name: "signaled",
 		code: -1, signaled: true, sig: 15,
 		dur: 5 * time.Millisecond, outLines: 1, errLines: 0,
-		want: "Finished signal=15 in 5ms (out=1 err=0)",
+		want: "Finished signal=15 in 5ms cpu=0s/0s (out=1 err=0)",
+	},
+	{
+		name: "with cpu split",
+		code: 0, signaled: false, sig: 0,
+		dur:   12 * time.Millisecond,
+		usage: Usage{UserUS: 8000, SystemUS: 3000},
+		outLines: 1, errLines: 0,
+		want: "Finished exitcode=0 in 12ms cpu=8ms/3ms (out=1 err=0)",
 	},
 	{
 		name: "with id",
 		code: 0, signaled: false, sig: 0,
 		dur: 12 * time.Millisecond, outLines: 1, errLines: 0, id: "Q3F9K2",
-		want: "Finished exitcode=0 in 12ms (out=1 err=0) id=Q3F9K2",
+		want: "Finished exitcode=0 in 12ms cpu=0s/0s (out=1 err=0) id=Q3F9K2",
 	},
 	{
 		name: "signaled with id",
 		code: -1, signaled: true, sig: 15,
 		dur: 5 * time.Millisecond, outLines: 1, errLines: 0, id: "ABC123",
-		want: "Finished signal=15 in 5ms (out=1 err=0) id=ABC123",
+		want: "Finished signal=15 in 5ms cpu=0s/0s (out=1 err=0) id=ABC123",
 	},
 }
 
@@ -685,7 +701,7 @@ func TestFormatFinish(t *testing.T) {
 
 	for _, tt := range formatFinishTests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := formatFinish(tt.code, tt.signaled, tt.sig, tt.dur, tt.outLines, tt.errLines, tt.id)
+			got := formatFinish(tt.code, tt.signaled, tt.sig, tt.dur, tt.usage, tt.outLines, tt.errLines, tt.id)
 			if got != tt.want {
 				t.Errorf("formatFinish() = %q, want %q", got, tt.want)
 			}

@@ -18,6 +18,7 @@ func TestHandleMetaSuccess(t *testing.T) {
 		Signal:      &sig,
 		DurationMs:  12,
 		StdoutLines: 1,
+		Usage:       &cg.Usage{Source: cg.UsageSourceRusageChildren, UserUS: 8000, SystemUS: 3000},
 	})
 
 	_, out, err := handleMeta(context.Background(), nil, metaInput{ID: "AAAAAA"})
@@ -38,6 +39,9 @@ func TestHandleMetaSuccess(t *testing.T) {
 	}
 	if out.StdoutLines == nil || *out.StdoutLines != 1 {
 		t.Errorf("StdoutLines = %v, want 1", out.StdoutLines)
+	}
+	if out.Usage == nil || out.Usage.Source != cg.UsageSourceRusageChildren || out.Usage.UserUS != 8000 {
+		t.Errorf("Usage = %+v, want source=%s user_us=8000", out.Usage, cg.UsageSourceRusageChildren)
 	}
 }
 
@@ -88,6 +92,9 @@ func TestHandleMetaInFlight(t *testing.T) {
 	}
 	if out.StartedAt != nil {
 		t.Errorf("StartedAt = %v, want nil for in-flight", out.StartedAt)
+	}
+	if out.Usage != nil {
+		t.Errorf("Usage = %v, want nil for in-flight", out.Usage)
 	}
 }
 

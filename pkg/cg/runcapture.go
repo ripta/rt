@@ -93,6 +93,8 @@ func RunCapture(args []string, resolved *Resolution, cwd string, env map[string]
 		elapsed := time.Since(start)
 		_ = cap.Close()
 
+		usage := collectUsage(child)
+
 		meta := &Meta{
 			RunInfo:     RunInfo{ID: cap.ID, Command: args, Cwd: cwd, StartedAt: start.UTC()},
 			FinishedAt:  start.Add(elapsed).UTC(),
@@ -100,6 +102,7 @@ func RunCapture(args []string, resolved *Resolution, cwd string, env map[string]
 			ExitCode:    ExitCodeFromError(waitErr),
 			StdoutLines: outCounter.n.Load(),
 			StderrLines: errCounter.n.Load(),
+			Usage:       &usage,
 		}
 		if ws := exitStatus(child); ws != nil && ws.Signaled() {
 			sig := int(ws.Signal())
