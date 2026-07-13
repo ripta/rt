@@ -167,6 +167,44 @@ command finishes, grouping by stream. `--log-parse json|logfmt` reformats
 structured log lines inline. cg flags must precede the command; everything after
 the first positional or `--` is passed through to the child untouched.
 
+`cg note` records free-form memos that outlive a single run. A note carries an
+ID, a required message, an optional set of `key=value` tags, and a creation
+timestamp. Notes persist under `$TMPDIR/cg/notes/` and are shared with the
+`cg_note_*` MCP tools. A note written from the shell is visible to an agent, and
+a note written by an agent is visible here.
+
+`cg note add` takes the message as an argument or on stdin. Repeat `-k` to
+attach tags. `cg note ls` lists notes newest-first; `-n` overrides the default
+cap of 20, and `-k key` or `-k key=value` filters by tag. `cg note grep`
+searches message bodies with `--text` (a fixed string) or `--pattern` (an RE2
+regex). `cg note rm` deletes notes by ID.
+
+```
+❯ cg note add 'baseline suite green at HEAD' -k run=Q3F9K2 -k branch=cg5
+D2BHTQ
+
+❯ cg note add 'migration still running; hold re-runs'
+68NBND
+
+❯ cg note ls
+68NBND  2026-07-13T02:18:15Z
+  migration still running; hold re-runs
+
+D2BHTQ  2026-07-13T02:18:15Z  branch=cg5 run=Q3F9K2
+  baseline suite green at HEAD
+
+❯ cg note ls -k run=Q3F9K2
+D2BHTQ  2026-07-13T02:18:15Z  branch=cg5 run=Q3F9K2
+  baseline suite green at HEAD
+
+❯ cg note grep --text baseline
+D2BHTQ  2026-07-13T02:18:15Z  branch=cg5 run=Q3F9K2
+  baseline suite green at HEAD
+
+❯ cg note rm D2BHTQ
+D2BHTQ
+```
+
 `cg mcp` starts a stdio MCP server that exposes the capture-run model as native
 tools, using the same on-disk storage the shell subcommands use — a run started
 with `cg run -c` is visible to `cg_list`, and a run started by `cg_run` is
@@ -186,7 +224,7 @@ Or by hand in the MCP host config:
 }
 ```
 
-The server registers ten tools:
+The server registers fourteen tools:
 
 | Tool | Purpose |
 |------|---------|
@@ -200,6 +238,14 @@ The server registers ten tools:
 | `cg_stderr` | Fetch captured stderr with byte limits and head/tail windowing. |
 | `cg_grep` | Search captured output and return matching lines. |
 | `cg_prune` | Evict runs by count or age. |
+| `cg_note_add` | Record a free-form note with an optional set of `key=value` tags. |
+| `cg_note_list` | List notes newest-first, with an optional key filter and limit. |
+| `cg_note_delete` | Delete a note by ID. |
+| `cg_note_grep` | Search note bodies and return whole matching notes. |
+
+The notes store is shared the same way capture runs are. A note written with
+`cg note add` is visible to `cg_note_list`, and a note written by `cg_note_add`
+is visible to `cg note ls`.
 
 A non-zero child exit code is data, not an MCP error: `cg_run` returns
 successfully with `exit_code: N` and the caller decides how to react.
