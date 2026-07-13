@@ -7,7 +7,7 @@ require (
 	github.com/containerd/console v1.0.5
 	github.com/elk-language/go-prompt v1.4.0
 	github.com/go-logfmt/logfmt v0.6.1
-	github.com/google/cel-go v0.28.1
+	github.com/google/cel-go v0.29.2
 	github.com/google/jsonschema-go v0.4.3
 	github.com/gosuri/uilive v0.0.4
 	github.com/hashicorp/hcl/v2 v2.24.0
@@ -25,10 +25,10 @@ require (
 	github.com/stretchr/testify v1.11.1
 	github.com/thediveo/enumflag/v2 v2.2.1
 	github.com/vmihailenco/msgpack/v5 v5.4.1
-	github.com/zclconf/go-cty v1.18.1
-	golang.org/x/crypto v0.53.0
-	golang.org/x/term v0.44.0
-	golang.org/x/text v0.38.0
+	github.com/zclconf/go-cty v1.19.0
+	golang.org/x/crypto v0.54.0
+	golang.org/x/term v0.45.0
+	golang.org/x/text v0.40.0
 	golang.org/x/time v0.15.0
 	google.golang.org/protobuf v1.36.11
 	gopkg.in/yaml.v3 v3.0.1
@@ -41,6 +41,7 @@ require (
 	github.com/agext/levenshtein v1.2.3 // indirect
 	github.com/antlr4-go/antlr/v4 v4.13.1 // indirect
 	github.com/apparentlymart/go-textseg/v15 v15.0.0 // indirect
+	github.com/apparentlymart/go-textseg/v17 v17.0.1 // indirect
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
@@ -61,9 +62,9 @@ require (
 	golang.org/x/exp v0.0.0-20260611194520-c48552f49976 // indirect
 	golang.org/x/mod v0.37.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
-	golang.org/x/sync v0.21.0 // indirect
-	golang.org/x/sys v0.46.0 // indirect
-	golang.org/x/tools v0.46.0 // indirect
+	golang.org/x/sync v0.22.0 // indirect
+	golang.org/x/sys v0.47.0 // indirect
+	golang.org/x/tools v0.47.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260610212136-7ab31c22f7ad // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260610212136-7ab31c22f7ad // indirect
 )
