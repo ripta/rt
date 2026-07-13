@@ -73,6 +73,7 @@ func newServer(v string, startedAt time.Time, g *gate) *mcpsdk.Server {
 	registerStreams(s)
 	registerGrep(s)
 	registerPrune(s)
+	registerNotes(s)
 	registerElicitTest(s)
 	registerInfo(s, v, startedAt)
 	return s
