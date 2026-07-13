@@ -70,6 +70,7 @@ func TestFormatUsage(t *testing.T) {
 		UserUS:                 8000,
 		SystemUS:               3000,
 		MaxRSSBytes:            4404019,
+		PeakPids:               7,
 		MinorFaults:            120,
 		MajorFaults:            0,
 		VoluntaryCtxSwitches:   5,
@@ -77,7 +78,7 @@ func TestFormatUsage(t *testing.T) {
 		BlockInputOps:          0,
 		BlockOutputOps:         8,
 	}
-	want := "Usage user=8ms sys=3ms maxrss=4.2MB minflt=120 majflt=0 nvcsw=5 nivcsw=2 inblock=0 oublock=8 source=rusage_children"
+	want := "Usage user=8ms sys=3ms maxrss=4.2MB pids=7 minflt=120 majflt=0 nvcsw=5 nivcsw=2 inblock=0 oublock=8 source=rusage_children"
 	if got := formatUsage(u); got != want {
 		t.Errorf("formatUsage() = %q, want %q", got, want)
 	}

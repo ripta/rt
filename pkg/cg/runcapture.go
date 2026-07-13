@@ -75,9 +75,14 @@ func RunCapture(args []string, resolved *Resolution, cwd string, env map[string]
 		child.Env = mergeEnv(os.Environ(), env)
 	}
 
+	cgc := prepareCgroup(child)
+
 	start := time.Now()
 	if err := child.Start(); err != nil {
 		_ = cap.Close()
+		if cgc != nil {
+			cgc.close()
+		}
 		info := RunInfo{ID: cap.ID, Command: args, Cwd: cwd, StartedAt: start.UTC()}
 		_ = WriteStartDebug(cap.Dir, buildStartDebug(info, env, resolved, err))
 		return nil, &StartFailure{RunID: cap.ID, Dir: cap.Dir, Err: fmt.Errorf("starting child: %w", err)}
@@ -93,7 +98,10 @@ func RunCapture(args []string, resolved *Resolution, cwd string, env map[string]
 		elapsed := time.Since(start)
 		_ = cap.Close()
 
-		usage := collectUsage(child)
+		usage := resolveUsage(cgc, child)
+		if cgc != nil {
+			cgc.close()
+		}
 
 		meta := &Meta{
 			RunInfo:     RunInfo{ID: cap.ID, Command: args, Cwd: cwd, StartedAt: start.UTC()},

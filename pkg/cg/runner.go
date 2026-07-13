@@ -142,6 +142,13 @@ func (opts *Options) run(cmd *cobra.Command, args []string) error {
 	child := exec.CommandContext(cmd.Context(), args[0], args[1:]...)
 	child.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
+	cgc := prepareCgroup(child)
+	defer func() {
+		if cgc != nil {
+			cgc.close()
+		}
+	}()
+
 	stdout, err := child.StdoutPipe()
 	if err != nil {
 		return fmt.Errorf("creating stdout pipe: %w", err)
@@ -258,7 +265,7 @@ func (opts *Options) run(cmd *cobra.Command, args []string) error {
 	outLines := outCounter.n.Load()
 	errLines := errCounter.n.Load()
 
-	usage := collectUsage(child)
+	usage := resolveUsage(cgc, child)
 
 	id := ""
 	if cap != nil {
