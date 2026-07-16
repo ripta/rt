@@ -238,6 +238,169 @@ func TestLsCommand(t *testing.T) {
 	}
 }
 
+// seedPoolDir creates a pool directory holding only the manifest. Lock state
+// is layered on by the caller.
+func seedPoolDir(t *testing.T, id string, m *PoolManifest) string {
+	t.Helper()
+	dir := filepath.Join(CaptureRoot(), id)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", dir, err)
+	}
+	if err := WritePoolManifest(dir, m); err != nil {
+		t.Fatalf("WritePoolManifest: %v", err)
+	}
+	return dir
+}
+
+func TestLsCommandCollapsesPools(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	root := CaptureRoot()
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatalf("mkdir root: %v", err)
+	}
+
+	finished := time.Now().UTC()
+	seedPoolDir(t, "PPPPPP", &PoolManifest{
+		ID:         "PPPPPP",
+		Commands:   [][]string{{"echo", "hi"}},
+		StartedAt:  finished.Add(-2 * time.Second),
+		FinishedAt: &finished,
+		Runs: []PoolRunRecord{
+			{Command: 0, RunID: "AAAAAA", Status: PoolRunFinished, ExitCode: intp(0)},
+			{Command: 0, RunID: "BBBBBB", Status: PoolRunFinished, ExitCode: intp(1)},
+		},
+	})
+	seedRunDir(t, "AAAAAA", &Meta{RunInfo: RunInfo{ID: "AAAAAA", Command: []string{"echo", "hi"}, Pool: "PPPPPP"}})
+	seedRunDir(t, "BBBBBB", &Meta{RunInfo: RunInfo{ID: "BBBBBB", Command: []string{"echo", "hi"}, Pool: "PPPPPP"}, ExitCode: 1})
+	seedRunDir(t, "SSSSSS", &Meta{RunInfo: RunInfo{ID: "SSSSSS", Command: []string{"echo", "solo"}}})
+
+	stdout, stderr, err := runCgSplit("ls")
+	if err != nil {
+		t.Fatalf("unexpected error: %v (stderr=%q)", err, stderr)
+	}
+	lines := strings.Split(strings.TrimRight(stdout, "\n"), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("expected pool row + standalone row, got %d: %q", len(lines), stdout)
+	}
+	joined := strings.Join(lines, "\n")
+	if !strings.Contains(joined, "pool:finished") {
+		t.Errorf("no pool row in %q", stdout)
+	}
+	if !strings.Contains(joined, "2 runs: 1 ok, 1 failed") {
+		t.Errorf("no counts summary in %q", stdout)
+	}
+	if !strings.Contains(joined, "SSSSSS") {
+		t.Errorf("standalone row missing from %q", stdout)
+	}
+
+	stdout, stderr, err = runCgSplit("ls", "--pool", "PPPPPP")
+	if err != nil {
+		t.Fatalf("unexpected error: %v (stderr=%q)", err, stderr)
+	}
+	lines = strings.Split(strings.TrimRight(stdout, "\n"), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("expected 2 member rows, got %d: %q", len(lines), stdout)
+	}
+	if strings.Contains(stdout, "SSSSSS") || strings.Contains(stdout, "pool:") {
+		t.Errorf("member listing leaked non-members: %q", stdout)
+	}
+
+	stdout, _, err = runCgSplit("ls", "--pool", "none")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	lines = strings.Split(strings.TrimRight(stdout, "\n"), "\n")
+	if len(lines) != 1 || !strings.Contains(lines[0], "SSSSSS") {
+		t.Errorf("--pool none = %q, want just SSSSSS", stdout)
+	}
+
+	stdout, _, err = runCgSplit("ls", "--pool", "any")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	lines = strings.Split(strings.TrimRight(stdout, "\n"), "\n")
+	if len(lines) != 4 {
+		t.Errorf("--pool any listed %d rows, want 4: %q", len(lines), stdout)
+	}
+}
+
+func TestLsCommandPoolFlagValidation(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+
+	_, stderr, err := runCgSplit("ls", "--pool", "not-an-id")
+	var exitErr *ExitError
+	if !errors.As(err, &exitErr) || exitErr.Code != 2 {
+		t.Fatalf("expected exit code 2, got %v", err)
+	}
+	if !strings.Contains(stderr, "invalid --pool") {
+		t.Errorf("stderr = %q, want invalid --pool message", stderr)
+	}
+}
+
+func TestLsCommandUnknownPool(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	if err := os.MkdirAll(CaptureRoot(), 0o755); err != nil {
+		t.Fatalf("mkdir root: %v", err)
+	}
+
+	_, _, err := runCgSplit("ls", "--pool", "ZZZZZZ")
+	if err == nil {
+		t.Fatal("expected unknown pool error, got nil")
+	}
+	if !strings.Contains(err.Error(), "unknown pool id") {
+		t.Errorf("err = %v, want unknown pool id", err)
+	}
+}
+
+func TestLsCommandOrphanMemberVisible(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	if err := os.MkdirAll(CaptureRoot(), 0o755); err != nil {
+		t.Fatalf("mkdir root: %v", err)
+	}
+
+	seedRunDir(t, "AAAAAA", &Meta{RunInfo: RunInfo{ID: "AAAAAA", Command: []string{"echo", "hi"}, Pool: "PPPPPP"}})
+
+	stdout, _, err := runCgSplit("ls")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(stdout, "AAAAAA") {
+		t.Errorf("orphan member missing from default listing: %q", stdout)
+	}
+}
+
+func TestFormatLsRowPool(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now()
+	finished := now.Add(-30 * time.Second)
+	row := lsRow{
+		id:        "PPPPPP",
+		poolState: PoolStateFinished,
+		pool: &PoolManifest{
+			StartedAt:  finished.Add(-90 * time.Second),
+			FinishedAt: &finished,
+			Runs: []PoolRunRecord{
+				{Status: PoolRunFinished, ExitCode: intp(0)},
+				{Status: PoolRunSkipped},
+			},
+		},
+	}
+	got := formatLsRow(row, now)
+	want := "PPPPPP\tpool:finished\t1m30s\t2 runs: 1 ok, 1 skipped"
+	if got != want {
+		t.Errorf("formatLsRow pool = %q, want %q", got, want)
+	}
+
+	row.pool.FinishedAt = nil
+	row.poolState = PoolStateRunning
+	got = formatLsRow(row, now)
+	want = "PPPPPP\tpool:running\t2m0s\t2 runs: 1 ok, 1 skipped"
+	if got != want {
+		t.Errorf("formatLsRow running pool = %q, want %q", got, want)
+	}
+}
+
 func TestFormatLsRowRunning(t *testing.T) {
 	t.Parallel()
 

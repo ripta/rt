@@ -81,16 +81,24 @@ type PruneOptions struct {
 	DryRun bool
 }
 
-// pruneCandidate is a single run dir under consideration for eviction.
+// pruneCandidate is a single directory under consideration for eviction: a run
+// dir, or a pool dir carrying the member IDs its manifest names. A pool and its
+// members are one unit and count as one candidate.
 type pruneCandidate struct {
-	id    string
-	dir   string
-	mtime time.Time
+	id      string
+	dir     string
+	mtime   time.Time
+	members []string
 }
 
 // PruneRuns evicts capture runs from CaptureRoot() per opts. It returns the
 // IDs that were removed (or, under DryRun, would have been removed) in
 // eviction order. A missing CaptureRoot is not an error.
+//
+// A pool and its manifest-named members are evicted as one unit counting once
+// against Keep. Members are never evicted individually while their pool
+// directory exists; a member whose pool is gone is an orphan and evicts like
+// any run. A live pool, or a still-live member under a dead one, is skipped.
 func PruneRuns(opts PruneOptions) ([]string, error) {
 	root := CaptureRoot()
 	entries, err := os.ReadDir(root)
@@ -101,19 +109,39 @@ func PruneRuns(opts PruneOptions) ([]string, error) {
 		return nil, fmt.Errorf("reading capture root: %w", err)
 	}
 
-	candidates := make([]pruneCandidate, 0, len(entries))
+	// First pass: classify dirs and collect every pool-named member, so member
+	// protection is complete before candidates are chosen. Members of dead
+	// pools ride their unit; members of live pools are skipped outright.
+	type scanned struct {
+		id    string
+		dir   string
+		mtime time.Time
+		pool  *PoolManifest
+	}
+	items := make([]scanned, 0, len(entries))
+	protected := make(map[string]struct{})
 	for _, e := range entries {
 		name := e.Name()
 		if !e.IsDir() || !IsValidRunID(name) {
 			continue
 		}
 		dir := filepath.Join(root, name)
+
+		var pool *PoolManifest
 		if _, err := os.Stat(filepath.Join(dir, MetaFilename)); err != nil {
-			// A meta-less dir is evictable only when its run lock exists and is
-			// released: the supervisor died without finishing the run's
-			// bookkeeping. A held lock is a live run; a missing lock file is a
-			// shell-path run with no liveness signal. Both are skipped.
-			if !RunLockReleased(dir) {
+			if m, perr := ReadPoolManifest(dir); perr == nil {
+				pool = m
+				for _, id := range m.MemberIDs() {
+					protected[id] = struct{}{}
+				}
+				if PoolState(dir, m) == PoolStateRunning {
+					continue
+				}
+			} else if !RunLockReleased(dir) {
+				// A meta-less dir is evictable only when its run lock exists and
+				// is released: the supervisor died without finishing the run's
+				// bookkeeping. A held lock is a live run; a missing lock file is
+				// a shell-path run with no liveness signal. Both are skipped.
 				continue
 			}
 		}
@@ -121,7 +149,18 @@ func PruneRuns(opts PruneOptions) ([]string, error) {
 		if err != nil {
 			continue
 		}
-		candidates = append(candidates, pruneCandidate{id: name, dir: dir, mtime: info.ModTime()})
+		items = append(items, scanned{id: name, dir: dir, mtime: info.ModTime(), pool: pool})
+	}
+
+	candidates := make([]pruneCandidate, 0, len(items))
+	for _, it := range items {
+		c := pruneCandidate{id: it.id, dir: it.dir, mtime: it.mtime}
+		if it.pool != nil {
+			c.members = it.pool.MemberIDs()
+		} else if _, ok := protected[it.id]; ok {
+			continue
+		}
+		candidates = append(candidates, c)
 	}
 
 	sort.Slice(candidates, func(i, j int) bool {
@@ -142,14 +181,57 @@ func PruneRuns(opts PruneOptions) ([]string, error) {
 
 	removed := make([]string, 0, len(toRemove))
 	for _, c := range toRemove {
-		if !opts.DryRun {
-			if err := os.RemoveAll(c.dir); err != nil {
-				return removed, fmt.Errorf("removing %s: %w", c.dir, err)
-			}
+		ids, err := evictCandidate(c, opts.DryRun)
+		removed = append(removed, ids...)
+		if err != nil {
+			return removed, err
 		}
-		removed = append(removed, c.id)
 	}
 	return removed, nil
+}
+
+// evictCandidate removes one candidate and returns the IDs it evicted. For a
+// pool unit, members go first and the pool dir last, so a partial failure
+// leaves the manifest behind for a retry; the returned IDs list the pool
+// before its members on success. Manifest entries whose member dir is already
+// gone are silently tolerated.
+func evictCandidate(c pruneCandidate, dryRun bool) ([]string, error) {
+	root := CaptureRoot()
+
+	var members []string
+	for _, id := range c.members {
+		dir := filepath.Join(root, id)
+		if !memberEvictable(dir) {
+			continue
+		}
+		if !dryRun {
+			if err := os.RemoveAll(dir); err != nil {
+				return members, fmt.Errorf("removing %s: %w", dir, err)
+			}
+		}
+		members = append(members, id)
+	}
+
+	if !dryRun {
+		if err := os.RemoveAll(c.dir); err != nil {
+			return members, fmt.Errorf("removing %s: %w", c.dir, err)
+		}
+	}
+	return append([]string{c.id}, members...), nil
+}
+
+// memberEvictable reports whether a pool member's dir exists and is safe to
+// remove: finished (meta.json present) or dead (released lock). A still-live
+// member under a dead pool survives the unit and becomes an orphan, prunable
+// on its own once it dies.
+func memberEvictable(dir string) bool {
+	if _, err := os.Stat(filepath.Join(dir, MetaFilename)); err == nil {
+		return true
+	}
+	if _, err := os.Stat(dir); err != nil {
+		return false
+	}
+	return RunLockReleased(dir)
 }
 
 func (opts *pruneOptions) run(cmd *cobra.Command, args []string) error {

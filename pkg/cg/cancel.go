@@ -53,9 +53,11 @@ type CancelOptions struct {
 }
 
 // CancelResult is the `cg cancel` output. EscalateSignal is present only when
-// an escalation signal was actually sent.
+// an escalation signal was actually sent. Pool marks that id named a pool and
+// the signal went to its supervisor rather than a process group.
 type CancelResult struct {
 	ID             string `json:"id"`
+	Pool           bool   `json:"pool,omitempty"`
 	Signaled       bool   `json:"signaled"`
 	Signal         int    `json:"signal"`
 	Escalated      bool   `json:"escalated"`
@@ -68,6 +70,11 @@ type CancelResult struct {
 // unknown ID surfaces as ErrUnknownRunID. When EscalateAfter > 0, it waits up
 // to that long for the child to exit and sends EscalateSignal if it is still
 // running.
+//
+// A pool ID drives the pool signal protocol instead: the signal goes to the
+// pool supervisor itself, where SIGTERM stops scheduling and lets in-flight
+// runs finish, and SIGINT additionally cancels them. Finished and abandoned
+// pools report finished without signalling.
 func CancelRun(ctx context.Context, id string, opts CancelOptions) (CancelResult, error) {
 	sig, err := ParseSignal(opts.Signal, syscall.SIGTERM)
 	if err != nil {
@@ -94,6 +101,12 @@ func CancelRun(ctx context.Context, id string, opts CancelOptions) (CancelResult
 		return out, nil
 	case !errors.Is(lerr, ErrIncompleteRun):
 		return CancelResult{}, lerr
+	}
+
+	// A directory without meta.json is either an in-flight run or a pool; the
+	// manifest's presence is what distinguishes the two.
+	if m, perr := ReadPoolManifest(dir); perr == nil {
+		return cancelPool(ctx, out, dir, m, sig, escSig, opts.EscalateAfter)
 	}
 
 	pid, perr := ReadPidFile(dir)
@@ -131,6 +144,53 @@ func CancelRun(ctx context.Context, id string, opts CancelOptions) (CancelResult
 	return out, nil
 }
 
+// cancelPool signals the pool supervisor with sig. The pid is positive on
+// purpose: the supervisor is its own session leader and members run in their
+// own sessions, so a group signal would reach nothing else anyway, and the
+// protocol is defined on the supervisor process. Escalation waits on the
+// manifest and then signals the supervisor again with escSig.
+func cancelPool(ctx context.Context, out CancelResult, dir string, m *PoolManifest, sig, escSig syscall.Signal, escalateAfter time.Duration) (CancelResult, error) {
+	out.Pool = true
+
+	pid, finished, err := PoolSupervisorPid(dir, m)
+	if err != nil {
+		return CancelResult{}, fmt.Errorf("cannot cancel %s: %w", out.ID, err)
+	}
+	if finished {
+		out.Finished = true
+		return out, nil
+	}
+
+	if kerr := syscall.Kill(pid, sig); kerr != nil {
+		if errors.Is(kerr, syscall.ESRCH) {
+			out.Finished = true
+			return out, nil
+		}
+		return CancelResult{}, fmt.Errorf("signalling %s: %w", out.ID, kerr)
+	}
+	out.Signaled = true
+
+	if escalateAfter <= 0 {
+		return out, nil
+	}
+
+	finished, werr := awaitPoolFinish(ctx, dir, escalateAfter)
+	if werr != nil {
+		return CancelResult{}, werr
+	}
+	if finished {
+		out.Finished = true
+		return out, nil
+	}
+
+	if kerr := syscall.Kill(pid, escSig); kerr != nil && !errors.Is(kerr, syscall.ESRCH) {
+		return CancelResult{}, fmt.Errorf("escalating %s: %w", out.ID, kerr)
+	}
+	out.Escalated = true
+	out.EscalateSignal = int(escSig)
+	return out, nil
+}
+
 // cancelCmdOptions holds flags for the `cg cancel` subcommand.
 type cancelCmdOptions struct {
 	Signal         string
@@ -144,7 +204,7 @@ func NewCancelCommand() *cobra.Command {
 	opts := &cancelCmdOptions{}
 	c := &cobra.Command{
 		Use:           "cancel <ID>",
-		Short:         "Signal a run's process group and print the outcome as JSON",
+		Short:         "Signal a run's process group, or a pool's supervisor, and print the outcome as JSON",
 		Args:          cobra.ExactArgs(1),
 		SilenceErrors: true,
 		SilenceUsage:  true,

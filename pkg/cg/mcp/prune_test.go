@@ -89,6 +89,41 @@ func TestHandlePruneKeepEvictsOldest(t *testing.T) {
 	}
 }
 
+func TestHandlePruneEvictsPoolAsUnit(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	if err := os.MkdirAll(cg.CaptureRoot(), 0o755); err != nil {
+		t.Fatalf("mkdir root: %v", err)
+	}
+
+	now := time.Now()
+	seedFinishedPool(t, "PPPPPP", "AAAAAA", "BBBBBB")
+	dirPool := filepath.Join(cg.CaptureRoot(), "PPPPPP")
+	dirSolo := seedRunDir(t, "SSSSSS", &cg.Meta{RunInfo: cg.RunInfo{ID: "SSSSSS", Command: []string{"echo", "solo"}}})
+	if err := os.Chtimes(dirSolo, now, now); err != nil {
+		t.Fatalf("chtimes solo: %v", err)
+	}
+	if err := os.Chtimes(dirPool, now.Add(-1*time.Hour), now.Add(-1*time.Hour)); err != nil {
+		t.Fatalf("chtimes pool: %v", err)
+	}
+
+	_, out, err := handlePrune(context.Background(), nil, pruneInput{Keep: intPtr(1)})
+	if err != nil {
+		t.Fatalf("handlePrune: %v", err)
+	}
+	want := []string{"PPPPPP", "AAAAAA", "BBBBBB"}
+	if len(out.Removed) != len(want) || out.Removed[0] != want[0] {
+		t.Errorf("Removed = %v, want %v", out.Removed, want)
+	}
+	for _, id := range want {
+		if _, err := os.Stat(filepath.Join(cg.CaptureRoot(), id)); !os.IsNotExist(err) {
+			t.Errorf("%s still exists: %v", id, err)
+		}
+	}
+	if _, err := os.Stat(dirSolo); err != nil {
+		t.Errorf("SSSSSS removed unexpectedly: %v", err)
+	}
+}
+
 func TestHandlePruneDryRun(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 	if err := os.MkdirAll(cg.CaptureRoot(), 0o755); err != nil {

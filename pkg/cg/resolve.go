@@ -161,13 +161,22 @@ func NewPathsCommand() *cobra.Command {
 	}
 }
 
+// Values of the `--pool` flag on `cg ls` that are not pool IDs: `none` lists
+// only standalone runs, `any` lists everything uncollapsed.
+const (
+	lsPoolNone = "none"
+	lsPoolAny  = "any"
+)
+
 // lsOptions holds flags for the `cg ls` subcommand.
 type lsOptions struct {
-	N int
+	N    int
+	Pool string
 }
 
 // NewLsCommand returns the `cg ls` subcommand. It lists recent capture runs in
-// most-recent-first order by directory mtime.
+// most-recent-first order by directory mtime. Pool members collapse behind one
+// row per pool unless --pool expands them.
 func NewLsCommand() *cobra.Command {
 	opts := &lsOptions{}
 	c := &cobra.Command{
@@ -179,6 +188,7 @@ func NewLsCommand() *cobra.Command {
 		RunE:          opts.run,
 	}
 	c.Flags().IntVarP(&opts.N, "limit", "n", 20, "maximum number of runs to list")
+	c.Flags().StringVar(&opts.Pool, "pool", "", "pool handling: a pool ID lists that pool's members, `none` lists only standalone runs, `any` lists everything uncollapsed")
 	return c
 }
 
@@ -189,9 +199,20 @@ type lsRow struct {
 	debug     *StartDebug
 	start     *StartInfo
 	abandoned bool
+	pool      *PoolManifest
+	poolState string
+	memberOf  string
 }
 
 func (opts *lsOptions) run(cmd *cobra.Command, args []string) error {
+	switch {
+	case opts.Pool == "", opts.Pool == lsPoolNone, opts.Pool == lsPoolAny, IsValidRunID(opts.Pool):
+	default:
+		fmt.Fprintf(cmd.ErrOrStderr(), "invalid --pool %q: want a pool ID, none, or any\n", opts.Pool)
+		return &ExitError{Code: 2}
+	}
+	memberMode := opts.Pool != "" && opts.Pool != lsPoolNone && opts.Pool != lsPoolAny
+
 	if opts.N <= 0 {
 		return nil
 	}
@@ -206,6 +227,7 @@ func (opts *lsOptions) run(cmd *cobra.Command, args []string) error {
 	}
 
 	rows := make([]lsRow, 0, len(entries))
+	poolDirs := make(map[string]bool)
 	for _, e := range entries {
 		name := e.Name()
 		if !e.IsDir() || !IsValidRunID(name) {
@@ -219,15 +241,49 @@ func (opts *lsOptions) run(cmd *cobra.Command, args []string) error {
 		dir := filepath.Join(root, name)
 		if m, err := ReadMeta(dir); err == nil {
 			row.meta = m
+			row.memberOf = m.Pool
+		} else if p, err := ReadPoolManifest(dir); err == nil {
+			row.pool = p
+			row.poolState = PoolState(dir, p)
+			poolDirs[name] = true
 		} else if d, err := ReadStartDebug(dir); err == nil {
 			row.debug = d
+			row.memberOf = d.Pool
 		} else {
 			row.abandoned = RunLockReleased(dir)
 			if s, err := ReadStartInfo(dir); err == nil {
 				row.start = s
+				row.memberOf = s.Pool
 			}
 		}
 		rows = append(rows, row)
+	}
+
+	// Collapse before truncating so a big pool cannot bury the listing. A
+	// member whose pool dir is gone is an orphan and counts as standalone.
+	kept := rows[:0]
+	for _, r := range rows {
+		switch {
+		case memberMode:
+			if r.memberOf != opts.Pool {
+				continue
+			}
+		case opts.Pool == lsPoolAny:
+		case opts.Pool == lsPoolNone:
+			if r.pool != nil || (r.memberOf != "" && poolDirs[r.memberOf]) {
+				continue
+			}
+		default:
+			if r.pool == nil && r.memberOf != "" && poolDirs[r.memberOf] {
+				continue
+			}
+		}
+		kept = append(kept, r)
+	}
+	rows = kept
+
+	if memberMode && len(rows) == 0 && !poolDirs[opts.Pool] {
+		return fmt.Errorf("unknown pool id: %s", opts.Pool)
 	}
 
 	sort.Slice(rows, func(i, j int) bool {
@@ -249,9 +305,17 @@ func (opts *lsOptions) run(cmd *cobra.Command, args []string) error {
 // formatLsRow renders one tab-separated ls row: id, status, duration, command.
 // Finished runs read their status and duration from meta.json; failed runs read
 // the command from debug.json; in-flight and abandoned runs read the command from
-// start.json and show elapsed time measured against now. The caller aligns the
+// start.json and show elapsed time measured against now. Pool rows show the pool
+// state and a member-count summary in place of a command. The caller aligns the
 // columns with a tabwriter.
 func formatLsRow(r lsRow, now time.Time) string {
+	if r.pool != nil {
+		dur := formatDuration(now.Sub(r.pool.StartedAt))
+		if r.pool.FinishedAt != nil {
+			dur = formatDuration(r.pool.FinishedAt.Sub(r.pool.StartedAt))
+		}
+		return fmt.Sprintf("%s\tpool:%s\t%s\t%s", r.id, r.poolState, dur, formatPoolCounts(r.pool.Counts()))
+	}
 	if r.debug != nil {
 		return fmt.Sprintf("%s\tstart_failed\t?\t%s", r.id, EscapeArgs(r.debug.Command))
 	}
@@ -273,4 +337,33 @@ func formatLsRow(r lsRow, now time.Time) string {
 		return fmt.Sprintf("%s\t%s\t%s\t%s", r.id, status, elapsed, EscapeArgs(r.start.Command))
 	}
 	return fmt.Sprintf("%s\t%s\t?\t?", r.id, status)
+}
+
+// formatPoolCounts renders a pool's member tally, like "6 runs: 4 ok, 1
+// failed, 1 skipped". Zero categories are omitted.
+func formatPoolCounts(c PoolCounts) string {
+	noun := "runs"
+	if c.Total == 1 {
+		noun = "run"
+	}
+
+	parts := make([]string, 0, 5)
+	for _, p := range []struct {
+		n     int
+		label string
+	}{
+		{c.Succeeded, "ok"},
+		{c.Failed, "failed"},
+		{c.Skipped, "skipped"},
+		{c.Running, "running"},
+		{c.Pending, "pending"},
+	} {
+		if p.n > 0 {
+			parts = append(parts, fmt.Sprintf("%d %s", p.n, p.label))
+		}
+	}
+	if len(parts) == 0 {
+		return fmt.Sprintf("%d %s", c.Total, noun)
+	}
+	return fmt.Sprintf("%d %s: %s", c.Total, noun, strings.Join(parts, ", "))
 }

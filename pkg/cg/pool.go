@@ -2,7 +2,9 @@ package cg
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"time"
@@ -33,6 +35,27 @@ const (
 	PoolRunSkipped    = "skipped"
 )
 
+// Pool states derived from the manifest and the pool lock. A manifest with
+// FinishedAt set is finished. Without it, a held lock means the supervisor is
+// alive and the pool is running; a released lock means the supervisor died
+// mid-pool and the pool is abandoned.
+const (
+	PoolStateRunning   = "running"
+	PoolStateFinished  = "finished"
+	PoolStateAbandoned = "abandoned"
+)
+
+// PoolState classifies the pool in dir given its manifest m.
+func PoolState(dir string, m *PoolManifest) string {
+	if m.FinishedAt != nil {
+		return PoolStateFinished
+	}
+	if RunLockReleased(dir) {
+		return PoolStateAbandoned
+	}
+	return PoolStateRunning
+}
+
 // PoolManifest is the pool's on-disk record, rewritten atomically by the pool
 // supervisor as state changes. A manifest without FinishedAt belongs to a pool
 // that is still running, or, when the pool lock is released, one whose
@@ -59,6 +82,84 @@ type PoolRunRecord struct {
 	ExitCode   *int   `json:"exit_code,omitempty"`
 	Signal     *int   `json:"signal,omitempty"`
 	StartError string `json:"start_error,omitempty"`
+}
+
+// Failed reports whether the record is a failure: a start failure, or a
+// finished run with a non-zero exit or a terminating signal.
+func (r PoolRunRecord) Failed() bool {
+	switch r.Status {
+	case PoolRunStartError:
+		return true
+	case PoolRunFinished:
+		return (r.ExitCode != nil && *r.ExitCode != 0) || r.Signal != nil
+	}
+	return false
+}
+
+// PoolCounts tallies a pool's member records by outcome.
+type PoolCounts struct {
+	Total     int `json:"total"`
+	Succeeded int `json:"succeeded,omitempty"`
+	Failed    int `json:"failed,omitempty"`
+	Skipped   int `json:"skipped,omitempty"`
+	Running   int `json:"running,omitempty"`
+	Pending   int `json:"pending,omitempty"`
+}
+
+// Counts tallies the manifest's run records.
+func (m *PoolManifest) Counts() PoolCounts {
+	c := PoolCounts{Total: len(m.Runs)}
+	for _, r := range m.Runs {
+		switch {
+		case r.Failed():
+			c.Failed++
+		case r.Status == PoolRunFinished:
+			c.Succeeded++
+		case r.Status == PoolRunSkipped:
+			c.Skipped++
+		case r.Status == PoolRunRunning:
+			c.Running++
+		default:
+			c.Pending++
+		}
+	}
+	return c
+}
+
+// MemberIDs returns the run IDs the manifest names, skipping records that never
+// got one (pending or skipped). IDs that fail validation are dropped: callers
+// join these onto the capture root and remove them, so a corrupt manifest must
+// never yield a traversal path.
+func (m *PoolManifest) MemberIDs() []string {
+	ids := make([]string, 0, len(m.Runs))
+	for _, r := range m.Runs {
+		if r.RunID != "" && IsValidRunID(r.RunID) {
+			ids = append(ids, r.RunID)
+		}
+	}
+	return ids
+}
+
+// PoolSupervisorPid returns the pool supervisor's pid for signalling, or
+// finished=true when there is nothing left to signal: the manifest records
+// finished_at, the pool lock is released, or the pid file is already gone. The
+// released-lock case matters because a SIGKILLed supervisor leaves a stale pid
+// file, and signalling a recycled pid is worse than reporting the pool dead.
+func PoolSupervisorPid(dir string, m *PoolManifest) (int, bool, error) {
+	if m.FinishedAt != nil {
+		return 0, true, nil
+	}
+	if RunLockReleased(dir) {
+		return 0, true, nil
+	}
+	pid, err := ReadPidFile(dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return 0, true, nil
+	}
+	if err != nil {
+		return 0, false, err
+	}
+	return pid, false, nil
 }
 
 // WritePoolManifest serialises m and writes it atomically to dir/pool.json.

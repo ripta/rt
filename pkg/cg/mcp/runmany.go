@@ -284,11 +284,17 @@ func buildPoolSummary(dir string, excerpt int) (poolSummary, error) {
 		return poolSummary{}, fmt.Errorf("reading pool.json: %w", err)
 	}
 
+	counts := m.Counts()
 	s := poolSummary{
-		Total:    len(m.Runs),
-		OnError:  m.OnError,
-		Commands: m.Commands,
-		Runs:     make([]poolRunResult, 0, len(m.Runs)),
+		Total:     counts.Total,
+		Succeeded: counts.Succeeded,
+		Failed:    counts.Failed,
+		Skipped:   counts.Skipped,
+		Running:   counts.Running,
+		Pending:   counts.Pending,
+		OnError:   m.OnError,
+		Commands:  m.Commands,
+		Runs:      make([]poolRunResult, 0, len(m.Runs)),
 	}
 
 	budget := poolExcerptBudget
@@ -302,27 +308,7 @@ func buildPoolSummary(dir string, excerpt int) (poolSummary, error) {
 			StartError: r.StartError,
 		}
 
-		failed := false
-		switch r.Status {
-		case cg.PoolRunFinished:
-			if (r.ExitCode != nil && *r.ExitCode != 0) || r.Signal != nil {
-				s.Failed++
-				failed = true
-			} else {
-				s.Succeeded++
-			}
-		case cg.PoolRunStartError:
-			s.Failed++
-			failed = true
-		case cg.PoolRunSkipped:
-			s.Skipped++
-		case cg.PoolRunRunning:
-			s.Running++
-		default:
-			s.Pending++
-		}
-
-		if failed && excerpt > 0 && rec.RunID != "" {
+		if r.Failed() && excerpt > 0 && rec.RunID != "" {
 			attachPoolExcerpts(&rec, filepath.Join(cg.CaptureRoot(), rec.RunID), excerpt, &budget)
 		}
 

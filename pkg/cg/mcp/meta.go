@@ -35,18 +35,20 @@ type metaFields struct {
 
 // metaOutput is the result shape for `cg_meta`. State is always populated.
 // Running and finished runs carry the shared start-time fields; finished runs
-// add the finish fields; failed runs carry Debug.
+// add the finish fields; failed runs carry Debug. A pool ID returns the pool
+// state and the manifest verbatim, which never holds excerpts.
 type metaOutput struct {
-	ID    string         `json:"id"`
-	State string         `json:"state"`
-	Debug *cg.StartDebug `json:"debug,omitempty"`
+	ID       string           `json:"id"`
+	State    string           `json:"state"`
+	Debug    *cg.StartDebug   `json:"debug,omitempty"`
+	Manifest *cg.PoolManifest `json:"manifest,omitempty"`
 	metaFields
 }
 
 func registerMeta(s *mcpsdk.Server) {
 	mcpsdk.AddTool(s, &mcpsdk.Tool{
 		Name:        "cg_meta",
-		Description: "Return the run state and meta.json fields for a capture run. Finished runs return state: \"finished\" with all meta fields. In-flight runs return state: \"running\" with command, cwd, and started_at from start.json. Failed-to-start runs return state: \"failed\" with a debug field carrying cwd and the resolution diagnostics. Unknown ID is a tool error.",
+		Description: "Return the run state and meta.json fields for a capture run. Finished runs return state: \"finished\" with all meta fields. In-flight runs return state: \"running\" with command, cwd, and started_at from start.json. Failed-to-start runs return state: \"failed\" with a debug field carrying cwd and the resolution diagnostics. A pool ID returns the pool state with the manifest in a manifest field. Unknown ID is a tool error.",
 	}, handleMeta)
 }
 
@@ -56,6 +58,11 @@ func handleMeta(_ context.Context, _ *mcpsdk.CallToolRequest, in metaInput) (*mc
 	case errors.Is(err, cg.ErrUnknownRunID):
 		return nil, metaOutput{}, fmt.Errorf("unknown run id: %s", in.ID)
 	case errors.Is(err, cg.ErrIncompleteRun):
+		// A directory without meta.json is either an in-flight run or a pool;
+		// the manifest's presence is what distinguishes the two.
+		if m, perr := cg.ReadPoolManifest(dir); perr == nil {
+			return nil, metaOutput{ID: in.ID, State: cg.PoolState(dir, m), Manifest: m}, nil
+		}
 		out := metaOutput{ID: in.ID, State: stateRunning}
 		if si, siErr := cg.ReadStartInfo(dir); siErr == nil {
 			out.metaFields = metaFieldsFromStart(si)

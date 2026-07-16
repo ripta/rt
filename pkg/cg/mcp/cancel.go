@@ -21,9 +21,11 @@ type cancelInput struct {
 }
 
 // cancelOutput is the result shape for `cg_cancel`. EscalateSignal is present
-// only when an escalation signal was actually sent.
+// only when an escalation signal was actually sent. Pool marks that id named a
+// pool and the signal went to its supervisor rather than a process group.
 type cancelOutput struct {
 	ID             string `json:"id"`
+	Pool           bool   `json:"pool,omitempty"`
 	Signaled       bool   `json:"signaled"`
 	Signal         int    `json:"signal"`
 	Escalated      bool   `json:"escalated"`
@@ -34,7 +36,7 @@ type cancelOutput struct {
 func registerCancel(s *mcpsdk.Server, reg *runRegistry) {
 	mcpsdk.AddTool(s, &mcpsdk.Tool{
 		Name:        "cg_cancel",
-		Description: "Signal a capture run's process group. Sends signal (default SIGTERM) to the run started by this server. Already-finished or already-gone runs return {signaled: false, finished: true} without error; unknown IDs are a tool error. With escalate_after_ms > 0, waits up to that long for the child to exit and sends escalate_signal (default SIGKILL) if it is still running.",
+		Description: "Signal a capture run's process group. Sends signal (default SIGTERM) to the run started by this server. Already-finished or already-gone runs return {signaled: false, finished: true} without error; unknown IDs are a tool error. With escalate_after_ms > 0, waits up to that long for the child to exit and sends escalate_signal (default SIGKILL) if it is still running. A pool ID signals the pool supervisor instead: SIGTERM stops scheduling and lets in-flight runs finish, SIGINT additionally cancels them, and anything else (including the SIGKILL escalation default) abandons the pool.",
 	}, func(ctx context.Context, req *mcpsdk.CallToolRequest, in cancelInput) (*mcpsdk.CallToolResult, cancelOutput, error) {
 		return handleCancel(ctx, reg, in)
 	})
@@ -68,6 +70,12 @@ func handleCancel(ctx context.Context, reg *runRegistry, in cancelInput) (*mcpsd
 		return nil, cancelOutput{}, lerr
 	}
 
+	// A directory without meta.json is either an in-flight run or a pool; the
+	// manifest's presence is what distinguishes the two.
+	if m, perr := cg.ReadPoolManifest(dir); perr == nil {
+		return handlePoolCancel(ctx, reg, in, out, dir, m, sig, escSig)
+	}
+
 	pid, perr := cg.ReadPidFile(dir)
 	if perr != nil {
 		return nil, cancelOutput{}, fmt.Errorf("cannot cancel %s: no pid recorded for this run: %w", in.ID, perr)
@@ -96,6 +104,53 @@ func handleCancel(ctx context.Context, reg *runRegistry, in cancelInput) (*mcpsd
 	}
 
 	if kerr := syscall.Kill(-pid, escSig); kerr != nil && !errors.Is(kerr, syscall.ESRCH) {
+		return nil, cancelOutput{}, fmt.Errorf("escalating %s: %w", in.ID, kerr)
+	}
+	out.Escalated = true
+	out.EscalateSignal = int(escSig)
+	return nil, out, nil
+}
+
+// handlePoolCancel signals the pool supervisor with sig. The pid is positive on
+// purpose: the supervisor is its own session leader and members run in their
+// own sessions, so a group signal would reach nothing else anyway, and the
+// protocol is defined on the supervisor process. Escalation waits for the pool
+// to finish and then signals the supervisor again with escSig.
+func handlePoolCancel(ctx context.Context, reg *runRegistry, in cancelInput, out cancelOutput, dir string, m *cg.PoolManifest, sig, escSig syscall.Signal) (*mcpsdk.CallToolResult, cancelOutput, error) {
+	out.Pool = true
+
+	pid, finished, err := cg.PoolSupervisorPid(dir, m)
+	if err != nil {
+		return nil, cancelOutput{}, fmt.Errorf("cannot cancel %s: %w", in.ID, err)
+	}
+	if finished {
+		out.Finished = true
+		return nil, out, nil
+	}
+
+	if kerr := syscall.Kill(pid, sig); kerr != nil {
+		if errors.Is(kerr, syscall.ESRCH) {
+			out.Finished = true
+			return nil, out, nil
+		}
+		return nil, cancelOutput{}, fmt.Errorf("signalling %s: %w", in.ID, kerr)
+	}
+	out.Signaled = true
+
+	if in.EscalateAfterMs <= 0 {
+		return nil, out, nil
+	}
+
+	finished, werr := awaitPoolFinish(ctx, reg, in.ID, dir, time.Duration(in.EscalateAfterMs)*time.Millisecond)
+	if werr != nil {
+		return nil, cancelOutput{}, werr
+	}
+	if finished {
+		out.Finished = true
+		return nil, out, nil
+	}
+
+	if kerr := syscall.Kill(pid, escSig); kerr != nil && !errors.Is(kerr, syscall.ESRCH) {
 		return nil, cancelOutput{}, fmt.Errorf("escalating %s: %w", in.ID, kerr)
 	}
 	out.Escalated = true

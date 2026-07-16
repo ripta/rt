@@ -363,6 +363,292 @@ func TestPruneOlderThanEvictsAbandonedRuns(t *testing.T) {
 	}
 }
 
+// seedPoolWithMembers seeds a finished pool and two finished member run dirs
+// whose IDs the manifest names.
+func seedPoolWithMembers(t *testing.T, poolID, okID, badID string) string {
+	t.Helper()
+	finished := time.Now().UTC()
+	dir := seedPoolDir(t, poolID, &PoolManifest{
+		ID:         poolID,
+		Commands:   [][]string{{"echo", "hi"}},
+		StartedAt:  finished.Add(-time.Minute),
+		FinishedAt: &finished,
+		Runs: []PoolRunRecord{
+			{Command: 0, RunID: okID, Status: PoolRunFinished, ExitCode: intp(0)},
+			{Command: 0, RunID: badID, Status: PoolRunFinished, ExitCode: intp(1)},
+		},
+	})
+	seedRunDir(t, okID, &Meta{RunInfo: RunInfo{ID: okID, Command: []string{"echo", "hi"}, Pool: poolID}})
+	seedRunDir(t, badID, &Meta{RunInfo: RunInfo{ID: badID, Command: []string{"echo", "hi"}, Pool: poolID}, ExitCode: 1})
+	return dir
+}
+
+func TestPruneEvictsPoolAsUnit(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	root := CaptureRoot()
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatalf("mkdir root: %v", err)
+	}
+
+	now := time.Now()
+	dirPool := seedPoolWithMembers(t, "PPPPPP", "AAAAAA", "BBBBBB")
+	dirSolo := seedRunDir(t, "SSSSSS", &Meta{RunInfo: RunInfo{ID: "SSSSSS", Command: []string{"echo", "solo"}}})
+	chtimes(t, dirSolo, now)
+	chtimes(t, dirPool, now.Add(-1*time.Hour))
+
+	stdout, _, err := runCgSplit("prune", "--keep", "1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if stdout != "PPPPPP\nAAAAAA\nBBBBBB\n" {
+		t.Errorf("stdout = %q, want pool then members", stdout)
+	}
+
+	for _, id := range []string{"PPPPPP", "AAAAAA", "BBBBBB"} {
+		if _, err := os.Stat(filepath.Join(root, id)); !os.IsNotExist(err) {
+			t.Errorf("%s still exists: %v", id, err)
+		}
+	}
+	if _, err := os.Stat(dirSolo); err != nil {
+		t.Errorf("SSSSSS removed unexpectedly: %v", err)
+	}
+}
+
+func TestPruneSkipsLivePoolAndMembers(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	root := CaptureRoot()
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatalf("mkdir root: %v", err)
+	}
+
+	now := time.Now()
+
+	// A live pool: manifest without finished_at, lock held. Its finished member
+	// must not be evicted from under it, however old.
+	dirPool := seedPoolDir(t, "PPPPPP", &PoolManifest{
+		ID:        "PPPPPP",
+		Commands:  [][]string{{"echo", "hi"}},
+		StartedAt: now.UTC(),
+		Runs: []PoolRunRecord{
+			{Command: 0, RunID: "AAAAAA", Status: PoolRunFinished, ExitCode: intp(0)},
+			{Command: 0, RunID: "BBBBBB", Status: PoolRunRunning},
+		},
+	})
+	lock, err := acquireRunLock(dirPool)
+	if err != nil {
+		t.Fatalf("holding pool lock: %v", err)
+	}
+	defer lock.Close()
+
+	dirMember := seedRunDir(t, "AAAAAA", &Meta{RunInfo: RunInfo{ID: "AAAAAA", Command: []string{"echo", "hi"}, Pool: "PPPPPP"}})
+	dirSolo := seedRunDir(t, "SSSSSS", &Meta{RunInfo: RunInfo{ID: "SSSSSS", Command: []string{"echo", "solo"}}})
+	dirOld := seedRunDir(t, "CCCCCC", &Meta{RunInfo: RunInfo{ID: "CCCCCC", Command: []string{"echo", "old"}}})
+
+	chtimes(t, dirSolo, now)
+	chtimes(t, dirPool, now.Add(-1*time.Hour))
+	chtimes(t, dirMember, now.Add(-2*time.Hour))
+	chtimes(t, dirOld, now.Add(-3*time.Hour))
+
+	stdout, _, err := runCgSplit("prune", "--keep", "1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if stdout != "CCCCCC\n" {
+		t.Errorf("stdout = %q, want just CCCCCC", stdout)
+	}
+
+	for _, dir := range []string{dirPool, dirMember, dirSolo} {
+		if _, err := os.Stat(dir); err != nil {
+			t.Errorf("%s removed unexpectedly: %v", dir, err)
+		}
+	}
+}
+
+func TestPruneEvictsAbandonedPool(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	root := CaptureRoot()
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatalf("mkdir root: %v", err)
+	}
+
+	now := time.Now()
+
+	// Abandoned: no finished_at, lock file released. The manifest still names a
+	// running member; a held member lock keeps that member alive as an orphan.
+	dirPool := seedPoolDir(t, "PPPPPP", &PoolManifest{
+		ID:        "PPPPPP",
+		Commands:  [][]string{{"echo", "hi"}},
+		StartedAt: now.UTC(),
+		Runs: []PoolRunRecord{
+			{Command: 0, RunID: "AAAAAA", Status: PoolRunFinished, ExitCode: intp(0)},
+			{Command: 0, RunID: "BBBBBB", Status: PoolRunRunning},
+		},
+	})
+	poolLock, err := acquireRunLock(dirPool)
+	if err != nil {
+		t.Fatalf("acquiring pool lock: %v", err)
+	}
+	poolLock.Close()
+
+	dirDone := seedRunDir(t, "AAAAAA", &Meta{RunInfo: RunInfo{ID: "AAAAAA", Command: []string{"echo", "hi"}, Pool: "PPPPPP"}})
+	dirLive := seedRunDir(t, "BBBBBB", nil)
+	memberLock, err := acquireRunLock(dirLive)
+	if err != nil {
+		t.Fatalf("holding member lock: %v", err)
+	}
+	defer memberLock.Close()
+
+	dirSolo := seedRunDir(t, "SSSSSS", &Meta{RunInfo: RunInfo{ID: "SSSSSS", Command: []string{"echo", "solo"}}})
+	chtimes(t, dirSolo, now)
+	chtimes(t, dirPool, now.Add(-1*time.Hour))
+	chtimes(t, dirDone, now.Add(-1*time.Hour))
+	chtimes(t, dirLive, now.Add(-1*time.Hour))
+
+	stdout, _, err := runCgSplit("prune", "--keep", "1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if stdout != "PPPPPP\nAAAAAA\n" {
+		t.Errorf("stdout = %q, want pool and finished member only", stdout)
+	}
+
+	if _, err := os.Stat(dirLive); err != nil {
+		t.Errorf("live member BBBBBB removed from under abandoned pool: %v", err)
+	}
+	for _, dir := range []string{dirPool, dirDone} {
+		if _, err := os.Stat(dir); !os.IsNotExist(err) {
+			t.Errorf("%s still exists: %v", dir, err)
+		}
+	}
+}
+
+func TestPruneOrphanMemberEvictable(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	if err := os.MkdirAll(CaptureRoot(), 0o755); err != nil {
+		t.Fatalf("mkdir root: %v", err)
+	}
+
+	now := time.Now()
+
+	// The member's meta names a pool whose dir no longer exists: an orphan,
+	// individually evictable like any run.
+	dirOrphan := seedRunDir(t, "AAAAAA", &Meta{RunInfo: RunInfo{ID: "AAAAAA", Command: []string{"echo", "hi"}, Pool: "GGGGGG"}})
+	dirSolo := seedRunDir(t, "SSSSSS", &Meta{RunInfo: RunInfo{ID: "SSSSSS", Command: []string{"echo", "solo"}}})
+	chtimes(t, dirSolo, now)
+	chtimes(t, dirOrphan, now.Add(-1*time.Hour))
+
+	stdout, _, err := runCgSplit("prune", "--keep", "1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if stdout != "AAAAAA\n" {
+		t.Errorf("stdout = %q, want %q", stdout, "AAAAAA\n")
+	}
+}
+
+func TestPruneToleratesMissingMemberDirs(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	root := CaptureRoot()
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatalf("mkdir root: %v", err)
+	}
+
+	now := time.Now()
+	finished := now.UTC()
+	dirPool := seedPoolDir(t, "PPPPPP", &PoolManifest{
+		ID:         "PPPPPP",
+		Commands:   [][]string{{"echo", "hi"}},
+		StartedAt:  finished.Add(-time.Minute),
+		FinishedAt: &finished,
+		Runs:       []PoolRunRecord{{Command: 0, RunID: "AAAAAA", Status: PoolRunFinished, ExitCode: intp(0)}},
+	})
+	dirSolo := seedRunDir(t, "SSSSSS", &Meta{RunInfo: RunInfo{ID: "SSSSSS", Command: []string{"echo", "solo"}}})
+	chtimes(t, dirSolo, now)
+	chtimes(t, dirPool, now.Add(-1*time.Hour))
+
+	stdout, _, err := runCgSplit("prune", "--keep", "1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if stdout != "PPPPPP\n" {
+		t.Errorf("stdout = %q, want just the pool", stdout)
+	}
+	if _, err := os.Stat(dirPool); !os.IsNotExist(err) {
+		t.Errorf("PPPPPP still exists: %v", err)
+	}
+}
+
+func TestPrunePoolCountsOnceAgainstKeep(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	if err := os.MkdirAll(CaptureRoot(), 0o755); err != nil {
+		t.Fatalf("mkdir root: %v", err)
+	}
+
+	now := time.Now()
+	dirPool := seedPoolWithMembers(t, "PPPPPP", "AAAAAA", "BBBBBB")
+	dirSolo := seedRunDir(t, "SSSSSS", &Meta{RunInfo: RunInfo{ID: "SSSSSS", Command: []string{"echo", "solo"}}})
+	chtimes(t, dirSolo, now)
+	chtimes(t, dirPool, now.Add(-1*time.Hour))
+
+	// Four directories, but only two candidates: the standalone run and the
+	// pool unit. keep=2 retains both.
+	stdout, _, err := runCgSplit("prune", "--keep", "2")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if stdout != "" {
+		t.Errorf("stdout = %q, want empty", stdout)
+	}
+}
+
+func TestPruneDryRunPool(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	root := CaptureRoot()
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatalf("mkdir root: %v", err)
+	}
+
+	now := time.Now()
+	dirPool := seedPoolWithMembers(t, "PPPPPP", "AAAAAA", "BBBBBB")
+	dirSolo := seedRunDir(t, "SSSSSS", &Meta{RunInfo: RunInfo{ID: "SSSSSS", Command: []string{"echo", "solo"}}})
+	chtimes(t, dirSolo, now)
+	chtimes(t, dirPool, now.Add(-1*time.Hour))
+
+	stdout, _, err := runCgSplit("prune", "--keep", "1", "--dry-run")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if stdout != "PPPPPP\nAAAAAA\nBBBBBB\n" {
+		t.Errorf("stdout = %q, want the whole unit previewed", stdout)
+	}
+
+	for _, id := range []string{"PPPPPP", "AAAAAA", "BBBBBB"} {
+		if _, err := os.Stat(filepath.Join(root, id)); err != nil {
+			t.Errorf("%s removed despite --dry-run: %v", id, err)
+		}
+	}
+}
+
+func TestPruneOlderThanEvictsPoolUnit(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	root := CaptureRoot()
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatalf("mkdir root: %v", err)
+	}
+
+	now := time.Now()
+	dirPool := seedPoolWithMembers(t, "PPPPPP", "AAAAAA", "BBBBBB")
+	chtimes(t, dirPool, now.Add(-2*time.Hour))
+
+	stdout, _, err := runCgSplit("prune", "--older-than", "1h")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if stdout != "PPPPPP\nAAAAAA\nBBBBBB\n" {
+		t.Errorf("stdout = %q, want the whole unit", stdout)
+	}
+}
+
 func TestPruneMutuallyExclusive(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 	if err := os.MkdirAll(CaptureRoot(), 0o755); err != nil {

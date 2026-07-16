@@ -388,3 +388,253 @@ func TestHandleListLimitClampedToMax(t *testing.T) {
 		t.Errorf("expected 0 runs (empty root), got %d", len(out.Runs))
 	}
 }
+
+// seedFinishedPool seeds a finished pool with two finished members, one green
+// and one failed, plus the member run dirs whose meta names the pool.
+func seedFinishedPool(t *testing.T, poolID, okID, badID string) *cg.PoolManifest {
+	t.Helper()
+	finished := time.Now().UTC()
+	m := &cg.PoolManifest{
+		ID:         poolID,
+		Commands:   [][]string{{"echo", "hi"}},
+		StartedAt:  finished.Add(-time.Minute),
+		FinishedAt: &finished,
+		Runs: []cg.PoolRunRecord{
+			{Command: 0, RunID: okID, Status: cg.PoolRunFinished, ExitCode: intp(0)},
+			{Command: 0, RunID: badID, Status: cg.PoolRunFinished, ExitCode: intp(1)},
+		},
+	}
+	seedPoolDir(t, poolID, m)
+	seedRunDir(t, okID, &cg.Meta{RunInfo: cg.RunInfo{ID: okID, Command: []string{"echo", "hi"}, Pool: poolID}})
+	seedRunDir(t, badID, &cg.Meta{RunInfo: cg.RunInfo{ID: badID, Command: []string{"echo", "hi"}, Pool: poolID}, ExitCode: 1})
+	return m
+}
+
+func intp(v int) *int {
+	return &v
+}
+
+func TestHandleListCollapsesPools(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	if err := os.MkdirAll(cg.CaptureRoot(), 0o755); err != nil {
+		t.Fatalf("mkdir root: %v", err)
+	}
+
+	seedFinishedPool(t, "PPPPPP", "AAAAAA", "BBBBBB")
+	seedRunDir(t, "SSSSSS", &cg.Meta{RunInfo: cg.RunInfo{ID: "SSSSSS", Command: []string{"echo", "solo"}}})
+
+	_, out, err := handleList(context.Background(), nil, listInput{})
+	if err != nil {
+		t.Fatalf("handleList: %v", err)
+	}
+	if len(out.Runs) != 2 {
+		t.Fatalf("expected pool row + standalone row, got %d: %+v", len(out.Runs), out.Runs)
+	}
+
+	var pool *listRun
+	for i := range out.Runs {
+		if out.Runs[i].Kind == "pool" {
+			pool = &out.Runs[i]
+		} else if out.Runs[i].ID != "SSSSSS" {
+			t.Errorf("unexpected non-pool row %+v", out.Runs[i])
+		}
+	}
+	if pool == nil {
+		t.Fatalf("no pool row in %+v", out.Runs)
+	}
+	if pool.ID != "PPPPPP" || pool.State != "finished" {
+		t.Errorf("pool row = %+v, want PPPPPP/finished", pool)
+	}
+	if pool.Counts == nil || *pool.Counts != (cg.PoolCounts{Total: 2, Succeeded: 1, Failed: 1}) {
+		t.Errorf("pool counts = %+v, want total 2, 1 ok, 1 failed", pool.Counts)
+	}
+	if pool.FinishedAt == nil {
+		t.Errorf("pool row FinishedAt = nil, want manifest finished_at")
+	}
+}
+
+func TestHandleListPoolStates(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	if err := os.MkdirAll(cg.CaptureRoot(), 0o755); err != nil {
+		t.Fatalf("mkdir root: %v", err)
+	}
+
+	running := seedPoolDir(t, "QQQQQQ", &cg.PoolManifest{
+		ID:        "QQQQQQ",
+		Commands:  [][]string{{"sleep", "60"}},
+		StartedAt: time.Now().UTC(),
+		Runs:      []cg.PoolRunRecord{{Command: 0, Status: cg.PoolRunRunning, RunID: "AAAAAA"}},
+	})
+	holdRunLock(t, running)
+
+	abandoned := seedPoolDir(t, "XXXXXX", &cg.PoolManifest{
+		ID:        "XXXXXX",
+		Commands:  [][]string{{"sleep", "60"}},
+		StartedAt: time.Now().UTC(),
+		Runs:      []cg.PoolRunRecord{{Command: 0, Status: cg.PoolRunRunning}},
+	})
+	seedLockFile(t, abandoned)
+
+	// The default state filter is finished, so neither pool surfaces.
+	_, out, err := handleList(context.Background(), nil, listInput{})
+	if err != nil {
+		t.Fatalf("handleList default: %v", err)
+	}
+	if len(out.Runs) != 0 {
+		t.Errorf("default filter listed unfinished pools: %+v", out.Runs)
+	}
+
+	_, out, err = handleList(context.Background(), nil, listInput{State: "running"})
+	if err != nil {
+		t.Fatalf("handleList running: %v", err)
+	}
+	if len(out.Runs) != 1 || out.Runs[0].ID != "QQQQQQ" || out.Runs[0].Kind != "pool" {
+		t.Errorf("running filter = %+v, want QQQQQQ pool row", out.Runs)
+	}
+
+	_, out, err = handleList(context.Background(), nil, listInput{State: "abandoned"})
+	if err != nil {
+		t.Fatalf("handleList abandoned: %v", err)
+	}
+	if len(out.Runs) != 1 || out.Runs[0].ID != "XXXXXX" || out.Runs[0].State != "abandoned" {
+		t.Errorf("abandoned filter = %+v, want XXXXXX pool row", out.Runs)
+	}
+}
+
+func TestHandleListPoolMembers(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	if err := os.MkdirAll(cg.CaptureRoot(), 0o755); err != nil {
+		t.Fatalf("mkdir root: %v", err)
+	}
+
+	seedFinishedPool(t, "PPPPPP", "AAAAAA", "BBBBBB")
+
+	// An in-flight member: no meta.json yet, start.json names the pool. Member
+	// mode must default the state filter to all so this row is not hidden.
+	dirRun := seedRunDir(t, "CCCCCC", nil)
+	if err := cg.WriteStartInfo(dirRun, &cg.StartInfo{RunInfo: cg.RunInfo{Command: []string{"sleep", "30"}, StartedAt: time.Now().UTC(), Pool: "PPPPPP"}}); err != nil {
+		t.Fatalf("WriteStartInfo: %v", err)
+	}
+
+	seedRunDir(t, "SSSSSS", &cg.Meta{RunInfo: cg.RunInfo{ID: "SSSSSS", Command: []string{"echo", "solo"}}})
+
+	_, out, err := handleList(context.Background(), nil, listInput{Pool: "PPPPPP"})
+	if err != nil {
+		t.Fatalf("handleList members: %v", err)
+	}
+	if len(out.Runs) != 3 {
+		t.Fatalf("expected 3 member rows, got %d: %+v", len(out.Runs), out.Runs)
+	}
+	for _, r := range out.Runs {
+		if r.Pool != "PPPPPP" {
+			t.Errorf("member row %s Pool = %q, want PPPPPP", r.ID, r.Pool)
+		}
+		if r.Kind != "" {
+			t.Errorf("member row %s Kind = %q, want empty", r.ID, r.Kind)
+		}
+	}
+
+	_, out, err = handleList(context.Background(), nil, listInput{Pool: "PPPPPP", State: "running"})
+	if err != nil {
+		t.Fatalf("handleList members running: %v", err)
+	}
+	if len(out.Runs) != 1 || out.Runs[0].ID != "CCCCCC" {
+		t.Errorf("explicit state filter = %+v, want just CCCCCC", out.Runs)
+	}
+}
+
+func TestHandleListPoolNoneAndAny(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	if err := os.MkdirAll(cg.CaptureRoot(), 0o755); err != nil {
+		t.Fatalf("mkdir root: %v", err)
+	}
+
+	seedFinishedPool(t, "PPPPPP", "AAAAAA", "BBBBBB")
+	seedRunDir(t, "SSSSSS", &cg.Meta{RunInfo: cg.RunInfo{ID: "SSSSSS", Command: []string{"echo", "solo"}}})
+
+	_, out, err := handleList(context.Background(), nil, listInput{Pool: "none"})
+	if err != nil {
+		t.Fatalf("handleList none: %v", err)
+	}
+	if len(out.Runs) != 1 || out.Runs[0].ID != "SSSSSS" {
+		t.Errorf("pool none = %+v, want just SSSSSS", out.Runs)
+	}
+
+	_, out, err = handleList(context.Background(), nil, listInput{Pool: "any"})
+	if err != nil {
+		t.Fatalf("handleList any: %v", err)
+	}
+	if len(out.Runs) != 4 {
+		t.Errorf("pool any listed %d rows, want 4 (pool + 2 members + standalone): %+v", len(out.Runs), out.Runs)
+	}
+}
+
+func TestHandleListOrphanMemberIsStandalone(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	if err := os.MkdirAll(cg.CaptureRoot(), 0o755); err != nil {
+		t.Fatalf("mkdir root: %v", err)
+	}
+
+	// A member whose pool dir is gone: it must stay visible as standalone.
+	seedRunDir(t, "AAAAAA", &cg.Meta{RunInfo: cg.RunInfo{ID: "AAAAAA", Command: []string{"echo", "hi"}, Pool: "PPPPPP"}})
+
+	_, out, err := handleList(context.Background(), nil, listInput{})
+	if err != nil {
+		t.Fatalf("handleList default: %v", err)
+	}
+	if len(out.Runs) != 1 || out.Runs[0].ID != "AAAAAA" {
+		t.Errorf("default filter = %+v, want orphan AAAAAA visible", out.Runs)
+	}
+
+	_, out, err = handleList(context.Background(), nil, listInput{Pool: "none"})
+	if err != nil {
+		t.Fatalf("handleList none: %v", err)
+	}
+	if len(out.Runs) != 1 || out.Runs[0].ID != "AAAAAA" {
+		t.Errorf("pool none = %+v, want orphan AAAAAA visible", out.Runs)
+	}
+}
+
+func TestHandleListLimitCountsCollapsedRows(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	if err := os.MkdirAll(cg.CaptureRoot(), 0o755); err != nil {
+		t.Fatalf("mkdir root: %v", err)
+	}
+
+	seedFinishedPool(t, "PPPPPP", "AAAAAA", "BBBBBB")
+	dirSolo := seedRunDir(t, "SSSSSS", &cg.Meta{RunInfo: cg.RunInfo{ID: "SSSSSS", Command: []string{"echo", "solo"}}})
+
+	now := time.Now()
+	if err := os.Chtimes(dirSolo, now, now); err != nil {
+		t.Fatalf("chtimes solo: %v", err)
+	}
+
+	_, out, err := handleList(context.Background(), nil, listInput{Limit: 1})
+	if err != nil {
+		t.Fatalf("handleList: %v", err)
+	}
+	if len(out.Runs) != 1 || out.Runs[0].ID != "SSSSSS" {
+		t.Errorf("limit 1 = %+v, want just most-recent SSSSSS", out.Runs)
+	}
+}
+
+func TestHandleListInvalidPool(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+
+	_, out, err := handleList(context.Background(), nil, listInput{Pool: "not-an-id"})
+	if err == nil {
+		t.Fatalf("handleList: expected error, got nil; out=%+v", out)
+	}
+}
+
+func TestHandleListUnknownPoolID(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	if err := os.MkdirAll(cg.CaptureRoot(), 0o755); err != nil {
+		t.Fatalf("mkdir root: %v", err)
+	}
+
+	_, out, err := handleList(context.Background(), nil, listInput{Pool: "ZZZZZZ"})
+	if err == nil {
+		t.Fatalf("handleList: expected unknown pool error, got nil; out=%+v", out)
+	}
+}

@@ -64,6 +64,169 @@ func waitReady(t *testing.T, run *cg.CaptureRun, timeout time.Duration) {
 	t.Fatalf("child %s never became ready", run.ID)
 }
 
+// startCancelPool launches a real pool via the run_many path without waiting
+// and returns its ID and directory once member job is running.
+func startCancelPool(t *testing.T, reg *runRegistry, job int, commands ...[]string) (string, string) {
+	t.Helper()
+
+	async := false
+	_, started, err := handleRunMany(context.Background(), reg, nil, nil, runManyInput{
+		Commands: commands,
+		Wait:     &async,
+	})
+	if err != nil {
+		t.Fatalf("handleRunMany: %v", err)
+	}
+	if !started.Started {
+		t.Fatalf("pool not started: %+v", started)
+	}
+
+	dir := filepath.Join(cg.CaptureRoot(), started.ID)
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		m, err := cg.ReadPoolManifest(dir)
+		if err == nil && len(m.Runs) > job && m.Runs[job].Status == cg.PoolRunRunning {
+			return started.ID, dir
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("pool %s member %d never started running", started.ID, job)
+	return "", ""
+}
+
+func TestHandleCancelPoolStop(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+
+	reg := newRunRegistry()
+	id, dir := startCancelPool(t, reg, 0,
+		[]string{"sh", "-c", "sleep 0.5; echo done"},
+		[]string{"echo", "never"},
+	)
+
+	_, out, err := handleCancel(context.Background(), reg, cancelInput{ID: id})
+	if err != nil {
+		t.Fatalf("handleCancel: %v", err)
+	}
+	if !out.Pool || !out.Signaled {
+		t.Errorf("output = %+v, want pool and signaled", out)
+	}
+	if out.Signal != int(syscall.SIGTERM) {
+		t.Errorf("Signal = %d, want SIGTERM", out.Signal)
+	}
+
+	waitForPoolFinished(t, dir)
+	m, err := cg.ReadPoolManifest(dir)
+	if err != nil {
+		t.Fatalf("ReadPoolManifest: %v", err)
+	}
+	if m.Runs[0].Status != cg.PoolRunFinished || m.Runs[0].Signal != nil {
+		t.Errorf("in-flight run = %+v, want finished without a signal", m.Runs[0])
+	}
+	if m.Runs[1].Status != cg.PoolRunSkipped {
+		t.Errorf("pending run status = %q, want skipped", m.Runs[1].Status)
+	}
+}
+
+func TestHandleCancelPoolKill(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+
+	reg := newRunRegistry()
+	id, dir := startCancelPool(t, reg, 0,
+		[]string{"sleep", "30"},
+		[]string{"echo", "never"},
+	)
+
+	_, out, err := handleCancel(context.Background(), reg, cancelInput{ID: id, Signal: "SIGINT"})
+	if err != nil {
+		t.Fatalf("handleCancel: %v", err)
+	}
+	if !out.Pool || !out.Signaled {
+		t.Errorf("output = %+v, want pool and signaled", out)
+	}
+
+	waitForPoolFinished(t, dir)
+	m, err := cg.ReadPoolManifest(dir)
+	if err != nil {
+		t.Fatalf("ReadPoolManifest: %v", err)
+	}
+	if m.Runs[0].Status != cg.PoolRunFinished || m.Runs[0].Signal == nil {
+		t.Errorf("in-flight run = %+v, want finished by a signal", m.Runs[0])
+	}
+	if m.Runs[1].Status != cg.PoolRunSkipped {
+		t.Errorf("pending run status = %q, want skipped", m.Runs[1].Status)
+	}
+}
+
+func TestHandleCancelPoolEscalation(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+
+	reg := newRunRegistry()
+	id, dir := startCancelPool(t, reg, 0, []string{"sleep", "30"})
+
+	// SIGTERM only stops scheduling; the 30s member keeps the pool alive past
+	// the escalation window, so the SIGINT escalation must cancel it.
+	_, out, err := handleCancel(context.Background(), reg, cancelInput{
+		ID:              id,
+		Signal:          "SIGTERM",
+		EscalateAfterMs: 200,
+		EscalateSignal:  "SIGINT",
+	})
+	if err != nil {
+		t.Fatalf("handleCancel: %v", err)
+	}
+	if !out.Pool || !out.Signaled || !out.Escalated {
+		t.Errorf("output = %+v, want pool, signaled, escalated", out)
+	}
+	if out.EscalateSignal != int(syscall.SIGINT) {
+		t.Errorf("EscalateSignal = %d, want SIGINT", out.EscalateSignal)
+	}
+
+	waitForPoolFinished(t, dir)
+	m, err := cg.ReadPoolManifest(dir)
+	if err != nil {
+		t.Fatalf("ReadPoolManifest: %v", err)
+	}
+	if m.Runs[0].Status != cg.PoolRunFinished || m.Runs[0].Signal == nil {
+		t.Errorf("member = %+v, want finished by a signal", m.Runs[0])
+	}
+}
+
+func TestHandleCancelPoolFinished(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+
+	m := runningPoolManifest("PPPPPP")
+	finishPoolManifest(m)
+	seedPoolDir(t, "PPPPPP", m)
+
+	_, out, err := handleCancel(context.Background(), newRunRegistry(), cancelInput{ID: "PPPPPP"})
+	if err != nil {
+		t.Fatalf("handleCancel: %v", err)
+	}
+	if !out.Pool || out.Signaled || !out.Finished {
+		t.Errorf("output = %+v, want pool, unsignaled, finished", out)
+	}
+}
+
+func TestHandleCancelPoolAbandoned(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+
+	// Abandoned: no finished_at, released lock, and a stale pid file left by a
+	// SIGKILLed supervisor. The guard must report finished without signalling.
+	dir := seedPoolDir(t, "PPPPPP", runningPoolManifest("PPPPPP"))
+	seedLockFile(t, dir)
+	if err := cg.WritePidFile(dir, os.Getpid()); err != nil {
+		t.Fatalf("WritePidFile: %v", err)
+	}
+
+	_, out, err := handleCancel(context.Background(), newRunRegistry(), cancelInput{ID: "PPPPPP"})
+	if err != nil {
+		t.Fatalf("handleCancel: %v", err)
+	}
+	if !out.Pool || out.Signaled || !out.Finished {
+		t.Errorf("output = %+v, want pool, unsignaled, finished", out)
+	}
+}
+
 func TestHandleCancelSigterm(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 

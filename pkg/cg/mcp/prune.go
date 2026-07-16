@@ -27,7 +27,7 @@ type pruneOutput struct {
 func registerPrune(s *mcpsdk.Server) {
 	mcpsdk.AddTool(s, &mcpsdk.Tool{
 		Name:        "cg_prune",
-		Description: "Evict capture runs from $TMPDIR/cg/. Either keeps the N most recent runs by mtime or removes runs older than a duration. Use dry_run to preview without removing.",
+		Description: "Evict capture runs from $TMPDIR/cg/. Either keeps the N most recent runs by mtime or removes runs older than a duration. A pool and its member runs are evicted as one unit counting once against keep; live pools and their members are never touched. Use dry_run to preview without removing.",
 	}, handlePrune)
 }
 

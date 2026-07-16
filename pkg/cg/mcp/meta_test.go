@@ -98,6 +98,49 @@ func TestHandleMetaInFlight(t *testing.T) {
 	}
 }
 
+func TestHandleMetaPool(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+
+	m := runningPoolManifest("PPPPPP")
+	dir := seedPoolDir(t, "PPPPPP", m)
+	seedLockFile(t, dir)
+
+	_, out, err := handleMeta(context.Background(), nil, metaInput{ID: "PPPPPP"})
+	if err != nil {
+		t.Fatalf("handleMeta: %v", err)
+	}
+	if out.State != "abandoned" {
+		t.Errorf("State = %q, want abandoned for a released lock", out.State)
+	}
+	if out.Manifest == nil || out.Manifest.ID != "PPPPPP" || len(out.Manifest.Runs) != 1 {
+		t.Errorf("Manifest = %+v, want the seeded manifest", out.Manifest)
+	}
+
+	holdRunLock(t, dir)
+	_, out, err = handleMeta(context.Background(), nil, metaInput{ID: "PPPPPP"})
+	if err != nil {
+		t.Fatalf("handleMeta: %v", err)
+	}
+	if out.State != "running" {
+		t.Errorf("State = %q, want running for a held lock", out.State)
+	}
+
+	finishPoolManifest(m)
+	if err := cg.WritePoolManifest(dir, m); err != nil {
+		t.Fatalf("WritePoolManifest: %v", err)
+	}
+	_, out, err = handleMeta(context.Background(), nil, metaInput{ID: "PPPPPP"})
+	if err != nil {
+		t.Fatalf("handleMeta: %v", err)
+	}
+	if out.State != "finished" {
+		t.Errorf("State = %q, want finished", out.State)
+	}
+	if out.Manifest == nil || out.Manifest.FinishedAt == nil {
+		t.Errorf("Manifest = %+v, want finished_at set", out.Manifest)
+	}
+}
+
 func TestHandleMetaInFlightWithStartInfo(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 
