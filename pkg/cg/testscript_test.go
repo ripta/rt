@@ -10,6 +10,13 @@ import (
 )
 
 func TestMain(m *testing.M) {
+	// RunSupervised re-execs os.Executable(), which under `go test` is this
+	// test binary. Dispatch that invocation to the real cg root command so the
+	// spawn path is exercised with its production argv.
+	if len(os.Args) > 1 && os.Args[1] == "supervise" {
+		os.Exit(cgMain())
+	}
+
 	os.Exit(testscript.RunMain(m, map[string]func() int{
 		"cg":              cgMain,
 		"emit-json-log":   emitJSONLog,

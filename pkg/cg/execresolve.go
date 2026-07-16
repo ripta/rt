@@ -10,8 +10,8 @@ import (
 
 // Resolution is the executable identity cg derives from a command's argv[0]
 // before it is approved and execed. The approval gate matches against the
-// canonical form and RunCapture execs the same path, so the policy decision and
-// the execution agree on which file runs.
+// canonical form and the supervisor execs the same path, so the policy decision
+// and the execution agree on which file runs.
 type Resolution struct {
 	// Argv is the original command, unchanged.
 	Argv []string
@@ -97,7 +97,7 @@ func (r *Resolution) CanonicalArgv() []string {
 	return out
 }
 
-// ExecPath is the path RunCapture execs: the canonical path when available, then
+// ExecPath is the path the supervisor execs: the canonical path when available, then
 // the resolved path, falling back to the original argv[0] so a command that
 // could not be resolved still surfaces its start failure through exec.
 func (r *Resolution) ExecPath() string {

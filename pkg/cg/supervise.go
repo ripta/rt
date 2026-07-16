@@ -194,8 +194,8 @@ func writeAck(out io.Writer, ack SuperviseAck) {
 	_, _ = out.Write(append(data, '\n'))
 }
 
-// countLines counts '\n' bytes in the file at path, the same definition the streaming
-// lineCountingWriter uses, so post-hoc and streaming counts agree.
+// countLines counts '\n' bytes in the file at path, the same definition the in-process
+// streaming counter used, so post-hoc counts match historical ones.
 func countLines(path string) (int64, error) {
 	f, err := os.Open(path)
 	if err != nil {

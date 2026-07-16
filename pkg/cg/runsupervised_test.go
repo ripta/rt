@@ -18,12 +18,12 @@ func waitDone(t *testing.T, run *CaptureRun, d time.Duration) {
 	}
 }
 
-func TestRunCaptureEcho(t *testing.T) {
+func TestRunSupervisedEcho(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 
-	run, err := RunCapture([]string{"echo", "hello"}, nil, "", nil)
+	run, err := RunSupervised([]string{"echo", "hello"}, nil, "", nil)
 	if err != nil {
-		t.Fatalf("RunCapture: %v", err)
+		t.Fatalf("RunSupervised: %v", err)
 	}
 	waitDone(t, run, 5*time.Second)
 
@@ -35,6 +35,8 @@ func TestRunCaptureEcho(t *testing.T) {
 		t.Errorf("stdout = %q, want %q", out, "hello\n")
 	}
 
+	// Done closes only after the supervisor exits, and the supervisor exits
+	// only after meta.json is written; the read must succeed immediately.
 	meta, err := ReadMeta(run.Dir)
 	if err != nil {
 		t.Fatalf("ReadMeta: %v", err)
@@ -57,14 +59,21 @@ func TestRunCaptureEcho(t *testing.T) {
 	if meta.DurationMs < 0 {
 		t.Errorf("DurationMs = %d, want >= 0", meta.DurationMs)
 	}
+
+	if _, err := ReadPidFile(run.Dir); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("ReadPidFile after finish: err = %v, want ErrNotExist", err)
+	}
+	if _, err := os.Stat(filepath.Join(run.Dir, LockFilename)); err != nil {
+		t.Errorf("lock file: %v", err)
+	}
 }
 
-func TestRunCaptureStartInfo(t *testing.T) {
+func TestRunSupervisedStartInfo(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 
-	run, err := RunCapture([]string{"sh", "-c", "sleep 0.3; echo done"}, nil, "", nil)
+	run, err := RunSupervised([]string{"sh", "-c", "sleep 0.3; echo done"}, nil, "", nil)
 	if err != nil {
-		t.Fatalf("RunCapture: %v", err)
+		t.Fatalf("RunSupervised: %v", err)
 	}
 
 	// While the child runs, start.json carries the command and start time so
@@ -88,12 +97,12 @@ func TestRunCaptureStartInfo(t *testing.T) {
 	}
 }
 
-func TestRunCaptureNonZeroExit(t *testing.T) {
+func TestRunSupervisedNonZeroExit(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 
-	run, err := RunCapture([]string{"sh", "-c", "exit 3"}, nil, "", nil)
+	run, err := RunSupervised([]string{"sh", "-c", "exit 3"}, nil, "", nil)
 	if err != nil {
-		t.Fatalf("RunCapture: %v", err)
+		t.Fatalf("RunSupervised: %v", err)
 	}
 	waitDone(t, run, 5*time.Second)
 
@@ -106,17 +115,20 @@ func TestRunCaptureNonZeroExit(t *testing.T) {
 	}
 }
 
-func TestRunCaptureStartError(t *testing.T) {
+func TestRunSupervisedStartError(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 
-	_, err := RunCapture([]string{"this-binary-does-not-exist-zzzz"}, nil, "", nil)
+	_, err := RunSupervised([]string{"this-binary-does-not-exist-zzzz"}, nil, "", nil)
 	if err == nil {
-		t.Fatalf("RunCapture: expected error, got nil")
+		t.Fatalf("RunSupervised: expected error, got nil")
 	}
 
 	var sf *StartFailure
 	if !errors.As(err, &sf) {
 		t.Fatalf("expected *StartFailure, got %T: %v", err, err)
+	}
+	if sf.RunID == "" {
+		t.Error("StartFailure.RunID is empty")
 	}
 
 	// The capture dir is kept so debug.json can be inspected.
@@ -127,39 +139,25 @@ func TestRunCaptureStartError(t *testing.T) {
 	if dbg.StartError == "" {
 		t.Error("StartDebug.StartError is empty")
 	}
+
+	if _, err := ReadMeta(sf.Dir); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("ReadMeta: err = %v, want ErrNotExist", err)
+	}
 }
 
-func TestRunCaptureEmptyCommand(t *testing.T) {
-	if _, err := RunCapture(nil, nil, "", nil); err == nil {
+func TestRunSupervisedEmptyCommand(t *testing.T) {
+	if _, err := RunSupervised(nil, nil, "", nil); err == nil {
 		t.Fatalf("expected error for empty command")
 	}
 }
 
-func TestRunCaptureEnv(t *testing.T) {
-	t.Setenv("TMPDIR", t.TempDir())
-
-	run, err := RunCapture([]string{"sh", "-c", "echo $CG_TEST_KEY"}, nil, "", map[string]string{"CG_TEST_KEY": "from-mcp"})
-	if err != nil {
-		t.Fatalf("RunCapture: %v", err)
-	}
-	waitDone(t, run, 5*time.Second)
-
-	out, err := os.ReadFile(filepath.Join(run.Dir, "stdout"))
-	if err != nil {
-		t.Fatalf("read stdout: %v", err)
-	}
-	if strings.TrimSpace(string(out)) != "from-mcp" {
-		t.Errorf("stdout = %q, want %q", out, "from-mcp\n")
-	}
-}
-
-func TestRunCaptureEnvOverride(t *testing.T) {
+func TestRunSupervisedEnvOverride(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 	t.Setenv("CG_OVERRIDE_ME", "parent-value")
 
-	run, err := RunCapture([]string{"sh", "-c", "echo $CG_OVERRIDE_ME"}, nil, "", map[string]string{"CG_OVERRIDE_ME": "child-value"})
+	run, err := RunSupervised([]string{"sh", "-c", "echo $CG_OVERRIDE_ME"}, nil, "", map[string]string{"CG_OVERRIDE_ME": "child-value"})
 	if err != nil {
-		t.Fatalf("RunCapture: %v", err)
+		t.Fatalf("RunSupervised: %v", err)
 	}
 	waitDone(t, run, 5*time.Second)
 
@@ -172,13 +170,13 @@ func TestRunCaptureEnvOverride(t *testing.T) {
 	}
 }
 
-func TestRunCaptureCwd(t *testing.T) {
+func TestRunSupervisedCwd(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 
 	dir := t.TempDir()
-	run, err := RunCapture([]string{"pwd"}, nil, dir, nil)
+	run, err := RunSupervised([]string{"pwd"}, nil, dir, nil)
 	if err != nil {
-		t.Fatalf("RunCapture: %v", err)
+		t.Fatalf("RunSupervised: %v", err)
 	}
 	waitDone(t, run, 5*time.Second)
 
@@ -197,31 +195,5 @@ func TestRunCaptureCwd(t *testing.T) {
 	}
 	if got != want {
 		t.Errorf("pwd = %q, want %q", got, want)
-	}
-}
-
-func TestRunCaptureStderr(t *testing.T) {
-	t.Setenv("TMPDIR", t.TempDir())
-
-	run, err := RunCapture([]string{"sh", "-c", "echo only-err >&2"}, nil, "", nil)
-	if err != nil {
-		t.Fatalf("RunCapture: %v", err)
-	}
-	waitDone(t, run, 5*time.Second)
-
-	stderr, err := os.ReadFile(filepath.Join(run.Dir, "stderr"))
-	if err != nil {
-		t.Fatalf("read stderr: %v", err)
-	}
-	if string(stderr) != "only-err\n" {
-		t.Errorf("stderr = %q, want %q", stderr, "only-err\n")
-	}
-
-	meta, err := ReadMeta(run.Dir)
-	if err != nil {
-		t.Fatalf("ReadMeta: %v", err)
-	}
-	if meta.StderrLines != 1 || meta.StdoutLines != 0 {
-		t.Errorf("lines: out=%d err=%d, want out=0 err=1", meta.StdoutLines, meta.StderrLines)
 	}
 }

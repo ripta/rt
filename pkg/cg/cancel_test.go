@@ -79,9 +79,9 @@ func TestCancelRunInvalidSignal(t *testing.T) {
 func TestCancelRunLive(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 
-	run, err := RunCapture([]string{"sleep", "30"}, nil, "", nil)
+	run, err := RunSupervised([]string{"sleep", "30"}, nil, "", nil)
 	if err != nil {
-		t.Fatalf("RunCapture: %v", err)
+		t.Fatalf("RunSupervised: %v", err)
 	}
 
 	res, err := CancelRun(context.Background(), run.ID, CancelOptions{Signal: "SIGKILL"})

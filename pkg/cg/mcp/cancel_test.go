@@ -18,9 +18,9 @@ import (
 // not outlive the test.
 func startCancelRun(t *testing.T, reg *runRegistry, args ...string) *cg.CaptureRun {
 	t.Helper()
-	run, err := cg.RunCapture(args, nil, "", nil)
+	run, err := cg.RunSupervised(args, nil, "", nil)
 	if err != nil {
-		t.Fatalf("RunCapture: %v", err)
+		t.Fatalf("RunSupervised: %v", err)
 	}
 	reg.Add(run.ID, run.Done)
 	t.Cleanup(func() {

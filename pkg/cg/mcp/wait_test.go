@@ -85,6 +85,37 @@ func TestHandleWaitFastPath(t *testing.T) {
 	}
 }
 
+func TestHandleWaitFastPathSupervised(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+
+	reg := newRunRegistry()
+
+	async := false
+	_, started, err := handleRun(context.Background(), reg, nil, nil, runInput{
+		Command: []string{"sh", "-c", "sleep 0.2; echo fp"},
+		Wait:    &async,
+	})
+	if err != nil {
+		t.Fatalf("handleRun: %v", err)
+	}
+	if !started.Started {
+		t.Fatalf("run not started: %+v", started)
+	}
+
+	// The registry holds the Done channel driven by supervisor-exit EOF, so
+	// the wait takes the in-process path and sees the finished run.
+	_, out, err := handleWait(context.Background(), reg, waitInput{ID: started.ID, TimeoutMs: 5000})
+	if err != nil {
+		t.Fatalf("handleWait: %v", err)
+	}
+	if !out.Finished {
+		t.Errorf("Finished = false, want true")
+	}
+	if out.ExitCode == nil || *out.ExitCode != 0 {
+		t.Errorf("ExitCode = %v, want 0", out.ExitCode)
+	}
+}
+
 func TestHandleWaitSlowPath(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 

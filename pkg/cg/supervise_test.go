@@ -351,21 +351,12 @@ var countLinesTests = []countLinesTest{
 	{Name: "larger than read buffer", Payload: strings.Repeat(strings.Repeat("x", 1023)+"\n", 100), Want: 100},
 }
 
-func TestCountLinesMatchesStreamingCounter(t *testing.T) {
+func TestCountLines(t *testing.T) {
 	for _, test := range countLinesTests {
 		t.Run(test.Name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "payload")
-			f, err := os.Create(path)
-			if err != nil {
-				t.Fatalf("creating payload file: %v", err)
-			}
-
-			counter := &lineCountingWriter{w: f}
-			if _, err := counter.Write([]byte(test.Payload)); err != nil {
-				t.Fatalf("writing payload: %v", err)
-			}
-			if err := f.Close(); err != nil {
-				t.Fatalf("closing payload file: %v", err)
+			if err := os.WriteFile(path, []byte(test.Payload), 0o644); err != nil {
+				t.Fatalf("writing payload file: %v", err)
 			}
 
 			got, err := countLines(path)
@@ -374,9 +365,6 @@ func TestCountLinesMatchesStreamingCounter(t *testing.T) {
 			}
 			if got != test.Want {
 				t.Errorf("countLines = %d, want %d", got, test.Want)
-			}
-			if streamed := counter.n.Load(); got != streamed {
-				t.Errorf("countLines = %d, streaming counter = %d; counts must agree", got, streamed)
 			}
 		})
 	}
