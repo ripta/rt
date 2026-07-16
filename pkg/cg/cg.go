@@ -34,6 +34,7 @@ func NewCommand() *cobra.Command {
 	c.AddCommand(NewCancelCommand())
 	c.AddCommand(NewGrepCommand())
 	c.AddCommand(NewNoteCommand())
+	c.AddCommand(NewSuperviseCommand())
 
 	return c
 }
