@@ -250,6 +250,19 @@ is visible to `cg note ls`.
 A non-zero child exit code is data, not an MCP error: `cg_run` returns
 successfully with `exit_code: N` and the caller decides how to react.
 
+Runs survive `cg mcp` restarts. Each `cg_run` hands the child to a small
+detached supervisor process whose lifetime matches the run's. Restarting the
+server does not kill or lose in-flight runs; a fresh server picks them up from
+the run directory. One caveat: `cg_wait` keeps an in-process fast path only for
+runs the current server started. After a restart, waits on pre-existing runs
+fall back to filesystem polling. Same result, slightly coarser latency.
+
+If a supervisor dies before recording the run's exit — a SIGKILL, say — the
+run never gets its `meta.json`. Such a run lists as `abandoned` in `cg ls` and
+in `cg_list`, which also accepts `state: abandoned` as a filter. `cg prune`
+treats abandoned runs as evictable alongside finished ones. A run whose
+supervisor still holds the run lock is live and is never pruned.
+
 `cg_run` checks each command against an approval matcher before running it. The
 default mode prompts for unmatched commands when the client supports elicitation,
 and otherwise fails closed; `cg mcp --blindly-allow` skips the gate entirely.
