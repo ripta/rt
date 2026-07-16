@@ -84,6 +84,87 @@ func waitStdoutContains(t *testing.T, dir, s string, timeout time.Duration) {
 	t.Fatalf("captured stdout never contained %q", s)
 }
 
+// spawnPoolMain is the body of the spawn-pool TestMain dispatch, the pool
+// analogue of spawnRunMain: it starts a supervised pool of one command
+// repeated three times at parallelism 1, reports the pool ID on stdout, and
+// blocks until killed. That shape is what the restart test needs: while the
+// first run blocks, the other two stay pending.
+func spawnPoolMain(args []string) int {
+	pc := cg.PoolCommand{Argv: args}
+	if resolved, _ := cg.ResolveCommand(args, ""); resolved != nil {
+		pc.Resolved = resolved.Resolved
+		pc.Canonical = resolved.Canonical
+	}
+
+	pool, err := cg.PoolSupervised(&cg.PoolSpec{
+		Commands:    []cg.PoolCommand{pc},
+		Repeat:      3,
+		Parallelism: 1,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "PoolSupervised: %v\n", err)
+		return 1
+	}
+
+	fmt.Println(pool.ID)
+	select {}
+}
+
+// startServerPool launches the spawn-pool helper with the given child command
+// and reads back the pool ID. Like startServerRun, the helper inherits this
+// process's environment, so a t.Setenv'd TMPDIR points every process at the
+// same capture root. A cleanup SIGINTs the pool supervisor if the pool is
+// still in flight at test end; SIGINT is the kill-everything protocol signal,
+// so in-flight members die with it.
+func startServerPool(t *testing.T, args ...string) (*exec.Cmd, string, string) {
+	t.Helper()
+
+	server := exec.Command(os.Args[0], append([]string{"spawn-pool"}, args...)...)
+	stdout, err := server.StdoutPipe()
+	if err != nil {
+		t.Fatalf("creating helper stdout pipe: %v", err)
+	}
+	server.Stderr = os.Stderr
+
+	if err := server.Start(); err != nil {
+		t.Fatalf("starting spawn-pool helper: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = server.Process.Kill()
+		_ = server.Wait()
+	})
+
+	line, err := bufio.NewReader(stdout).ReadString('\n')
+	if err != nil {
+		t.Fatalf("reading pool ID from helper: %v", err)
+	}
+	id := strings.TrimSpace(line)
+	dir := filepath.Join(cg.CaptureRoot(), id)
+
+	t.Cleanup(func() {
+		if pid, perr := cg.ReadPidFile(dir); perr == nil {
+			_ = syscall.Kill(pid, syscall.SIGINT)
+		}
+	})
+
+	return server, id, dir
+}
+
+// waitPoolRunning polls the pool manifest until run index i is running,
+// failing the test on timeout.
+func waitPoolRunning(t *testing.T, dir string, i int, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		m, err := cg.ReadPoolManifest(dir)
+		if err == nil && i < len(m.Runs) && m.Runs[i].Status == cg.PoolRunRunning {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("pool run %d never reached running", i)
+}
+
 // killServer SIGKILLs the spawn-run helper and reaps it, simulating an MCP
 // host tearing down the server mid-run.
 func killServer(t *testing.T, server *exec.Cmd) {
@@ -223,5 +304,79 @@ func TestRestartToleranceCancel(t *testing.T) {
 	}
 	if m.Signal == nil || *m.Signal != int(syscall.SIGTERM) {
 		t.Errorf("meta Signal = %v, want %d", m.Signal, int(syscall.SIGTERM))
+	}
+}
+
+func TestRestartTolerancePool(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+
+	release := filepath.Join(os.TempDir(), "release")
+	script := fmt.Sprintf(`while [ ! -e %s ]; do sleep 0.05; done`, release)
+	server, id, dir := startServerPool(t, "sh", "-c", script)
+
+	waitPoolRunning(t, dir, 0, 5*time.Second)
+	killServer(t, server)
+
+	// The detached supervisor owns scheduling: after the server's death the
+	// pool must still be live, with the first run in flight and the rest
+	// pending, not abandoned.
+	m, err := cg.ReadPoolManifest(dir)
+	if err != nil {
+		t.Fatalf("ReadPoolManifest: %v", err)
+	}
+	if len(m.Runs) != 3 {
+		t.Fatalf("len(Runs) = %d, want 3", len(m.Runs))
+	}
+	for i := 1; i < len(m.Runs); i++ {
+		if m.Runs[i].Status != cg.PoolRunPending {
+			t.Errorf("Runs[%d].Status = %q, want pending", i, m.Runs[i].Status)
+		}
+	}
+	if cg.RunLockReleased(dir) {
+		t.Fatalf("pool lock released after server death, want held by the supervisor")
+	}
+
+	if err := os.WriteFile(release, nil, 0o644); err != nil {
+		t.Fatalf("writing release file: %v", err)
+	}
+
+	// A fresh server has an empty registry, so the pool wait must take the
+	// manifest-polling fallback. The wait itself observes the pending runs
+	// getting scheduled and the pool finishing.
+	reg := newRunRegistry()
+
+	_, out, err := handleWait(context.Background(), reg, waitInput{ID: id, TimeoutMs: 10000})
+	if err != nil {
+		t.Fatalf("handleWait: %v", err)
+	}
+	if !out.Finished {
+		t.Fatalf("Finished = false, want true after the release file lands")
+	}
+	if out.Total != 3 || out.Succeeded != 3 {
+		t.Errorf("Total = %d, Succeeded = %d, want 3 and 3", out.Total, out.Succeeded)
+	}
+	if len(out.Runs) != 3 {
+		t.Fatalf("len(Runs) = %d, want 3", len(out.Runs))
+	}
+	for i, r := range out.Runs {
+		if r.RunID == "" {
+			t.Errorf("Runs[%d].RunID is empty, want a member run ID", i)
+		}
+		if r.Status != cg.PoolRunFinished {
+			t.Errorf("Runs[%d].Status = %q, want finished", i, r.Status)
+		}
+		if r.ExitCode == nil || *r.ExitCode != 0 {
+			t.Errorf("Runs[%d].ExitCode = %v, want 0", i, r.ExitCode)
+		}
+	}
+
+	// Together with the pending check above, a completed manifest proves the
+	// last two runs were scheduled after the server died.
+	m, err = cg.ReadPoolManifest(dir)
+	if err != nil {
+		t.Fatalf("ReadPoolManifest after wait: %v", err)
+	}
+	if m.FinishedAt == nil {
+		t.Errorf("FinishedAt = nil, want set after the pool drains")
 	}
 }

@@ -21,10 +21,14 @@ func TestMain(m *testing.M) {
 		}
 	}
 
-	// spawn-run plays a doomed MCP server for the restart-tolerance tests: it
-	// starts a supervised run and blocks until the test kills it.
+	// spawn-run and spawn-pool play a doomed MCP server for the
+	// restart-tolerance tests: each starts supervised work and blocks until the
+	// test kills it.
 	if len(os.Args) > 1 && os.Args[1] == "spawn-run" {
 		os.Exit(spawnRunMain(os.Args[2:]))
+	}
+	if len(os.Args) > 1 && os.Args[1] == "spawn-pool" {
+		os.Exit(spawnPoolMain(os.Args[2:]))
 	}
 
 	os.Exit(m.Run())
