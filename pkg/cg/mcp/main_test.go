@@ -17,6 +17,12 @@ func TestMain(m *testing.M) {
 		os.Exit(cgMain())
 	}
 
+	// spawn-run plays a doomed MCP server for the restart-tolerance tests: it
+	// starts a supervised run and blocks until the test kills it.
+	if len(os.Args) > 1 && os.Args[1] == "spawn-run" {
+		os.Exit(spawnRunMain(os.Args[2:]))
+	}
+
 	os.Exit(m.Run())
 }
 
