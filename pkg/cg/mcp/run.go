@@ -76,7 +76,7 @@ func handleRun(ctx context.Context, reg *runRegistry, g *gate, el elicitor, in r
 
 	resolved, _ := cg.ResolveCommand(in.Command, in.Cwd)
 
-	warning, err := g.check(ctx, in, resolved, el)
+	warning, err := g.check(ctx, "cg_run", in, resolved, el)
 	if err != nil {
 		return nil, runOutput{}, err
 	}

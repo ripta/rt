@@ -32,8 +32,9 @@ type gate struct {
 // check evaluates the command against the gate. It returns a nil error to
 // permit execution or a refusal error to block it. The srting return is a
 // best-effort persistence diagnostic to surface alongside a permitted run,
-// empty when there is nothing to report.
-func (g *gate) check(ctx context.Context, in runInput, resolved *cg.Resolution, el elicitor) (string, error) {
+// empty when there is nothing to report. tool names the calling MCP tool in
+// refusal messages.
+func (g *gate) check(ctx context.Context, tool string, in runInput, resolved *cg.Resolution, el elicitor) (string, error) {
 	if g == nil || g.blindlyAllow {
 		return "", nil
 	}
@@ -44,14 +45,14 @@ func (g *gate) check(ctx context.Context, in runInput, resolved *cg.Resolution, 
 	case approve.DecisionRun:
 		if res.Rule != nil {
 			if bad := res.Rule.DisallowedEnvs(in.Env); len(bad) > 0 {
-				return "", fmt.Errorf("cg_run refused: env override sets %s, which the matching allow rule does not permit; list them under permit_unsafe_envs to allow", strings.Join(bad, ", "))
+				return "", fmt.Errorf("%s refused: env override sets %s, which the matching allow rule does not permit; list them under permit_unsafe_envs to allow", tool, strings.Join(bad, ", "))
 			}
 		}
 		return "", nil
 	case approve.DecisionRefuse:
-		return "", refusalError(res)
+		return "", refusalError(tool, res)
 	default:
-		return g.promptOrFailClosed(ctx, in, resolved, el)
+		return g.promptOrFailClosed(ctx, tool, in, resolved, el)
 	}
 }
 
@@ -61,36 +62,36 @@ func (g *gate) check(ctx context.Context, in runInput, resolved *cg.Resolution, 
 // command has no rule to carry a permit_unsafe_envs exemption. With no
 // elicitor the gate fails closed; otherwise it prompts for approval. resolved
 // carries the canonical executable path the prompt pre-fills as a strict rule.
-func (g *gate) promptOrFailClosed(ctx context.Context, in runInput, resolved *cg.Resolution, el elicitor) (string, error) {
+func (g *gate) promptOrFailClosed(ctx context.Context, tool string, in runInput, resolved *cg.Resolution, el elicitor) (string, error) {
 	if bad := (&approve.Rule{}).DisallowedEnvs(in.Env); len(bad) > 0 {
-		return "", fmt.Errorf("cg_run refused: env override sets %s, which a prompted command cannot permit; add an allow rule with permit_unsafe_envs to %s", strings.Join(bad, ", "), g.store.Project.Path)
+		return "", fmt.Errorf("%s refused: env override sets %s, which a prompted command cannot permit; add an allow rule with permit_unsafe_envs to %s", tool, strings.Join(bad, ", "), g.store.Project.Path)
 	}
 	if el == nil {
-		return "", g.failClosedError()
+		return "", g.failClosedError(tool)
 	}
 
-	return g.prompt(ctx, in, resolved, el)
+	return g.prompt(ctx, tool, in, resolved, el)
 }
 
 // refusalError builds the error for a deny or restrict match, naming the rule
 // kind and appending the rule's message when set so the agent sees why the
 // command was blocked.
-func refusalError(res approve.MatchResult) error {
+func refusalError(tool string, res approve.MatchResult) error {
 	kind := "deny"
 	if res.Restricted {
 		kind = "restrict"
 	}
 	if res.Rule != nil && res.Rule.Message != "" {
-		return fmt.Errorf("cg_run refused: command matches a %s rule: %s", kind, res.Rule.Message)
+		return fmt.Errorf("%s refused: command matches a %s rule: %s", tool, kind, res.Rule.Message)
 	}
-	return fmt.Errorf("cg_run refused: command matches a %s rule", kind)
+	return fmt.Errorf("%s refused: command matches a %s rule", tool, kind)
 }
 
 // failClosedError builds the error for a command that matched neither allow
 // nor deny when no interactive prompt is available. The message points at the
 // ways to permit the command.
-func (g *gate) failClosedError() error {
-	return fmt.Errorf("cg_run refused: no rule matched and the client cannot prompt for approval; add an allow rule to %s or start cg mcp with --blindly-allow", g.store.Project.Path)
+func (g *gate) failClosedError(tool string) error {
+	return fmt.Errorf("%s refused: no rule matched and the client cannot prompt for approval; add an allow rule to %s or start cg mcp with --blindly-allow", tool, g.store.Project.Path)
 }
 
 // elicitationAvailable reports whether the connected client advertised the

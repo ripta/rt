@@ -143,8 +143,10 @@ func RunSupervised(args []string, opts SuperviseOptions) (*CaptureRun, error) {
 
 // sendSpec writes the spawn spec to the supervisor's stdin, closes it, and
 // decodes the single ack line from the status pipe. An EOF or decode error
-// means the supervisor died before acking.
-func sendSpec(stdin io.WriteCloser, stdout io.Reader, spec *SuperviseSpec) (SuperviseAck, error) {
+// means the supervisor died before acking. spec is a *SuperviseSpec for run
+// supervisors and a *PoolSpec for pool supervisors; both speak the same
+// spec-then-ack protocol.
+func sendSpec(stdin io.WriteCloser, stdout io.Reader, spec any) (SuperviseAck, error) {
 	var ack SuperviseAck
 
 	data, err := json.Marshal(spec)

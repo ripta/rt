@@ -65,6 +65,7 @@ func newServer(v string, startedAt time.Time, g *gate) *mcpsdk.Server {
 	s := mcpsdk.NewServer(&mcpsdk.Implementation{Name: "cg", Version: v}, nil)
 	reg := newRunRegistry()
 	registerRun(s, reg, g)
+	registerRunMany(s, reg, g)
 	registerList(s)
 	registerMeta(s)
 	registerWait(s, reg)

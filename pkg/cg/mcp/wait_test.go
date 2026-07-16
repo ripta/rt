@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -158,5 +159,139 @@ func TestHandleWaitTimeout(t *testing.T) {
 	}
 	if out.ExitCode != nil {
 		t.Errorf("ExitCode = %v, want nil on timeout", out.ExitCode)
+	}
+}
+
+// seedPoolDir writes a pool directory with the given manifest, standing in for
+// a pool started by another process.
+func seedPoolDir(t *testing.T, id string, m *cg.PoolManifest) string {
+	t.Helper()
+
+	dir := cg.CaptureRoot() + "/" + id
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := cg.WritePoolManifest(dir, m); err != nil {
+		t.Fatalf("WritePoolManifest: %v", err)
+	}
+	return dir
+}
+
+// runningPoolManifest builds an in-flight manifest with one running member.
+func runningPoolManifest(id string) *cg.PoolManifest {
+	return &cg.PoolManifest{
+		ID:       id,
+		Commands: [][]string{{"echo", "member"}},
+		Runs:     []cg.PoolRunRecord{{Command: 0, RunID: "BBBBBB", Status: cg.PoolRunRunning}},
+	}
+}
+
+// finishPoolManifest marks the manifest's single member finished with exit 0
+// and stamps finished_at.
+func finishPoolManifest(m *cg.PoolManifest) {
+	exit := 0
+	m.Runs[0].Status = cg.PoolRunFinished
+	m.Runs[0].ExitCode = &exit
+	now := time.Now().UTC()
+	m.FinishedAt = &now
+}
+
+func TestHandleWaitPoolAlreadyFinished(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+
+	m := runningPoolManifest("AAAAAA")
+	finishPoolManifest(m)
+	seedPoolDir(t, "AAAAAA", m)
+
+	_, out, err := handleWait(context.Background(), newRunRegistry(), waitInput{ID: "AAAAAA"})
+	if err != nil {
+		t.Fatalf("handleWait: %v", err)
+	}
+	if !out.Finished {
+		t.Errorf("Finished = false, want true")
+	}
+	if out.Total != 1 || out.Succeeded != 1 {
+		t.Errorf("counts = %+v, want 1/1 (total/succeeded)", out.poolSummary)
+	}
+}
+
+func TestHandleWaitPoolFastPath(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+
+	m := runningPoolManifest("AAAAAA")
+	dir := seedPoolDir(t, "AAAAAA", m)
+
+	reg := newRunRegistry()
+	done := make(chan struct{})
+	reg.Add("AAAAAA", done)
+
+	// Finish the manifest and close Done as the pool supervisor's exit would.
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		finishPoolManifest(m)
+		if err := cg.WritePoolManifest(dir, m); err != nil {
+			t.Errorf("WritePoolManifest: %v", err)
+		}
+		close(done)
+	}()
+
+	start := time.Now()
+	_, out, err := handleWait(context.Background(), reg, waitInput{ID: "AAAAAA", TimeoutMs: 5000})
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatalf("handleWait: %v", err)
+	}
+	if !out.Finished {
+		t.Errorf("Finished = false, want true")
+	}
+	if out.Total != 1 || out.Succeeded != 1 {
+		t.Errorf("counts = %+v, want 1/1 (total/succeeded)", out.poolSummary)
+	}
+	if elapsed >= waitPollInterval {
+		t.Errorf("elapsed = %v, want < %v (fast path should beat ticker)", elapsed, waitPollInterval)
+	}
+}
+
+func TestHandleWaitPoolSlowPath(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+
+	m := runningPoolManifest("AAAAAA")
+	dir := seedPoolDir(t, "AAAAAA", m)
+
+	go func() {
+		time.Sleep(250 * time.Millisecond)
+		finishPoolManifest(m)
+		_ = cg.WritePoolManifest(dir, m)
+	}()
+
+	_, out, err := handleWait(context.Background(), newRunRegistry(), waitInput{ID: "AAAAAA", TimeoutMs: 5000})
+	if err != nil {
+		t.Fatalf("handleWait: %v", err)
+	}
+	if !out.Finished {
+		t.Errorf("Finished = false, want true")
+	}
+	if out.Succeeded != 1 {
+		t.Errorf("Succeeded = %d, want 1", out.Succeeded)
+	}
+}
+
+func TestHandleWaitPoolTimeoutPartialSummary(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+
+	seedPoolDir(t, "AAAAAA", runningPoolManifest("AAAAAA"))
+
+	_, out, err := handleWait(context.Background(), newRunRegistry(), waitInput{ID: "AAAAAA", TimeoutMs: 100})
+	if err != nil {
+		t.Fatalf("handleWait: %v", err)
+	}
+	if out.Finished {
+		t.Errorf("Finished = true, want false on timeout")
+	}
+	if out.Total != 1 || out.Running != 1 {
+		t.Errorf("counts = %+v, want one running record in the partial summary", out.poolSummary)
+	}
+	if len(out.Runs) != 1 || out.Runs[0].Status != cg.PoolRunRunning {
+		t.Errorf("Runs = %+v, want the running member visible", out.Runs)
 	}
 }

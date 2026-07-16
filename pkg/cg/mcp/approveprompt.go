@@ -38,14 +38,14 @@ const (
 //
 // A non-empty first return is a best-effort persistence diagnostic the caller
 // surfaces in the tool result; the command was still approved and runs.
-func (g *gate) prompt(ctx context.Context, in runInput, resolved *cg.Resolution, el elicitor) (string, error) {
+func (g *gate) prompt(ctx context.Context, tool string, in runInput, resolved *cg.Resolution, el elicitor) (string, error) {
 	suggestion := approve.SuggestPrefix(in.Command, resolved.ExecPath())
 	res, err := el.Elicit(ctx, &mcpsdk.ElicitParams{
 		Message:         approvalMessage(in),
 		RequestedSchema: approvalSchema(suggestion, g.store.Project.Path),
 	})
 	if err != nil {
-		return "", fmt.Errorf("cg_run refused: approval prompt failed: %w", err)
+		return "", fmt.Errorf("%s refused: approval prompt failed: %w", tool, err)
 	}
 	// A declined or cancelled prompt refuses the command this once and persists
 	// nothing. Elicitation only returns form content on accept, so the remember
@@ -55,13 +55,13 @@ func (g *gate) prompt(ctx context.Context, in runInput, resolved *cg.Resolution,
 	// already carries Accept and Decline buttons, and duplicating that choice
 	// inside the form is clunky.
 	if res.Action != actionAccept {
-		return "", fmt.Errorf("cg_run refused: command was declined at the approval prompt")
+		return "", fmt.Errorf("%s refused: command was declined at the approval prompt", tool)
 	}
 
 	if remember(res.Content) {
 		tokens, err := parseRuleField(res.Content, suggestion)
 		if err != nil {
-			return "", fmt.Errorf("cg_run refused: %w", err)
+			return "", fmt.Errorf("%s refused: %w", tool, err)
 		}
 		return g.persistRemember(ctx, tokens, el), nil
 	}
