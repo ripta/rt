@@ -16,6 +16,22 @@ const LockFilename = "lock"
 // errRunLockHeld reports that another supervisor already owns the run directory.
 var errRunLockHeld = errors.New("run lock held by another supervisor")
 
+// RunLockReleased reports whether dir's run lock exists and is not held. A released
+// lock with no meta.json marks an abandoned run: the supervisor died before writing
+// the run's bookkeeping. A missing lock file returns false, so shell-path runs and
+// pre-supervisor run dirs keep their existing behavior. The probe takes a shared
+// lock so concurrent probes do not conflict with each other; it still conflicts with
+// the supervisor's exclusive lock.
+func RunLockReleased(dir string) bool {
+	f, err := os.Open(filepath.Join(dir, LockFilename))
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+
+	return syscall.Flock(int(f.Fd()), syscall.LOCK_SH|syscall.LOCK_NB) == nil
+}
+
 // acquireRunLock creates dir/lock if needed and takes a non-blocking exclusive flock
 // on it. The caller must keep the returned file open for as long as the lock must be
 // held; closing it releases the lock. A held lock means another supervisor owns the

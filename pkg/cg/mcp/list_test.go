@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
 	"time"
 
@@ -31,6 +32,32 @@ func seedRunDir(t *testing.T, id string, meta *cg.Meta) string {
 		}
 	}
 	return dir
+}
+
+// seedLockFile creates dir/lock without holding the flock, matching a run whose
+// supervisor has died.
+func seedLockFile(t *testing.T, dir string) {
+	t.Helper()
+	f, err := os.Create(filepath.Join(dir, cg.LockFilename))
+	if err != nil {
+		t.Fatalf("creating lock file: %v", err)
+	}
+	f.Close()
+}
+
+// holdRunLock takes the exclusive flock a live supervisor would hold and releases
+// it on test cleanup.
+func holdRunLock(t *testing.T, dir string) {
+	t.Helper()
+	f, err := os.OpenFile(filepath.Join(dir, cg.LockFilename), os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		t.Fatalf("opening lock file: %v", err)
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		f.Close()
+		t.Fatalf("holding run lock: %v", err)
+	}
+	t.Cleanup(func() { f.Close() })
 }
 
 func TestHandleListEmpty(t *testing.T) {
@@ -203,6 +230,87 @@ func TestHandleListRunningReadsStartInfo(t *testing.T) {
 	}
 	if r.StartedAt == nil || !r.StartedAt.Equal(started) {
 		t.Errorf("running StartedAt = %v, want %v", r.StartedAt, started)
+	}
+}
+
+func TestHandleListStateAbandoned(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	if err := os.MkdirAll(cg.CaptureRoot(), 0o755); err != nil {
+		t.Fatalf("mkdir root: %v", err)
+	}
+
+	seedRunDir(t, "AAAAAA", &cg.Meta{RunInfo: cg.RunInfo{ID: "AAAAAA", Command: []string{"echo", "done"}}})
+
+	// In flight on the shell path: no meta.json and no lock file.
+	seedRunDir(t, "DDDDDD", nil)
+
+	// Abandoned: the lock file exists but nothing holds it, and start.json
+	// survives from before the supervisor died.
+	dirAband := seedRunDir(t, "CCCCCC", nil)
+	seedLockFile(t, dirAband)
+	started := time.Now().Add(-5 * time.Minute).UTC()
+	if err := cg.WriteStartInfo(dirAband, &cg.StartInfo{RunInfo: cg.RunInfo{Command: []string{"sleep", "600"}, StartedAt: started}}); err != nil {
+		t.Fatalf("WriteStartInfo: %v", err)
+	}
+
+	_, out, err := handleList(context.Background(), nil, listInput{State: "abandoned"})
+	if err != nil {
+		t.Fatalf("handleList: %v", err)
+	}
+	if len(out.Runs) != 1 {
+		t.Fatalf("expected 1 abandoned run, got %d: %+v", len(out.Runs), out.Runs)
+	}
+	r := out.Runs[0]
+	if r.ID != "CCCCCC" || r.State != "abandoned" {
+		t.Errorf("Runs[0] = %+v, want CCCCCC/abandoned", r)
+	}
+	if want := []string{"sleep", "600"}; len(r.Command) != 2 || r.Command[0] != want[0] || r.Command[1] != want[1] {
+		t.Errorf("abandoned Command = %v, want %v", r.Command, want)
+	}
+	if r.StartedAt == nil || !r.StartedAt.Equal(started) {
+		t.Errorf("abandoned StartedAt = %v, want %v", r.StartedAt, started)
+	}
+
+	_, out, err = handleList(context.Background(), nil, listInput{State: "running"})
+	if err != nil {
+		t.Fatalf("handleList running: %v", err)
+	}
+	if len(out.Runs) != 1 || out.Runs[0].ID != "DDDDDD" {
+		t.Fatalf("running filter = %+v, want just DDDDDD", out.Runs)
+	}
+
+	_, out, err = handleList(context.Background(), nil, listInput{State: "all"})
+	if err != nil {
+		t.Fatalf("handleList all: %v", err)
+	}
+	if len(out.Runs) != 3 {
+		t.Errorf("all filter returned %d runs, want 3: %+v", len(out.Runs), out.Runs)
+	}
+}
+
+func TestHandleListHeldLockListsRunning(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	if err := os.MkdirAll(cg.CaptureRoot(), 0o755); err != nil {
+		t.Fatalf("mkdir root: %v", err)
+	}
+
+	dir := seedRunDir(t, "CCCCCC", nil)
+	holdRunLock(t, dir)
+
+	_, out, err := handleList(context.Background(), nil, listInput{State: "abandoned"})
+	if err != nil {
+		t.Fatalf("handleList abandoned: %v", err)
+	}
+	if len(out.Runs) != 0 {
+		t.Errorf("held lock listed as abandoned: %+v", out.Runs)
+	}
+
+	_, out, err = handleList(context.Background(), nil, listInput{State: "running"})
+	if err != nil {
+		t.Fatalf("handleList running: %v", err)
+	}
+	if len(out.Runs) != 1 || out.Runs[0].ID != "CCCCCC" || out.Runs[0].State != "running" {
+		t.Errorf("running filter = %+v, want CCCCCC/running", out.Runs)
 	}
 }
 

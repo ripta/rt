@@ -183,11 +183,12 @@ func NewLsCommand() *cobra.Command {
 }
 
 type lsRow struct {
-	id    string
-	mtime time.Time
-	meta  *Meta
-	debug *StartDebug
-	start *StartInfo
+	id        string
+	mtime     time.Time
+	meta      *Meta
+	debug     *StartDebug
+	start     *StartInfo
+	abandoned bool
 }
 
 func (opts *lsOptions) run(cmd *cobra.Command, args []string) error {
@@ -220,8 +221,11 @@ func (opts *lsOptions) run(cmd *cobra.Command, args []string) error {
 			row.meta = m
 		} else if d, err := ReadStartDebug(dir); err == nil {
 			row.debug = d
-		} else if s, err := ReadStartInfo(dir); err == nil {
-			row.start = s
+		} else {
+			row.abandoned = RunLockReleased(dir)
+			if s, err := ReadStartInfo(dir); err == nil {
+				row.start = s
+			}
 		}
 		rows = append(rows, row)
 	}
@@ -244,9 +248,9 @@ func (opts *lsOptions) run(cmd *cobra.Command, args []string) error {
 
 // formatLsRow renders one tab-separated ls row: id, status, duration, command.
 // Finished runs read their status and duration from meta.json; failed runs read
-// the command from debug.json; in-flight runs read the command from start.json
-// and show elapsed time measured against now. The caller aligns the columns
-// with a tabwriter.
+// the command from debug.json; in-flight and abandoned runs read the command from
+// start.json and show elapsed time measured against now. The caller aligns the
+// columns with a tabwriter.
 func formatLsRow(r lsRow, now time.Time) string {
 	if r.debug != nil {
 		return fmt.Sprintf("%s\tstart_failed\t?\t%s", r.id, EscapeArgs(r.debug.Command))
@@ -259,9 +263,14 @@ func formatLsRow(r lsRow, now time.Time) string {
 		dur := formatDuration(time.Duration(r.meta.DurationMs) * time.Millisecond)
 		return fmt.Sprintf("%s\t%s\t%s\t%s", r.id, head, dur, EscapeArgs(r.meta.Command))
 	}
+
+	status := "running"
+	if r.abandoned {
+		status = "abandoned"
+	}
 	if r.start != nil {
 		elapsed := formatDuration(now.Sub(r.start.StartedAt))
-		return fmt.Sprintf("%s\trunning\t%s\t%s", r.id, elapsed, EscapeArgs(r.start.Command))
+		return fmt.Sprintf("%s\t%s\t%s\t%s", r.id, status, elapsed, EscapeArgs(r.start.Command))
 	}
-	return fmt.Sprintf("%s\trunning\t?\t?", r.id)
+	return fmt.Sprintf("%s\t%s\t?\t?", r.id, status)
 }

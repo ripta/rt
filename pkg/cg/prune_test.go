@@ -272,6 +272,97 @@ func TestPruneSkipsNonRunEntries(t *testing.T) {
 	}
 }
 
+func TestPruneEvictsAbandonedRuns(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	if err := os.MkdirAll(CaptureRoot(), 0o755); err != nil {
+		t.Fatalf("mkdir root: %v", err)
+	}
+
+	now := time.Now()
+	dirFin := seedRunDir(t, "AAAAAA", &Meta{RunInfo: RunInfo{ID: "AAAAAA", Command: []string{"echo", "a"}}})
+
+	// Abandoned: the lock file exists but nothing holds it.
+	dirAband := seedRunDir(t, "ABANDN", nil)
+	lock, err := acquireRunLock(dirAband)
+	if err != nil {
+		t.Fatalf("acquiring lock: %v", err)
+	}
+	lock.Close()
+
+	// Live supervised run: the lock is held.
+	dirHeld := seedRunDir(t, "DDDDDD", nil)
+	held, err := acquireRunLock(dirHeld)
+	if err != nil {
+		t.Fatalf("holding lock: %v", err)
+	}
+	defer held.Close()
+
+	// Shell-path run: no lock file at all.
+	dirShell := seedRunDir(t, "EEEEEE", nil)
+
+	chtimes(t, dirFin, now)
+	chtimes(t, dirAband, now.Add(-1*time.Hour))
+	chtimes(t, dirHeld, now.Add(-2*time.Hour))
+	chtimes(t, dirShell, now.Add(-3*time.Hour))
+
+	stdout, _, err := runCgSplit("prune", "--keep", "1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if stdout != "ABANDN\n" {
+		t.Errorf("stdout = %q, want %q", stdout, "ABANDN\n")
+	}
+
+	if _, err := os.Stat(dirAband); !os.IsNotExist(err) {
+		t.Errorf("ABANDN still exists: %v", err)
+	}
+	for _, dir := range []string{dirFin, dirHeld, dirShell} {
+		if _, err := os.Stat(dir); err != nil {
+			t.Errorf("%s removed unexpectedly: %v", dir, err)
+		}
+	}
+}
+
+func TestPruneOlderThanEvictsAbandonedRuns(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	if err := os.MkdirAll(CaptureRoot(), 0o755); err != nil {
+		t.Fatalf("mkdir root: %v", err)
+	}
+
+	now := time.Now()
+	dirAband := seedRunDir(t, "ABANDN", nil)
+	lock, err := acquireRunLock(dirAband)
+	if err != nil {
+		t.Fatalf("acquiring lock: %v", err)
+	}
+	lock.Close()
+
+	dirHeld := seedRunDir(t, "DDDDDD", nil)
+	held, err := acquireRunLock(dirHeld)
+	if err != nil {
+		t.Fatalf("holding lock: %v", err)
+	}
+	defer held.Close()
+
+	chtimes(t, dirAband, now.Add(-2*time.Hour))
+	chtimes(t, dirHeld, now.Add(-2*time.Hour))
+
+	stdout, _, err := runCgSplit("prune", "--older-than", "1h")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if stdout != "ABANDN\n" {
+		t.Errorf("stdout = %q, want %q", stdout, "ABANDN\n")
+	}
+
+	if _, err := os.Stat(dirAband); !os.IsNotExist(err) {
+		t.Errorf("ABANDN still exists: %v", err)
+	}
+	if _, err := os.Stat(dirHeld); err != nil {
+		t.Errorf("DDDDDD removed unexpectedly: %v", err)
+	}
+}
+
 func TestPruneMutuallyExclusive(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 	if err := os.MkdirAll(CaptureRoot(), 0o755); err != nil {

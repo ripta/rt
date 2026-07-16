@@ -109,7 +109,13 @@ func PruneRuns(opts PruneOptions) ([]string, error) {
 		}
 		dir := filepath.Join(root, name)
 		if _, err := os.Stat(filepath.Join(dir, MetaFilename)); err != nil {
-			continue
+			// A meta-less dir is evictable only when its run lock exists and is
+			// released: the supervisor died without finishing the run's
+			// bookkeeping. A held lock is a live run; a missing lock file is a
+			// shell-path run with no liveness signal. Both are skipped.
+			if !RunLockReleased(dir) {
+				continue
+			}
 		}
 		info, err := e.Info()
 		if err != nil {

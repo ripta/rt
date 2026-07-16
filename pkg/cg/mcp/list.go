@@ -27,7 +27,7 @@ const (
 // listInput is the argument shape for `cg_list`.
 type listInput struct {
 	Limit int    `json:"limit,omitempty" jsonschema:"maximum number of runs to return; default 20, max 1000"`
-	State string `json:"state,omitempty" jsonschema:"which runs to surface: all|finished|running|failed; default finished"`
+	State string `json:"state,omitempty" jsonschema:"which runs to surface: all|finished|running|failed|abandoned; default finished"`
 }
 
 // listOutput is the result shape for `cg_list`.
@@ -37,9 +37,9 @@ type listOutput struct {
 
 // listRun is a single row in the cg_list response. Only `id` and `state` are
 // guaranteed; the remaining meta-derived fields are populated for finished runs
-// only. In-flight rows carry `command` and `started_at` from start.json, or just
-// `started_at` synthesized from the run dir's mtime when start.json is absent.
-// Failed rows carry `start_error` and `command`.
+// only. In-flight and abandoned rows carry `command` and `started_at` from
+// start.json, or just `started_at` synthesized from the run dir's mtime when
+// start.json is absent. Failed rows carry `start_error` and `command`.
 type listRun struct {
 	ID          string     `json:"id"`
 	State       string     `json:"state"`
@@ -57,7 +57,7 @@ type listRun struct {
 func registerList(s *mcpsdk.Server) {
 	mcpsdk.AddTool(s, &mcpsdk.Tool{
 		Name:        "cg_list",
-		Description: "List recent capture runs, most-recent-first by directory mtime. The `state` input filters to finished (default), running, failed, or all runs. Failed rows include state: \"failed\" and start_error. Running rows carry id, state, command, and started_at from start.json, falling back to the run dir's mtime when start.json is absent.",
+		Description: "List recent capture runs, most-recent-first by directory mtime. The `state` input filters to finished (default), running, failed, abandoned, or all runs. Failed rows include state: \"failed\" and start_error. Running and abandoned rows carry id, state, command, and started_at from start.json, falling back to the run dir's mtime when start.json is absent. An abandoned run is one whose supervisor died before recording the run's exit.",
 	}, handleList)
 }
 
@@ -75,9 +75,9 @@ func handleList(_ context.Context, _ *mcpsdk.CallToolRequest, in listInput) (*mc
 		state = defaultListState
 	}
 	switch state {
-	case listStateAll, stateFinished, stateRunning, stateFailed:
+	case listStateAll, stateFinished, stateRunning, stateFailed, stateAbandoned:
 	default:
-		return nil, listOutput{}, fmt.Errorf("invalid state %q: want all|finished|running|failed", in.State)
+		return nil, listOutput{}, fmt.Errorf("invalid state %q: want all|finished|running|failed|abandoned", in.State)
 	}
 
 	root := cg.CaptureRoot()
@@ -111,7 +111,7 @@ func handleList(_ context.Context, _ *mcpsdk.CallToolRequest, in listInput) (*mc
 			// No meta.json: distinguish a failed run (has debug.json) from one
 			// still in flight (neither file present yet).
 			if dbg, dbgErr := cg.ReadStartDebug(dir); dbgErr == nil {
-				if state == stateRunning || state == stateFinished {
+				if state != listStateAll && state != stateFailed {
 					continue
 				}
 				started := mtime
@@ -127,25 +127,32 @@ func handleList(_ context.Context, _ *mcpsdk.CallToolRequest, in listInput) (*mc
 				})
 				continue
 			}
-			if state == stateFinished || state == stateFailed {
+			// A released run lock with no meta.json means the supervisor died
+			// before recording the run's exit: the run is abandoned, not running.
+			rowState := stateRunning
+			if cg.RunLockReleased(dir) {
+				rowState = stateAbandoned
+			}
+			if state != listStateAll && state != rowState {
 				continue
 			}
+
 			// A running capture writes start.json with its command and precise
 			// start time; fall back to the run dir's mtime when it is absent.
-			running := listRun{ID: name, State: stateRunning}
+			r := listRun{ID: name, State: rowState}
 			if si, siErr := cg.ReadStartInfo(dir); siErr == nil {
 				started := si.StartedAt
-				running.StartedAt = &started
-				running.Command = si.Command
+				r.StartedAt = &started
+				r.Command = si.Command
 			} else {
 				started := mtime
-				running.StartedAt = &started
+				r.StartedAt = &started
 			}
-			rows = append(rows, row{mtime: mtime, run: running})
+			rows = append(rows, row{mtime: mtime, run: r})
 			continue
 		}
 
-		if state == stateRunning || state == stateFailed {
+		if state != listStateAll && state != stateFinished {
 			continue
 		}
 

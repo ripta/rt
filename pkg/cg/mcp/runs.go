@@ -4,9 +4,10 @@ import "sync"
 
 // Run state strings shared by the cg_meta, cg_list, and cg_wait outputs.
 const (
-	stateRunning  = "running"
-	stateFinished = "finished"
-	stateFailed   = "failed"
+	stateRunning   = "running"
+	stateFinished  = "finished"
+	stateFailed    = "failed"
+	stateAbandoned = "abandoned"
 )
 
 // runRegistry tracks the Done channels of capture runs that this MCP server

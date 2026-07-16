@@ -183,6 +183,55 @@ func TestHandlePruneOlderThanDaySuffix(t *testing.T) {
 	}
 }
 
+func TestHandlePruneEvictsAbandonedRuns(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	if err := os.MkdirAll(cg.CaptureRoot(), 0o755); err != nil {
+		t.Fatalf("mkdir root: %v", err)
+	}
+
+	now := time.Now()
+	dirFin := seedRunDir(t, "AAAAAA", &cg.Meta{RunInfo: cg.RunInfo{ID: "AAAAAA", Command: []string{"echo", "a"}}})
+
+	// Abandoned: the lock file exists but nothing holds it.
+	dirAband := seedRunDir(t, "ABANDN", nil)
+	seedLockFile(t, dirAband)
+
+	// Live supervised run: the lock is held.
+	dirHeld := seedRunDir(t, "DDDDDD", nil)
+	holdRunLock(t, dirHeld)
+
+	// Shell-path run: no lock file at all.
+	dirShell := seedRunDir(t, "EEEEEE", nil)
+
+	for dir, when := range map[string]time.Time{
+		dirFin:   now,
+		dirAband: now.Add(-1 * time.Hour),
+		dirHeld:  now.Add(-2 * time.Hour),
+		dirShell: now.Add(-3 * time.Hour),
+	} {
+		if err := os.Chtimes(dir, when, when); err != nil {
+			t.Fatalf("chtimes %s: %v", dir, err)
+		}
+	}
+
+	_, out, err := handlePrune(context.Background(), nil, pruneInput{Keep: intPtr(1)})
+	if err != nil {
+		t.Fatalf("handlePrune: %v", err)
+	}
+	if len(out.Removed) != 1 || out.Removed[0] != "ABANDN" {
+		t.Errorf("Removed = %v, want [ABANDN]", out.Removed)
+	}
+
+	if _, err := os.Stat(dirAband); !os.IsNotExist(err) {
+		t.Errorf("ABANDN still exists: %v", err)
+	}
+	for _, dir := range []string{dirFin, dirHeld, dirShell} {
+		if _, err := os.Stat(dir); err != nil {
+			t.Errorf("%s removed unexpectedly: %v", dir, err)
+		}
+	}
+}
+
 func TestHandlePruneMutuallyExclusive(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 

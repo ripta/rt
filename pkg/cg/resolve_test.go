@@ -263,6 +263,76 @@ func TestFormatLsRowRunningNoStartInfo(t *testing.T) {
 	}
 }
 
+func TestFormatLsRowAbandoned(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now()
+	row := lsRow{
+		id:        "ABANDN",
+		start:     &StartInfo{RunInfo: RunInfo{Command: []string{"sleep", "600"}, StartedAt: now.Add(-90 * time.Second)}},
+		abandoned: true,
+	}
+	got := formatLsRow(row, now)
+	want := "ABANDN\tabandoned\t1m30s\tsleep 600"
+	if got != want {
+		t.Errorf("formatLsRow abandoned = %q, want %q", got, want)
+	}
+
+	got = formatLsRow(lsRow{id: "ABANDN", abandoned: true}, now)
+	want = "ABANDN\tabandoned\t?\t?"
+	if got != want {
+		t.Errorf("formatLsRow abandoned fallback = %q, want %q", got, want)
+	}
+}
+
+func TestLsCommandAbandonedRun(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	root := CaptureRoot()
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatalf("mkdir root: %v", err)
+	}
+
+	// Abandoned: the lock file exists but nothing holds it.
+	dirAband := seedRunDir(t, "ABANDN", nil)
+	lock, err := acquireRunLock(dirAband)
+	if err != nil {
+		t.Fatalf("acquiring lock: %v", err)
+	}
+	lock.Close()
+
+	// Live supervised run: the lock is held.
+	dirHeld := seedRunDir(t, "DDDDDD", nil)
+	held, err := acquireRunLock(dirHeld)
+	if err != nil {
+		t.Fatalf("holding lock: %v", err)
+	}
+	defer held.Close()
+
+	now := time.Now()
+	if err := os.Chtimes(dirAband, now, now); err != nil {
+		t.Fatalf("chtimes abandoned: %v", err)
+	}
+	if err := os.Chtimes(dirHeld, now.Add(-1*time.Hour), now.Add(-1*time.Hour)); err != nil {
+		t.Fatalf("chtimes held: %v", err)
+	}
+
+	stdout, _, err := runCgSplit("ls")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	lines := strings.Split(strings.TrimRight(stdout, "\n"), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("expected 2 lines, got %d: %q", len(lines), stdout)
+	}
+	if !strings.HasPrefix(lines[0], "ABANDN") || !strings.Contains(lines[0], "abandoned") {
+		t.Errorf("line 0 = %q, want ABANDN abandoned", lines[0])
+	}
+	if !strings.HasPrefix(lines[1], "DDDDDD") || !strings.Contains(lines[1], "running") {
+		t.Errorf("line 1 = %q, want DDDDDD running", lines[1])
+	}
+}
+
 func TestLsCommandLimit(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 	root := CaptureRoot()
