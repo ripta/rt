@@ -390,7 +390,7 @@ func TestSuperviseCommandWiring(t *testing.T) {
 
 	var out bytes.Buffer
 	root := NewCommand()
-	root.SetArgs([]string{"supervise", cap.Dir})
+	root.SetArgs([]string{"supervise-run", cap.Dir})
 	root.SetIn(bytes.NewReader(spec))
 	root.SetOut(&out)
 	if err := root.Execute(); err != nil {
@@ -411,14 +411,17 @@ func TestSuperviseCommandWiring(t *testing.T) {
 
 	found := false
 	for _, sub := range root.Commands() {
-		if sub.Name() == "supervise" {
+		if sub.Name() == "supervise-run" {
 			found = true
 			if !sub.Hidden {
-				t.Error("supervise command is not hidden")
+				t.Error("supervise-run command is not hidden")
+			}
+			if !sub.HasAlias("supervise") {
+				t.Error("supervise-run command is missing the supervise alias")
 			}
 		}
 	}
 	if !found {
-		t.Error("supervise command not registered")
+		t.Error("supervise-run command not registered")
 	}
 }

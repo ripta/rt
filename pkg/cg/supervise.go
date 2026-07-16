@@ -19,13 +19,15 @@ import (
 // Argv is the full original command; index 0 stays the child's argv[0]. Resolved and
 // Canonical carry the executable identity the approval gate matched, so the supervisor
 // execs the same file without a fresh PATH lookup. Env holds caller-supplied overrides;
-// it rides the pipe and never appears in argv or on disk.
+// it rides the pipe and never appears in argv or on disk. Pool names the pool this run
+// is a member of, so the run's on-disk records carry it.
 type SuperviseSpec struct {
 	Argv      []string          `json:"argv"`
 	Resolved  string            `json:"resolved,omitempty"`
 	Canonical string            `json:"canonical,omitempty"`
 	Cwd       string            `json:"cwd,omitempty"`
 	Env       map[string]string `json:"env,omitempty"`
+	Pool      string            `json:"pool,omitempty"`
 }
 
 // resolution reconstructs the Resolution the server computed, for ExecPath and
@@ -44,14 +46,16 @@ type SuperviseAck struct {
 	StartError string `json:"start_error,omitempty"`
 }
 
-// NewSuperviseCommand creates the hidden `cg supervise` subcommand, the re-exec entry
-// point the MCP server spawns once per run. Not for human use.
-func NewSuperviseCommand() *cobra.Command {
+// NewSuperviseRunCommand creates the hidden `cg supervise-run` subcommand, the re-exec
+// entry point the MCP server spawns once per run. Not for human use. The `supervise`
+// alias keeps a still-running old server working after the binary on disk is replaced.
+func NewSuperviseRunCommand() *cobra.Command {
 	return &cobra.Command{
-		Use:    "supervise <run-dir>",
-		Short:  "Supervise a capture run (internal; spawned by cg mcp)",
-		Hidden: true,
-		Args:   cobra.ExactArgs(1),
+		Use:     "supervise-run <run-dir>",
+		Aliases: []string{"supervise"},
+		Short:   "Supervise a capture run (internal; spawned by cg mcp)",
+		Hidden:  true,
+		Args:    cobra.ExactArgs(1),
 
 		SilenceErrors: true,
 		SilenceUsage:  true,
@@ -135,7 +139,7 @@ func superviseRun(dir string, in io.Reader, out io.Writer) error {
 		if cgc != nil {
 			cgc.close()
 		}
-		info := RunInfo{ID: id, Command: spec.Argv, Cwd: cwd, StartedAt: start.UTC()}
+		info := RunInfo{ID: id, Command: spec.Argv, Cwd: cwd, Pool: spec.Pool, StartedAt: start.UTC()}
 		_ = WriteStartDebug(dir, buildStartDebug(info, spec.Env, resolved, err))
 		err = fmt.Errorf("starting child: %w", err)
 		writeAck(out, SuperviseAck{StartError: err.Error()})
@@ -143,7 +147,7 @@ func superviseRun(dir string, in io.Reader, out io.Writer) error {
 	}
 
 	_ = WritePidFile(dir, child.Process.Pid)
-	_ = WriteStartInfo(dir, &StartInfo{RunInfo: RunInfo{ID: id, Command: spec.Argv, Cwd: cwd, StartedAt: start.UTC()}})
+	_ = WriteStartInfo(dir, &StartInfo{RunInfo: RunInfo{ID: id, Command: spec.Argv, Cwd: cwd, Pool: spec.Pool, StartedAt: start.UTC()}})
 
 	writeAck(out, SuperviseAck{Started: true, Pid: child.Process.Pid})
 
@@ -161,7 +165,7 @@ func superviseRun(dir string, in io.Reader, out io.Writer) error {
 	}
 
 	meta := &Meta{
-		RunInfo:     RunInfo{ID: id, Command: spec.Argv, Cwd: cwd, StartedAt: start.UTC()},
+		RunInfo:     RunInfo{ID: id, Command: spec.Argv, Cwd: cwd, Pool: spec.Pool, StartedAt: start.UTC()},
 		FinishedAt:  start.Add(elapsed).UTC(),
 		DurationMs:  elapsed.Milliseconds(),
 		ExitCode:    ExitCodeFromError(waitErr),

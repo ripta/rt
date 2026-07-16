@@ -21,7 +21,7 @@ func waitDone(t *testing.T, run *CaptureRun, d time.Duration) {
 func TestRunSupervisedEcho(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 
-	run, err := RunSupervised([]string{"echo", "hello"}, nil, "", nil)
+	run, err := RunSupervised([]string{"echo", "hello"}, SuperviseOptions{})
 	if err != nil {
 		t.Fatalf("RunSupervised: %v", err)
 	}
@@ -71,7 +71,7 @@ func TestRunSupervisedEcho(t *testing.T) {
 func TestRunSupervisedStartInfo(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 
-	run, err := RunSupervised([]string{"sh", "-c", "sleep 0.3; echo done"}, nil, "", nil)
+	run, err := RunSupervised([]string{"sh", "-c", "sleep 0.3; echo done"}, SuperviseOptions{})
 	if err != nil {
 		t.Fatalf("RunSupervised: %v", err)
 	}
@@ -100,7 +100,7 @@ func TestRunSupervisedStartInfo(t *testing.T) {
 func TestRunSupervisedNonZeroExit(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 
-	run, err := RunSupervised([]string{"sh", "-c", "exit 3"}, nil, "", nil)
+	run, err := RunSupervised([]string{"sh", "-c", "exit 3"}, SuperviseOptions{})
 	if err != nil {
 		t.Fatalf("RunSupervised: %v", err)
 	}
@@ -118,7 +118,7 @@ func TestRunSupervisedNonZeroExit(t *testing.T) {
 func TestRunSupervisedStartError(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 
-	_, err := RunSupervised([]string{"this-binary-does-not-exist-zzzz"}, nil, "", nil)
+	_, err := RunSupervised([]string{"this-binary-does-not-exist-zzzz"}, SuperviseOptions{})
 	if err == nil {
 		t.Fatalf("RunSupervised: expected error, got nil")
 	}
@@ -146,7 +146,7 @@ func TestRunSupervisedStartError(t *testing.T) {
 }
 
 func TestRunSupervisedEmptyCommand(t *testing.T) {
-	if _, err := RunSupervised(nil, nil, "", nil); err == nil {
+	if _, err := RunSupervised(nil, SuperviseOptions{}); err == nil {
 		t.Fatalf("expected error for empty command")
 	}
 }
@@ -155,7 +155,7 @@ func TestRunSupervisedEnvOverride(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 	t.Setenv("CG_OVERRIDE_ME", "parent-value")
 
-	run, err := RunSupervised([]string{"sh", "-c", "echo $CG_OVERRIDE_ME"}, nil, "", map[string]string{"CG_OVERRIDE_ME": "child-value"})
+	run, err := RunSupervised([]string{"sh", "-c", "echo $CG_OVERRIDE_ME"}, SuperviseOptions{Env: map[string]string{"CG_OVERRIDE_ME": "child-value"}})
 	if err != nil {
 		t.Fatalf("RunSupervised: %v", err)
 	}
@@ -174,7 +174,7 @@ func TestRunSupervisedCwd(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 
 	dir := t.TempDir()
-	run, err := RunSupervised([]string{"pwd"}, nil, dir, nil)
+	run, err := RunSupervised([]string{"pwd"}, SuperviseOptions{Cwd: dir})
 	if err != nil {
 		t.Fatalf("RunSupervised: %v", err)
 	}

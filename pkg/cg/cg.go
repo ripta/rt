@@ -34,7 +34,8 @@ func NewCommand() *cobra.Command {
 	c.AddCommand(NewCancelCommand())
 	c.AddCommand(NewGrepCommand())
 	c.AddCommand(NewNoteCommand())
-	c.AddCommand(NewSuperviseCommand())
+	c.AddCommand(NewSuperviseRunCommand())
+	c.AddCommand(NewSupervisePoolCommand())
 
 	return c
 }

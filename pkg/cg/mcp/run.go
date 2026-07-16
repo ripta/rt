@@ -100,7 +100,7 @@ func handleRun(ctx context.Context, reg *runRegistry, g *gate, el elicitor, in r
 		wait = *in.Wait
 	}
 
-	run, err := cg.RunSupervised(in.Command, resolved, in.Cwd, in.Env)
+	run, err := cg.RunSupervised(in.Command, cg.SuperviseOptions{Resolved: resolved, Cwd: in.Cwd, Env: in.Env})
 	if err != nil {
 		var sf *cg.StartFailure
 		if errors.As(err, &sf) {

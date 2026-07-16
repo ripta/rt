@@ -33,30 +33,40 @@ type StartFailure struct {
 func (e *StartFailure) Error() string { return e.Err.Error() }
 func (e *StartFailure) Unwrap() error { return e.Err }
 
+// SuperviseOptions carries the optional knobs for RunSupervised. Resolved is
+// the executable identity computed for the command; when nil, RunSupervised
+// resolves it itself. Cwd is passed through; empty inherits the caller's
+// working directory. Env entries are appended to the supervisor's inherited
+// environ, so MCP-supplied keys override the parent's; they ride the spec
+// pipe and never appear in argv or on disk. Pool names the pool this run is a
+// member of, threaded into the run's on-disk records; empty for standalone
+// runs.
+type SuperviseOptions struct {
+	Resolved *Resolution
+	Cwd      string
+	Env      map[string]string
+	Pool     string
+}
+
 // RunSupervised starts args[0] with args[1:] under capture, parented by a
-// detached `cg supervise` process whose lifetime matches the run's. stdout and
-// stderr are written to $TMPDIR/cg/<ID>/{stdout,stderr}. cwd is passed
-// through; empty inherits the caller's working directory. env entries are
-// appended to the supervisor's inherited environ, so MCP-supplied keys
-// override the parent's. They ride the spec pipe and never appear in argv or
-// on disk.
+// detached `cg supervise-run` process whose lifetime matches the run's.
+// stdout and stderr are written to $TMPDIR/cg/<ID>/{stdout,stderr}.
 //
-// `resolved` is the executable identity computed for args; when nil,
-// RunSupervised resolves it itself. The supervisor execs resolved.ExecPath,
-// the canonical path, while keeping args[0] as the child's argv[0], so a fresh
-// PATH lookup at exec time cannot select a different file than the one the
-// approval gate matched.
+// The supervisor execs opts.Resolved.ExecPath, the canonical path, while
+// keeping args[0] as the child's argv[0], so a fresh PATH lookup at exec time
+// cannot select a different file than the one the approval gate matched.
 //
 // The supervisor runs in its own session courtesy Setsid, so the caller's exit
 // cannot signal it. Done is driven by EOF on the supervisor's status pipe,
 // which arrives only after meta.json is written, preserving the Done contract.
-func RunSupervised(args []string, resolved *Resolution, cwd string, env map[string]string) (*CaptureRun, error) {
+func RunSupervised(args []string, opts SuperviseOptions) (*CaptureRun, error) {
 	if len(args) == 0 {
 		return nil, fmt.Errorf("command is empty")
 	}
 
+	resolved := opts.Resolved
 	if resolved == nil {
-		resolved, _ = ResolveCommand(args, cwd)
+		resolved, _ = ResolveCommand(args, opts.Cwd)
 	}
 
 	cap, err := NewCapture()
@@ -67,14 +77,14 @@ func RunSupervised(args []string, resolved *Resolution, cwd string, env map[stri
 		return nil, fmt.Errorf("closing capture files: %w", err)
 	}
 
-	cwd = effectiveCwd(cwd)
+	cwd := effectiveCwd(opts.Cwd)
 
 	// A failure to launch the supervisor is reported like a child start
 	// failure: the server writes debug.json and the run dir is preserved for
 	// post-mortem inspection.
 	failStart := func(err error) (*CaptureRun, error) {
-		info := RunInfo{ID: cap.ID, Command: args, Cwd: cwd, StartedAt: time.Now().UTC()}
-		_ = WriteStartDebug(cap.Dir, buildStartDebug(info, env, resolved, err))
+		info := RunInfo{ID: cap.ID, Command: args, Cwd: cwd, Pool: opts.Pool, StartedAt: time.Now().UTC()}
+		_ = WriteStartDebug(cap.Dir, buildStartDebug(info, opts.Env, resolved, err))
 		return nil, &StartFailure{RunID: cap.ID, Dir: cap.Dir, Err: err}
 	}
 
@@ -83,7 +93,7 @@ func RunSupervised(args []string, resolved *Resolution, cwd string, env map[stri
 		return failStart(fmt.Errorf("locating cg executable: %w", err))
 	}
 
-	sup := exec.Command(exe, "supervise", cap.Dir)
+	sup := exec.Command(exe, "supervise-run", cap.Dir)
 	sup.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 
 	stdin, err := sup.StdinPipe()
@@ -99,7 +109,7 @@ func RunSupervised(args []string, resolved *Resolution, cwd string, env map[stri
 		return failStart(fmt.Errorf("starting supervisor: %w", err))
 	}
 
-	spec := SuperviseSpec{Argv: args, Cwd: cwd, Env: env}
+	spec := SuperviseSpec{Argv: args, Cwd: cwd, Env: opts.Env, Pool: opts.Pool}
 	if resolved != nil {
 		spec.Resolved = resolved.Resolved
 		spec.Canonical = resolved.Canonical

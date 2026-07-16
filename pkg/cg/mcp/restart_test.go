@@ -19,7 +19,7 @@ import (
 // for an MCP server that started a run and then gets terminated: it spawns the
 // supervised child, reports the run ID on stdout, and blocks until killed.
 func spawnRunMain(args []string) int {
-	run, err := cg.RunSupervised(args, nil, "", nil)
+	run, err := cg.RunSupervised(args, cg.SuperviseOptions{})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "RunSupervised: %v\n", err)
 		return 1

@@ -79,7 +79,7 @@ func TestCancelRunInvalidSignal(t *testing.T) {
 func TestCancelRunLive(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 
-	run, err := RunSupervised([]string{"sleep", "30"}, nil, "", nil)
+	run, err := RunSupervised([]string{"sleep", "30"}, SuperviseOptions{})
 	if err != nil {
 		t.Fatalf("RunSupervised: %v", err)
 	}
