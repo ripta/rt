@@ -224,11 +224,12 @@ Or by hand in the MCP host config:
 }
 ```
 
-The server registers fourteen tools:
+The server registers fifteen tools:
 
 | Tool | Purpose |
 |------|---------|
 | `cg_run` | Run a command with capture; returns metadata and head/tail excerpts. |
+| `cg_run_many` | Run a flat pool of commands with a parallelism knob and a fail policy; returns a pool ID and a per-run summary. |
 | `cg_list` | List recent runs, most-recent-first. |
 | `cg_meta` | Return run state and metadata. |
 | `cg_wait` | Block until a run finishes or a timeout elapses. |
@@ -262,6 +263,51 @@ run never gets its `meta.json`. Such a run lists as `abandoned` in `cg ls` and
 in `cg_list`, which also accepts `state: abandoned` as a filter. `cg prune`
 treats abandoned runs as evictable alongside finished ones. A run whose
 supervisor still holds the run lock is live and is never pruned.
+
+`cg_run_many` runs a flat pool of commands. Each argv in `commands` runs
+`repeat` times, through at most `parallelism` workers. Parallelism defaults to
+1, which executes runs in listed order with repeats consecutive. `on_error`
+decides what a failure does to the rest of the pool: `continue` (default) runs
+everything, `stop` schedules nothing new, and `kill` additionally cancels
+in-flight runs. `cwd` and `env` are shared across the pool. `wait` and
+`wait_timeout_ms` work as in `cg_run`; a timeout returns the partial summary
+while the pool keeps running.
+
+`cg_run_many` is not a workflow engine. There are no dependencies between runs,
+no conditionals, and no per-run fallback; the calling agent is the control-flow
+engine. There is also no `cg run-many` shell counterpart, since the shell
+already has `xargs -P` and `make -j`.
+
+The result is a summary: counts, the commands array echoed once, and one flat
+record per run referencing its command by index. Failed runs carry tail
+excerpts of both streams, sized by `excerpt_bytes` with `0` disabling them,
+under a 16 KB pool-wide budget; failures past the budget carry
+`excerpt_omitted: true` instead. Successful runs carry no excerpts. Skipped and
+pending runs are visible in the summary; a pending run has no run ID yet.
+
+A pool is one more ID in the run namespace: a directory under the capture root
+holding `pool.json` and no stream files. Members are ordinary sibling run
+directories, so `cg_meta`, `cg_stdout`, `cg_stderr`, and `cg_grep` work on any
+member run ID from the summary. Scheduling lives in a small detached pool
+supervisor, following the same pattern as single runs. A server restart
+therefore loses nothing: in-flight runs finish, pending jobs still get
+scheduled, and a fresh server's `cg_wait` on the pool ID aggregates via
+polling. A SIGKILLed pool supervisor leaves an abandoned pool, listed and
+evictable like an abandoned run.
+
+The other tools understand pools. `cg_wait` on a pool ID blocks until the pool
+finishes and returns the same summary as the sync call. `cg_list` and `cg ls`
+collapse members behind one row per pool with state and counts; the `pool`
+filter expands them: a pool ID lists that pool's members, `none` lists only
+standalone runs, and `any` lists everything uncollapsed. `cg_meta` on a pool ID
+returns the pool state and the manifest. `cg_prune` evicts a pool and its
+members as one unit, and never a member from under a live pool. `cg_cancel`
+accepts pool IDs: the default SIGTERM stops scheduling and lets in-flight runs
+finish, while SIGINT additionally cancels them.
+
+Every distinct command in a pool passes the approval gate below before anything
+spawns. A denial fails the whole call with nothing started, and `repeat` does
+not multiply prompts.
 
 `cg_run` checks each command against an approval matcher before running it. The
 default mode prompts for unmatched commands when the client supports elicitation,
