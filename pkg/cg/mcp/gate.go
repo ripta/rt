@@ -39,7 +39,7 @@ func (g *gate) check(ctx context.Context, tool string, in runInput, resolved *cg
 		return "", nil
 	}
 
-	subject := approve.Subject{Argv: in.Command, Canonical: resolved.CanonicalArgv()}
+	subject := approve.Subject{Argv: in.Command, Canonical: resolved.CanonicalArgv(), Resolved: resolved.ResolvedArgv()}
 	res := g.store.Ruleset().Match(subject)
 	switch res.Decision {
 	case approve.DecisionRun:

@@ -33,13 +33,14 @@ const (
 // prompt asks the user to approve an unmatched command. Accept runs the command
 // and, when remember is checked, persists the edited prefix rule to the project
 // file and swaps it into the live matcher. Decline and cancel refuse this once.
-// The suggestion pre-fills the canonical executable path resolved for the run, so
-// a remembered rule is strict by default; the user can edit it down to a name.
+// The suggestion pre-fills the executable path resolved for the run, chosen by
+// RulePath so a shim keeps its invoked name, and a remembered rule is strict by
+// default; the user can edit it down to a name.
 //
 // A non-empty first return is a best-effort persistence diagnostic the caller
 // surfaces in the tool result; the command was still approved and runs.
 func (g *gate) prompt(ctx context.Context, tool string, in runInput, resolved *cg.Resolution, el elicitor) (string, error) {
-	suggestion := approve.SuggestPrefix(in.Command, resolved.ExecPath())
+	suggestion := approve.SuggestPrefix(in.Command, resolved.RulePath())
 	res, err := el.Elicit(ctx, &mcpsdk.ElicitParams{
 		Message:         approvalMessage(in),
 		RequestedSchema: approvalSchema(suggestion, g.store.Project.Path),

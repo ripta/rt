@@ -55,6 +55,8 @@ type matchTest struct {
 	argv     []string
 	// canonical overrides the canonical form; when nil it defaults to argv.
 	canonical []string
+	// resolved sets the subject's pre-symlink resolved form; nil leaves it unset.
+	resolved []string
 	// unresolved leaves the canonical form unavailable, as when canonicalization
 	// fails. It takes precedence over canonical.
 	unresolved bool
@@ -139,6 +141,14 @@ func TestMatch(t *testing.T) {
 
 		// restrict message propagation
 		{name: "restrict message surfaced", restrict: []Rule{{Prefix: []string{"git"}, Message: "only read-only git is permitted here", kind: KindPrefix}}, argv: []string{"git", "push"}, want: DecisionRefuse, wantMessage: "only read-only git is permitted here", wantRestricted: true},
+
+		// path rules match the resolved form too, so a rule can pin a multiplexer
+		// shim like rustup's cargo, whose canonical path erases which tool ran
+		{name: "resolved path allow matches shim", allow: []Rule{prefixRule("/x/cargo", "fmt")}, argv: []string{"cargo", "fmt"}, resolved: []string{"/x/cargo", "fmt"}, canonical: []string{"/x/rustup", "fmt"}, want: DecisionRun},
+		{name: "resolved path rule other shim no match", allow: []Rule{prefixRule("/x/cargo", "fmt")}, argv: []string{"rustc", "fmt"}, resolved: []string{"/x/rustc", "fmt"}, canonical: []string{"/x/rustup", "fmt"}, want: DecisionPrompt},
+		{name: "canonical rule still matches shim", allow: []Rule{prefixRule("/x/rustup", "fmt")}, argv: []string{"cargo", "fmt"}, resolved: []string{"/x/cargo", "fmt"}, canonical: []string{"/x/rustup", "fmt"}, want: DecisionRun},
+		{name: "resolved path deny fires", deny: []Rule{prefixRule("/x/cargo")}, allow: []Rule{prefixRule("cargo")}, argv: []string{"cargo", "fmt"}, resolved: []string{"/x/cargo", "fmt"}, canonical: []string{"/x/rustup", "fmt"}, want: DecisionRefuse},
+		{name: "resolved form needs canonical", allow: []Rule{prefixRule("/x/cargo")}, argv: []string{"cargo"}, resolved: []string{"/x/cargo"}, unresolved: true, want: DecisionPrompt},
 	}
 
 	for _, tt := range staticTests {
@@ -206,6 +216,11 @@ func TestMatchPatterns(t *testing.T) {
 		{name: "restrict glob refuses in scope", restrict: []Rule{globRule(t, "git *")}, argv: []string{"git", "push"}, want: DecisionRefuse, wantRestricted: true},
 		{name: "restrict regex refuses in scope", restrict: []Rule{regexRule(t, `^git `)}, argv: []string{"git", "push"}, want: DecisionRefuse, wantRestricted: true},
 		{name: "restrict regex out of scope prompts", restrict: []Rule{regexRule(t, `^git `)}, argv: []string{"make"}, want: DecisionPrompt},
+
+		// pattern rules also see the resolved join, so a directory policy can name
+		// the shim's location rather than its symlink target
+		{name: "regex allow over resolved join", allow: []Rule{regexRule(t, `^/x/cargo fmt$`)}, argv: []string{"cargo", "fmt"}, resolved: []string{"/x/cargo", "fmt"}, canonical: []string{"/x/rustup", "fmt"}, want: DecisionRun},
+		{name: "glob deny over resolved join", deny: []Rule{globRule(t, "/x/cargo *")}, argv: []string{"cargo", "fmt"}, resolved: []string{"/x/cargo", "fmt"}, canonical: []string{"/x/rustup", "fmt"}, want: DecisionRefuse},
 	}
 
 	for _, tt := range tests {
@@ -216,17 +231,19 @@ func TestMatchPatterns(t *testing.T) {
 }
 
 // subjectFor builds the match subject for a test case. unresolved leaves the
-// canonical form nil; otherwise canonical defaults to argv.
+// canonical form nil; otherwise canonical defaults to argv. resolved is carried
+// as given, including alongside unresolved, so tests can cover a subject whose
+// resolution succeeded but whose canonicalization failed.
 func subjectFor(tt matchTest) Subject {
 	if tt.unresolved {
-		return Subject{Argv: tt.argv}
+		return Subject{Argv: tt.argv, Resolved: tt.resolved}
 	}
 	canonical := tt.canonical
 	if canonical == nil {
 		canonical = tt.argv
 	}
 
-	return Subject{Argv: tt.argv, Canonical: canonical}
+	return Subject{Argv: tt.argv, Canonical: canonical, Resolved: tt.resolved}
 }
 
 func runMatchCase(t *testing.T, tt matchTest) {

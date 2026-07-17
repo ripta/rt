@@ -315,3 +315,40 @@ func TestGateEnvPathDoesNotRedirectExec(t *testing.T) {
 		t.Errorf("StdoutExcerpt = %q, env.PATH redirected the exec", out.StdoutExcerpt)
 	}
 }
+
+// TestGateMultiplexerShimAllow mirrors rustup's layout: cargo and rustc are
+// symlinks to one multiplexer binary, so their canonical paths coincide. An
+// allow rule pinning the cargo shim's resolved path lets cargo run, and does not
+// leak to rustc, whose resolved path names a different tool.
+func TestGateMultiplexerShimAllow(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+
+	binDir := t.TempDir()
+	plantScript(t, binDir, "rustup", "proxied")
+	for _, shim := range []string{"cargo", "rustc"} {
+		if err := os.Symlink("rustup", filepath.Join(binDir, shim)); err != nil {
+			t.Fatalf("symlink %s: %v", shim, err)
+		}
+	}
+	t.Setenv("PATH", binDir)
+
+	yaml := "version: 1\nallow:\n  - prefix: ['" + filepath.Join(binDir, "cargo") + "', fmt]\n"
+	g := newTestGate(t, yaml, false)
+
+	_, out, err := handleRun(context.Background(), nil, g, nil, runInput{
+		Command: []string{"cargo", "fmt"},
+	})
+	if err != nil {
+		t.Fatalf("handleRun(cargo fmt): %v", err)
+	}
+	if !strings.Contains(out.StdoutExcerpt, "proxied") {
+		t.Errorf("StdoutExcerpt = %q, want the shim target to run", out.StdoutExcerpt)
+	}
+
+	_, _, err = handleRun(context.Background(), nil, g, nil, runInput{
+		Command: []string{"rustc", "fmt"},
+	})
+	if err == nil {
+		t.Fatalf("expected rustc fmt to fall through the cargo shim rule")
+	}
+}

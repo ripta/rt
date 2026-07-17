@@ -52,7 +52,8 @@ const (
 //
 // For prefix and exact rules the match form is inferred from the shape of the
 // first token: a bare program name matches the invoked basename, while an
-// absolute or project-relative path matches the canonical executable path.
+// absolute or project-relative path matches the canonical or resolved
+// executable path.
 // AsBasename is meaningful only on glob and regex rules, where there is no token
 // to read; it selects the basename quoted join over the canonical one. The
 // loader rejects as_basename on prefix and exact rules, where the token shape
@@ -139,14 +140,19 @@ func (s *Store) Ruleset() *Ruleset { return s.rules.Load() }
 // original argv as invoked. Canonical is the resolved, symlink-evaluated argv
 // whose first element is the absolute executable path and whose tail mirrors
 // Argv[1:]; it is nil when the executable could not be resolved or canonicalized.
+// Resolved is the same argv before symlink evaluation. The two differ when the
+// executable is reached through a symlink; for a multiplexer shim like rustup's
+// cargo the resolved path is the only absolute form that still names the
+// invoked tool.
 //
-// A rule that matches the canonical form cannot match when Canonical is nil. A
-// rule that matches by basename matches a form derived from
-// filepath.Base(Argv[0]), the invoked token, so name-based rules still evaluate
-// even when canonicalization fails.
+// A path rule matches the canonical or the resolved form, and cannot match
+// when Canonical is nil. A rule that matches by basename matches a form derived
+// from filepath.Base(Argv[0]), the invoked token, so name-based rules still
+// evaluate even when canonicalization fails.
 type Subject struct {
 	Argv      []string
 	Canonical []string
+	Resolved  []string
 }
 
 // Decision is the matcher's verdict for a command.
@@ -185,5 +191,5 @@ var (
 	ErrMultipleRuleKinds  = errors.New("rule has more than one rule-kind key")
 	ErrMessageOnAllow     = errors.New("message is not valid on an allow rule; use a YAML comment instead")
 	ErrPermitNotOnAllow   = errors.New("permit_unsafe_envs is valid only on an allow rule")
-	ErrAsBasenameOnTokens = errors.New("as_basename is not valid on a prefix or exact rule; the first token's shape already settles the form (bare name matches the basename, a path matches the canonical path)")
+	ErrAsBasenameOnTokens = errors.New("as_basename is not valid on a prefix or exact rule; the first token's shape already settles the form (bare name matches the basename, a path matches the resolved or canonical path)")
 )

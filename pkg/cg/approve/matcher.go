@@ -26,11 +26,14 @@ type matchForm struct {
 // and allow is evaluated before restrict, so an allow carves out of a restrict
 // scope. Both relationships hold across layers.
 //
-// Each rule matches either the canonical form or the basename form, decided at
-// load by compileMatch from the rule's shape. When the subject has no canonical
-// form, canonical-form rules cannot match, so a command with an unknown
-// executable identity is never allowed by canonical policy and falls through to
-// prompt or fail-closed.
+// Each rule matches either the path forms or the basename form, decided at
+// load by compileMatch from the rule's shape. A path rule matches the canonical
+// form or the resolved form, so a rule can pin either side of a symlink: the
+// file that ultimately runs, or the shim the user invoked, which for a
+// multiplexer like rustup is the only path that names the tool. When the
+// subject has no canonical form, path rules cannot match, so a command with an
+// unknown executable identity is never allowed by path policy and falls through
+// to prompt or fail-closed.
 func (rs *Ruleset) Match(subj Subject) MatchResult {
 	if len(subj.Argv) == 0 {
 		return MatchResult{Decision: DecisionRefuse}
@@ -43,20 +46,20 @@ func (rs *Ruleset) Match(subj Subject) MatchResult {
 		return MatchResult{Decision: DecisionRefuse}
 	}
 
-	canonical, basename := subj.forms()
+	canonical, resolved, basename := subj.forms()
 
 	for i := range rs.Deny {
-		if ruleMatches(&rs.Deny[i], canonical, basename) {
+		if ruleMatches(&rs.Deny[i], canonical, resolved, basename) {
 			return MatchResult{Decision: DecisionRefuse, Rule: &rs.Deny[i]}
 		}
 	}
 	for i := range rs.Allow {
-		if ruleMatches(&rs.Allow[i], canonical, basename) {
+		if ruleMatches(&rs.Allow[i], canonical, resolved, basename) {
 			return MatchResult{Decision: DecisionRun, Rule: &rs.Allow[i]}
 		}
 	}
 	for i := range rs.Restrict {
-		if ruleMatches(&rs.Restrict[i], canonical, basename) {
+		if ruleMatches(&rs.Restrict[i], canonical, resolved, basename) {
 			return MatchResult{Decision: DecisionRefuse, Rule: &rs.Restrict[i], Restricted: true}
 		}
 	}
@@ -64,12 +67,19 @@ func (rs *Ruleset) Match(subj Subject) MatchResult {
 	return MatchResult{Decision: DecisionPrompt}
 }
 
-// forms builds the canonical and basename match forms once per Match call. The
-// canonical form is unavailable when Canonical is nil. The basename form replaces
-// only Argv[0] with its basename, the invoked token, and leaves the tail intact.
-func (s Subject) forms() (canonical, basename matchForm) {
+// forms builds the canonical, resolved, and basename match forms once per Match
+// call. The canonical form is unavailable when Canonical is nil. The resolved
+// form is offered only when the canonical form is too, preserving the invariant
+// that a command whose executable identity is unknown cannot match path rules;
+// it is skipped as redundant when symlink evaluation changed nothing. The
+// basename form replaces only Argv[0] with its basename, the invoked token, and
+// leaves the tail intact.
+func (s Subject) forms() (canonical, resolved, basename matchForm) {
 	if s.Canonical != nil {
 		canonical = matchForm{argv: s.Canonical, quoted: cg.EscapeArgs(s.Canonical), ok: true}
+		if s.Resolved != nil && s.Resolved[0] != s.Canonical[0] {
+			resolved = matchForm{argv: s.Resolved, quoted: cg.EscapeArgs(s.Resolved), ok: true}
+		}
 	}
 
 	base := make([]string, len(s.Argv))
@@ -77,19 +87,25 @@ func (s Subject) forms() (canonical, basename matchForm) {
 	base[0] = filepath.Base(s.Argv[0])
 	basename = matchForm{argv: base, quoted: cg.EscapeArgs(base), ok: true}
 
-	return canonical, basename
+	return canonical, resolved, basename
 }
 
 // ruleMatches reports whether a single rule matches the subject. wantBasename,
 // set at load by compileMatch, selects the basename form; otherwise the rule
-// matches the canonical form, which it cannot do when that form is unavailable.
-// exact and prefix compare cmpArgv, the load-resolved comparison tokens; glob and
-// regex match the precomputed quoted join.
-func ruleMatches(rule *Rule, canonical, basename matchForm) bool {
-	form := canonical
+// matches the canonical form or the resolved form, neither of which is
+// available when canonicalization failed.
+func ruleMatches(rule *Rule, canonical, resolved, basename matchForm) bool {
 	if rule.wantBasename {
-		form = basename
+		return formMatches(rule, basename)
 	}
+
+	return formMatches(rule, canonical) || formMatches(rule, resolved)
+}
+
+// formMatches evaluates one rule against one form. exact and prefix compare
+// cmpArgv, the load-resolved comparison tokens; glob and regex match the
+// precomputed quoted join.
+func formMatches(rule *Rule, form matchForm) bool {
 	if !form.ok {
 		return false
 	}
@@ -109,13 +125,13 @@ func ruleMatches(rule *Rule, canonical, basename matchForm) bool {
 // compileMatch derives the match form and comparison tokens for a rule once at
 // load, so the matcher itself reads only precomputed fields. For prefix and exact
 // rules the form follows the first token's shape: a bare program name matches the
-// invoked basename; an absolute path matches the canonical path as written; a
-// relative path matches the canonical path after being resolved against
+// invoked basename; an absolute path matches the canonical or resolved path as
+// written; a relative path matches those paths after being resolved against
 // projectRoot. For glob and regex rules there is no token to read, so as_basename
 // selects the form. The relative token is joined and cleaned but not symlink
 // evaluated, matching how an absolute token compares literally against the
-// subject's symlink-resolved canonical path, and so the rule does not require the
-// file to exist at load.
+// subject's path forms, and so the rule does not require the file to exist at
+// load.
 func compileMatch(rule *Rule, projectRoot string) {
 	switch rule.kind {
 	case KindGlob, KindRegex:

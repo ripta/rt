@@ -97,6 +97,39 @@ func (r *Resolution) CanonicalArgv() []string {
 	return out
 }
 
+// ResolvedArgv is the pre-symlink counterpart of CanonicalArgv: the resolved
+// absolute path followed by the original argument tail. It is nil when
+// resolution did not succeed. The two differ when the executable is reached
+// through a symlink that renames it, as with a multiplexer shim like rustup's
+// cargo, where the resolved path is the only absolute form that still names the
+// invoked tool.
+func (r *Resolution) ResolvedArgv() []string {
+	if r == nil || r.Resolved == "" || len(r.Argv) == 0 {
+		return nil
+	}
+
+	out := make([]string, len(r.Argv))
+	out[0] = r.Resolved
+	copy(out[1:], r.Argv[1:])
+	return out
+}
+
+// RulePath is the executable path a suggested approval rule pins. It is the
+// canonical path, except when symlink evaluation changes the executable's
+// basename: that marks a multiplexer shim whose argv[0] is the command
+// identity, so the resolved path is used and the rule keeps naming the tool
+// that was invoked. When resolution is incomplete it falls back like ExecPath.
+func (r *Resolution) RulePath() string {
+	if r == nil {
+		return ""
+	}
+	if r.Canonical != "" && r.Resolved != "" && filepath.Base(r.Canonical) != filepath.Base(r.Resolved) {
+		return r.Resolved
+	}
+
+	return r.ExecPath()
+}
+
 // ExecPath is the path the supervisor execs: the canonical path when available, then
 // the resolved path, falling back to the original argv[0] so a command that
 // could not be resolved still surfaces its start failure through exec.

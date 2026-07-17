@@ -44,11 +44,15 @@ var multiVerbTools = map[string]struct{}{
 // arguments are dropped to avoid rules like [make, -j8] or [git, --no-pager] that
 // match only on incidental invocation details rather than the actual operation.
 //
-// execPath is the canonical absolute executable path, so the suggested rule is
-// strict by default: it pins the exact binary that ran rather than its name. The
-// user can edit it down to a bare name to allow the command however it resolves.
-// An empty execPath, as when canonicalization failed, falls back to argv[0] as
-// written. The multi-verb decision still reads the invoked program's basename.
+// execPath is the absolute executable path the rule pins, normally the
+// canonical path as chosen by Resolution.RulePath, so the suggested rule is
+// strict by default: it pins a specific binary rather than a name. For a
+// multiplexer shim like rustup's cargo, RulePath is the pre-symlink resolved
+// path, so the rule names the invoked tool instead of the shared shim target.
+// The user can edit it down to a bare name to allow the command however it
+// resolves. An empty execPath, as when resolution failed, falls back to argv[0]
+// as written. The multi-verb decision still reads the invoked program's
+// basename.
 func SuggestPrefix(argv []string, execPath string) []string {
 	if len(argv) == 0 {
 		return nil

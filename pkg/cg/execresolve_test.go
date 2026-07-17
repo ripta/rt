@@ -206,6 +206,86 @@ func TestCanonicalArgv(t *testing.T) {
 	}
 }
 
+type resolvedArgvTest struct {
+	name string
+	res  Resolution
+	want []string
+}
+
+var resolvedArgvTests = []resolvedArgvTest{
+	{name: "resolved with tail", res: Resolution{Argv: []string{"foo", "-x"}, Resolved: "/opt/foo"}, want: []string{"/opt/foo", "-x"}},
+	{name: "resolved only", res: Resolution{Argv: []string{"foo"}, Resolved: "/opt/foo"}, want: []string{"/opt/foo"}},
+	{name: "no resolved is nil", res: Resolution{Argv: []string{"foo"}}, want: nil},
+	{name: "no argv is nil", res: Resolution{Resolved: "/opt/foo"}, want: nil},
+}
+
+func TestResolvedArgv(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range resolvedArgvTests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.res.ResolvedArgv()
+			if len(got) != len(tt.want) {
+				t.Fatalf("ResolvedArgv() = %v, want %v", got, tt.want)
+			}
+			for i := range tt.want {
+				if got[i] != tt.want[i] {
+					t.Fatalf("ResolvedArgv() = %v, want %v", got, tt.want)
+				}
+			}
+		})
+	}
+}
+
+type rulePathTest struct {
+	name string
+	res  Resolution
+	want string
+}
+
+var rulePathTests = []rulePathTest{
+	{name: "same basename prefers canonical", res: Resolution{Argv: []string{"go"}, Resolved: "/opt/bin/go", Canonical: "/opt/cellar/go/bin/go"}, want: "/opt/cellar/go/bin/go"},
+	{name: "basename flip prefers resolved", res: Resolution{Argv: []string{"cargo"}, Resolved: "/home/u/.cargo/bin/cargo", Canonical: "/home/u/.cargo/bin/rustup"}, want: "/home/u/.cargo/bin/cargo"},
+	{name: "no canonical falls back to resolved", res: Resolution{Argv: []string{"foo"}, Resolved: "/r/foo"}, want: "/r/foo"},
+	{name: "no resolution falls back to argv0", res: Resolution{Argv: []string{"foo"}}, want: "foo"},
+	{name: "empty resolution", res: Resolution{}, want: ""},
+}
+
+func TestRulePath(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range rulePathTests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.res.RulePath(); got != tt.want {
+				t.Errorf("RulePath() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestRulePathShimOnDisk exercises RulePath against a real rustup-style shim: a
+// symlink named cargo pointing at a differently named binary in the same
+// directory, found through PATH.
+func TestRulePathShimOnDisk(t *testing.T) {
+	dir := t.TempDir()
+	plantExec(t, dir, "rustup")
+	if err := os.Symlink("rustup", filepath.Join(dir, "cargo")); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+	t.Setenv("PATH", dir)
+
+	r, err := ResolveCommand([]string{"cargo", "fmt"}, "")
+	if err != nil {
+		t.Fatalf("ResolveCommand: %v", err)
+	}
+	if filepath.Base(r.Canonical) != "rustup" {
+		t.Fatalf("Canonical = %q, want the shim target rustup", r.Canonical)
+	}
+	if got := r.RulePath(); got != filepath.Join(dir, "cargo") {
+		t.Errorf("RulePath() = %q, want the invoked shim %q", got, filepath.Join(dir, "cargo"))
+	}
+}
+
 type execPathTest struct {
 	name string
 	res  Resolution
