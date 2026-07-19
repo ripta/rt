@@ -585,6 +585,28 @@ func TestLsCommandLimit(t *testing.T) {
 	}
 }
 
+func TestLsCommandUnlimited(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	root := CaptureRoot()
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatalf("mkdir root: %v", err)
+	}
+
+	seedRunDir(t, "AAAAAA", &Meta{RunInfo: RunInfo{ID: "AAAAAA", Command: []string{"echo", "a"}}})
+	seedRunDir(t, "BBBBBB", &Meta{RunInfo: RunInfo{ID: "BBBBBB", Command: []string{"echo", "b"}}})
+
+	for _, n := range []string{"0", "-1"} {
+		stdout, stderr, err := runCgSplit("ls", "-n", n)
+		if err != nil {
+			t.Fatalf("-n %s: unexpected error: %v (stderr=%q)", n, err, stderr)
+		}
+		lines := strings.Split(strings.TrimRight(stdout, "\n"), "\n")
+		if len(lines) != 2 {
+			t.Fatalf("-n %s: expected 2 lines, got %d: %q", n, len(lines), stdout)
+		}
+	}
+}
+
 func TestLsCommandRunningReadsStartInfo(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 	root := CaptureRoot()

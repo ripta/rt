@@ -196,7 +196,7 @@ func NewLsCommand() *cobra.Command {
 		SilenceUsage:  true,
 		RunE:          opts.run,
 	}
-	c.Flags().IntVarP(&opts.N, "limit", "n", 20, "maximum number of runs to list")
+	c.Flags().IntVarP(&opts.N, "limit", "n", 20, "maximum number of runs to list; 0 or negative means unlimited")
 	c.Flags().StringVar(&opts.Pool, "pool", "", "pool handling: a pool ID lists that pool's members, `none` lists only standalone runs, `any` lists everything uncollapsed")
 	c.Flags().StringVar(&opts.State, "state", lsStateAll, "state filter: all|finished|running|failed|abandoned|unknown")
 	c.Flags().StringVar(&opts.ExitCode, "exit-code", "", "filter finished runs by exit code: N (equals), !=N, >=N, >N, <N, or <=N; pool summary rows always pass through")
@@ -312,10 +312,6 @@ func (opts *lsOptions) run(cmd *cobra.Command, args []string) error {
 		return &ExitError{Code: 2}
 	}
 
-	if opts.N <= 0 {
-		return nil
-	}
-
 	root := CaptureRoot()
 	entries, err := os.ReadDir(root)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -424,7 +420,7 @@ func (opts *lsOptions) run(cmd *cobra.Command, args []string) error {
 		return rows[i].mtime.After(rows[j].mtime)
 	})
 
-	if len(rows) > opts.N {
+	if opts.N > 0 && len(rows) > opts.N {
 		rows = rows[:opts.N]
 	}
 

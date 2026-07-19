@@ -146,10 +146,11 @@ I: Finished exitcode=0 in 3ms (out=1 err=1) id=Q3F9K2
 ```
 
 `cg ls` lists recent runs, most-recent-first; `cg ls -n N` overrides the
-default cap of 20. `--state`, `--exit-code`, and `--since`/`--before` narrow
-the listing further; all three are optional and compose with each other and
-with `--pool` (see below for the full grammar). Capture never deletes
-anything; `cg prune` is the explicit cleanup hook:
+default cap of 20, and `-n 0` (or any negative value) lists everything.
+`--state`, `--exit-code`, and `--since`/`--before` narrow the listing further;
+all three are optional and compose with each other and with `--pool` (see
+below for the full grammar). Capture never deletes anything; `cg prune` is the
+explicit cleanup hook:
 
 ```
 ❯ cg ls
