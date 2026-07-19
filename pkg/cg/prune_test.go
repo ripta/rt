@@ -297,26 +297,37 @@ func TestPruneEvictsAbandonedRuns(t *testing.T) {
 	}
 	defer held.Close()
 
-	// Shell-path run: no lock file at all.
-	dirShell := seedRunDir(t, "EEEEEE", nil)
+	// Live shell-path run: no lock file, but start.json survives, so it is
+	// presumed running.
+	dirRunning := seedRunDir(t, "FFFFFF", nil)
+	if err := WriteStartInfo(dirRunning, &StartInfo{RunInfo: RunInfo{ID: "FFFFFF", Command: []string{"sleep", "60"}, StartedAt: now}}); err != nil {
+		t.Fatalf("WriteStartInfo: %v", err)
+	}
+
+	// Unknown: no lock file and no start.json at all, so no liveness signal
+	// was ever recorded. The supervisor died before it could acquire its lock.
+	dirUnknown := seedRunDir(t, "EEEEEE", nil)
 
 	chtimes(t, dirFin, now)
 	chtimes(t, dirAband, now.Add(-1*time.Hour))
 	chtimes(t, dirHeld, now.Add(-2*time.Hour))
-	chtimes(t, dirShell, now.Add(-3*time.Hour))
+	chtimes(t, dirRunning, now.Add(-2*time.Hour))
+	chtimes(t, dirUnknown, now.Add(-3*time.Hour))
 
 	stdout, _, err := runCgSplit("prune", "--keep", "1")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if stdout != "ABANDN\n" {
-		t.Errorf("stdout = %q, want %q", stdout, "ABANDN\n")
+	if stdout != "ABANDN\nEEEEEE\n" {
+		t.Errorf("stdout = %q, want %q", stdout, "ABANDN\nEEEEEE\n")
 	}
 
-	if _, err := os.Stat(dirAband); !os.IsNotExist(err) {
-		t.Errorf("ABANDN still exists: %v", err)
+	for _, dir := range []string{dirAband, dirUnknown} {
+		if _, err := os.Stat(dir); !os.IsNotExist(err) {
+			t.Errorf("%s still exists: %v", dir, err)
+		}
 	}
-	for _, dir := range []string{dirFin, dirHeld, dirShell} {
+	for _, dir := range []string{dirFin, dirHeld, dirRunning} {
 		if _, err := os.Stat(dir); err != nil {
 			t.Errorf("%s removed unexpectedly: %v", dir, err)
 		}
@@ -519,6 +530,56 @@ func TestPruneEvictsAbandonedPool(t *testing.T) {
 		if _, err := os.Stat(dir); !os.IsNotExist(err) {
 			t.Errorf("%s still exists: %v", dir, err)
 		}
+	}
+}
+
+func TestPruneEvictsUnknownPoolMember(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	root := CaptureRoot()
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatalf("mkdir root: %v", err)
+	}
+
+	now := time.Now()
+
+	// Abandoned: no finished_at, lock file released. The manifest names a
+	// member that never recorded any liveness signal of its own: the
+	// supervisor died before it could acquire the member's lock.
+	dirPool := seedPoolDir(t, "PPPPPP", &PoolManifest{
+		ID:        "PPPPPP",
+		Commands:  [][]string{{"echo", "hi"}},
+		StartedAt: now.UTC(),
+		Runs: []PoolRunRecord{
+			{Command: 0, RunID: "AAAAAA", Status: PoolRunRunning},
+		},
+	})
+	poolLock, err := acquireRunLock(dirPool)
+	if err != nil {
+		t.Fatalf("acquiring pool lock: %v", err)
+	}
+	poolLock.Close()
+
+	dirUnknown := seedRunDir(t, "AAAAAA", nil)
+	dirSolo := seedRunDir(t, "SSSSSS", &Meta{RunInfo: RunInfo{ID: "SSSSSS", Command: []string{"echo", "solo"}}})
+	chtimes(t, dirSolo, now)
+	chtimes(t, dirPool, now.Add(-1*time.Hour))
+	chtimes(t, dirUnknown, now.Add(-1*time.Hour))
+
+	stdout, _, err := runCgSplit("prune", "--keep", "1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if stdout != "PPPPPP\nAAAAAA\n" {
+		t.Errorf("stdout = %q, want pool and unknown member", stdout)
+	}
+
+	for _, dir := range []string{dirPool, dirUnknown} {
+		if _, err := os.Stat(dir); !os.IsNotExist(err) {
+			t.Errorf("%s still exists: %v", dir, err)
+		}
+	}
+	if _, err := os.Stat(dirSolo); err != nil {
+		t.Errorf("SSSSSS removed unexpectedly: %v", err)
 	}
 }
 

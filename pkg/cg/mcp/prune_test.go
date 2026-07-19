@@ -235,14 +235,23 @@ func TestHandlePruneEvictsAbandonedRuns(t *testing.T) {
 	dirHeld := seedRunDir(t, "DDDDDD", nil)
 	holdRunLock(t, dirHeld)
 
-	// Shell-path run: no lock file at all.
-	dirShell := seedRunDir(t, "EEEEEE", nil)
+	// Live shell-path run: no lock file, but start.json survives, so it is
+	// presumed running.
+	dirRunning := seedRunDir(t, "FFFFFF", nil)
+	if err := cg.WriteStartInfo(dirRunning, &cg.StartInfo{RunInfo: cg.RunInfo{ID: "FFFFFF", Command: []string{"sleep", "60"}, StartedAt: now}}); err != nil {
+		t.Fatalf("WriteStartInfo: %v", err)
+	}
+
+	// Unknown: no lock file and no start.json at all, so no liveness signal
+	// was ever recorded. The supervisor died before it could acquire its lock.
+	dirUnknown := seedRunDir(t, "EEEEEE", nil)
 
 	for dir, when := range map[string]time.Time{
-		dirFin:   now,
-		dirAband: now.Add(-1 * time.Hour),
-		dirHeld:  now.Add(-2 * time.Hour),
-		dirShell: now.Add(-3 * time.Hour),
+		dirFin:     now,
+		dirAband:   now.Add(-1 * time.Hour),
+		dirHeld:    now.Add(-2 * time.Hour),
+		dirRunning: now.Add(-2 * time.Hour),
+		dirUnknown: now.Add(-3 * time.Hour),
 	} {
 		if err := os.Chtimes(dir, when, when); err != nil {
 			t.Fatalf("chtimes %s: %v", dir, err)
@@ -253,14 +262,16 @@ func TestHandlePruneEvictsAbandonedRuns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("handlePrune: %v", err)
 	}
-	if len(out.Removed) != 1 || out.Removed[0] != "ABANDN" {
-		t.Errorf("Removed = %v, want [ABANDN]", out.Removed)
+	if len(out.Removed) != 2 || out.Removed[0] != "ABANDN" || out.Removed[1] != "EEEEEE" {
+		t.Errorf("Removed = %v, want [ABANDN EEEEEE]", out.Removed)
 	}
 
-	if _, err := os.Stat(dirAband); !os.IsNotExist(err) {
-		t.Errorf("ABANDN still exists: %v", err)
+	for _, dir := range []string{dirAband, dirUnknown} {
+		if _, err := os.Stat(dir); !os.IsNotExist(err) {
+			t.Errorf("%s still exists: %v", dir, err)
+		}
 	}
-	for _, dir := range []string{dirFin, dirHeld, dirShell} {
+	for _, dir := range []string{dirFin, dirHeld, dirRunning} {
 		if _, err := os.Stat(dir); err != nil {
 			t.Errorf("%s removed unexpectedly: %v", dir, err)
 		}

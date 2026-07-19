@@ -137,11 +137,7 @@ func PruneRuns(opts PruneOptions) ([]string, error) {
 				if PoolState(dir, m) == PoolStateRunning {
 					continue
 				}
-			} else if !RunLockReleased(dir) {
-				// A meta-less dir is evictable only when its run lock exists and
-				// is released: the supervisor died without finishing the run's
-				// bookkeeping. A held lock is a live run; a missing lock file is
-				// a shell-path run with no liveness signal. Both are skipped.
+			} else if !metaLessDirEvictable(dir) {
 				continue
 			}
 		}
@@ -221,9 +217,9 @@ func evictCandidate(c pruneCandidate, dryRun bool) ([]string, error) {
 }
 
 // memberEvictable reports whether a pool member's dir exists and is safe to
-// remove: finished (meta.json present) or dead (released lock). A still-live
-// member under a dead pool survives the unit and becomes an orphan, prunable
-// on its own once it dies.
+// remove: finished (meta.json present) or dead. A still-live member under a
+// dead pool survives the unit and becomes an orphan, prunable on its own once
+// it dies.
 func memberEvictable(dir string) bool {
 	if _, err := os.Stat(filepath.Join(dir, MetaFilename)); err == nil {
 		return true
@@ -231,7 +227,23 @@ func memberEvictable(dir string) bool {
 	if _, err := os.Stat(dir); err != nil {
 		return false
 	}
-	return RunLockReleased(dir)
+	return metaLessDirEvictable(dir)
+}
+
+// metaLessDirEvictable reports whether a meta-less run dir carries no evidence
+// of a live process. A released lock is abandoned: the supervisor died before
+// writing meta.json. A missing lock file with no start.json is unknown: no
+// liveness signal was ever recorded, which only happens when the supervisor
+// died before acquiring its lock, since that lock is the first thing it does.
+// Both are evictable. A held lock, or a missing lock file with a surviving
+// start.json (a shell-path run, presumed running since nothing else records
+// its liveness), is not.
+func metaLessDirEvictable(dir string) bool {
+	if LockFileExists(dir) {
+		return RunLockReleased(dir)
+	}
+	_, err := ReadStartInfo(dir)
+	return err != nil
 }
 
 func (opts *pruneOptions) run(cmd *cobra.Command, args []string) error {
