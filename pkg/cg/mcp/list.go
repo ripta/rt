@@ -32,7 +32,7 @@ const (
 // listInput is the argument shape for `cg_list`.
 type listInput struct {
 	Limit int    `json:"limit,omitempty" jsonschema:"maximum number of runs to return; default 20, max 1000"`
-	State string `json:"state,omitempty" jsonschema:"which runs to surface: all|finished|running|failed|abandoned; default finished, or all when pool is a pool ID"`
+	State string `json:"state,omitempty" jsonschema:"which runs to surface: all|finished|running|failed|abandoned|unknown; default finished, or all when pool is a pool ID"`
 	Pool  string `json:"pool,omitempty" jsonschema:"pool handling: empty collapses members behind one row per pool, a pool ID lists that pool's members, \"none\" lists only standalone runs, \"any\" lists everything uncollapsed"`
 }
 
@@ -44,32 +44,36 @@ type listOutput struct {
 // listRun is a single row in the cg_list response. Only `id` and `state` are
 // guaranteed; the remaining meta-derived fields are populated for finished runs
 // only. In-flight and abandoned rows carry `command` and `started_at` from
-// start.json, or just `started_at` synthesized from the run dir's mtime when
-// start.json is absent. Failed rows carry `start_error` and `command`.
+// start.json. When start.json is absent, `started_at` falls back to the run
+// dir's mtime and `started_at_approx` is set, so callers can tell an estimate
+// from a measurement. A row with no lock file, pid file, or start.json at all
+// carries no liveness signal whatsoever and is reported as state: "unknown"
+// rather than "running". Failed rows carry `start_error` and `command`.
 //
 // Pool rows carry kind: "pool" and member counts instead of a command; their
 // timestamps come from the manifest. Member rows name their pool in `pool`.
 type listRun struct {
-	ID          string         `json:"id"`
-	State       string         `json:"state"`
-	Kind        string         `json:"kind,omitempty"`
-	Pool        string         `json:"pool,omitempty"`
-	Counts      *cg.PoolCounts `json:"counts,omitempty"`
-	Command     []string       `json:"command,omitempty"`
-	StartedAt   *time.Time     `json:"started_at,omitempty"`
-	FinishedAt  *time.Time     `json:"finished_at,omitempty"`
-	DurationMs  *int64         `json:"duration_ms,omitempty"`
-	ExitCode    *int           `json:"exit_code,omitempty"`
-	Signal      *int           `json:"signal,omitempty"`
-	StdoutLines *int64         `json:"stdout_lines,omitempty"`
-	StderrLines *int64         `json:"stderr_lines,omitempty"`
-	StartError  string         `json:"start_error,omitempty"`
+	ID              string         `json:"id"`
+	State           string         `json:"state"`
+	Kind            string         `json:"kind,omitempty"`
+	Pool            string         `json:"pool,omitempty"`
+	Counts          *cg.PoolCounts `json:"counts,omitempty"`
+	Command         []string       `json:"command,omitempty"`
+	StartedAt       *time.Time     `json:"started_at,omitempty"`
+	StartedAtApprox bool           `json:"started_at_approx,omitempty"`
+	FinishedAt      *time.Time     `json:"finished_at,omitempty"`
+	DurationMs      *int64         `json:"duration_ms,omitempty"`
+	ExitCode        *int           `json:"exit_code,omitempty"`
+	Signal          *int           `json:"signal,omitempty"`
+	StdoutLines     *int64         `json:"stdout_lines,omitempty"`
+	StderrLines     *int64         `json:"stderr_lines,omitempty"`
+	StartError      string         `json:"start_error,omitempty"`
 }
 
 func registerList(s *mcpsdk.Server) {
 	mcpsdk.AddTool(s, &mcpsdk.Tool{
 		Name:        "cg_list",
-		Description: "List recent capture runs, most-recent-first by directory mtime. The `state` input filters to finished (default), running, failed, abandoned, or all runs. Failed rows include state: \"failed\" and start_error. Running and abandoned rows carry id, state, command, and started_at from start.json, falling back to the run dir's mtime when start.json is absent. An abandoned run is one whose supervisor died before recording the run's exit. Pool members collapse behind one row per pool with kind: \"pool\" and member counts; the `pool` input expands them: a pool ID lists that pool's members (state defaults to all), \"none\" lists only standalone runs, \"any\" lists everything uncollapsed.",
+		Description: "List recent capture runs, most-recent-first by directory mtime. The `state` input filters to finished (default), running, failed, abandoned, unknown, or all runs. Failed rows include state: \"failed\" and start_error. Running and abandoned rows carry id, state, command, and started_at from start.json, falling back to the run dir's mtime (with started_at_approx: true) when start.json is absent. An abandoned run is one whose supervisor died before recording the run's exit. A run with no lock file, pid file, or start.json at all carries no liveness signal and is reported as state: \"unknown\" rather than \"running\". Pool members collapse behind one row per pool with kind: \"pool\" and member counts; the `pool` input expands them: a pool ID lists that pool's members (state defaults to all), \"none\" lists only standalone runs, \"any\" lists everything uncollapsed.",
 	}, handleList)
 }
 
@@ -100,9 +104,9 @@ func handleList(_ context.Context, _ *mcpsdk.CallToolRequest, in listInput) (*mc
 		}
 	}
 	switch state {
-	case listStateAll, stateFinished, stateRunning, stateFailed, stateAbandoned:
+	case listStateAll, stateFinished, stateRunning, stateFailed, stateAbandoned, stateUnknown:
 	default:
-		return nil, listOutput{}, fmt.Errorf("invalid state %q: want all|finished|running|failed|abandoned", in.State)
+		return nil, listOutput{}, fmt.Errorf("invalid state %q: want all|finished|running|failed|abandoned|unknown", in.State)
 	}
 
 	root := cg.CaptureRoot()
@@ -168,17 +172,27 @@ func handleList(_ context.Context, _ *mcpsdk.CallToolRequest, in listInput) (*mc
 				})
 				continue
 			}
+			// A running capture writes start.json with its command and precise
+			// start time; fall back to the run dir's mtime when it is absent.
+			hasLock := cg.LockFileExists(dir)
+			si, siErr := cg.ReadStartInfo(dir)
+			hasStart := siErr == nil
+
 			// A released run lock with no meta.json means the supervisor died
 			// before recording the run's exit: the run is abandoned, not running.
+			// No lock file, pid file, or start.json at all means no liveness
+			// signal has ever been recorded for this directory: unknown, not
+			// running.
 			rowState := stateRunning
-			if cg.RunLockReleased(dir) {
+			switch {
+			case !hasLock && !hasStart:
+				rowState = stateUnknown
+			case cg.RunLockReleased(dir):
 				rowState = stateAbandoned
 			}
 
-			// A running capture writes start.json with its command and precise
-			// start time; fall back to the run dir's mtime when it is absent.
 			r := listRun{ID: name, State: rowState}
-			if si, siErr := cg.ReadStartInfo(dir); siErr == nil {
+			if hasStart {
 				started := si.StartedAt
 				r.StartedAt = &started
 				r.Command = si.Command
@@ -186,6 +200,7 @@ func handleList(_ context.Context, _ *mcpsdk.CallToolRequest, in listInput) (*mc
 			} else {
 				started := mtime
 				r.StartedAt = &started
+				r.StartedAtApprox = true
 			}
 			rows = append(rows, row{mtime: mtime, run: r})
 			continue

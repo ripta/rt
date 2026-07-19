@@ -52,3 +52,21 @@ func TestRunLockReleased(t *testing.T) {
 		t.Fatal("released lock: got not released, want released")
 	}
 }
+
+func TestLockFileExists(t *testing.T) {
+	dir := t.TempDir()
+
+	if LockFileExists(dir) {
+		t.Fatal("no lock file: got exists, want not")
+	}
+
+	lock, err := acquireRunLock(dir)
+	if err != nil {
+		t.Fatalf("acquiring lock: %v", err)
+	}
+	defer lock.Close()
+
+	if !LockFileExists(dir) {
+		t.Fatal("held lock: got not exists, want exists")
+	}
+}

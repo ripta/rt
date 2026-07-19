@@ -264,6 +264,15 @@ in `cg_list`, which also accepts `state: abandoned` as a filter. `cg prune`
 treats abandoned runs as evictable alongside finished ones. A run whose
 supervisor still holds the run lock is live and is never pruned.
 
+A run directory with no lock file, no pid file, and no `start.json` at all
+carries no liveness signal whatsoever, which happens when a supervisor dies
+before it can even acquire the lock. Such a run lists as `unknown` rather than
+`running` in `cg ls` and in `cg_list`, which also accepts `state: unknown` as a
+filter. When `start.json` is missing, both `cg ls` and `cg_list` fall back to
+the run directory's mtime for an approximate elapsed time: `cg ls` marks it
+with a `~` prefix, and `cg_list` sets `started_at_approx: true` alongside the
+mtime-derived `started_at`.
+
 `cg_run_many` runs a flat pool of commands. Each argv in `commands` runs
 `repeat` times, through at most `parallelism` workers. Parallelism defaults to
 1, which executes runs in listed order with repeats consecutive. `on_error`

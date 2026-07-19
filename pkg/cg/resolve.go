@@ -199,6 +199,7 @@ type lsRow struct {
 	debug     *StartDebug
 	start     *StartInfo
 	abandoned bool
+	unknown   bool
 	pool      *PoolManifest
 	poolState string
 	memberOf  string
@@ -250,11 +251,13 @@ func (opts *lsOptions) run(cmd *cobra.Command, args []string) error {
 			row.debug = d
 			row.memberOf = d.Pool
 		} else {
+			hasLock := LockFileExists(dir)
 			row.abandoned = RunLockReleased(dir)
 			if s, err := ReadStartInfo(dir); err == nil {
 				row.start = s
 				row.memberOf = s.Pool
 			}
+			row.unknown = !hasLock && row.start == nil
 		}
 		rows = append(rows, row)
 	}
@@ -304,10 +307,15 @@ func (opts *lsOptions) run(cmd *cobra.Command, args []string) error {
 
 // formatLsRow renders one tab-separated ls row: id, status, duration, command.
 // Finished runs read their status and duration from meta.json; failed runs read
-// the command from debug.json; in-flight and abandoned runs read the command from
-// start.json and show elapsed time measured against now. Pool rows show the pool
-// state and a member-count summary in place of a command. The caller aligns the
-// columns with a tabwriter.
+// the command from debug.json; in-flight and abandoned runs read the command and
+// exact elapsed time from start.json. A run with no lock file, pid file, or
+// start.json carries no liveness signal at all, so it is reported as unknown
+// rather than running. Runs without start.json fall back to the run directory's
+// mtime for an approximate elapsed time, prefixed with "~" to mark it as an
+// estimate rather than a measurement; the command stays unknown in that case,
+// since mtime carries no command information. Pool rows show the pool state and
+// a member-count summary in place of a command. The caller aligns the columns
+// with a tabwriter.
 func formatLsRow(r lsRow, now time.Time) string {
 	if r.pool != nil {
 		dur := formatDuration(now.Sub(r.pool.StartedAt))
@@ -329,12 +337,19 @@ func formatLsRow(r lsRow, now time.Time) string {
 	}
 
 	status := "running"
-	if r.abandoned {
+	switch {
+	case r.unknown:
+		status = "unknown"
+	case r.abandoned:
 		status = "abandoned"
 	}
 	if r.start != nil {
 		elapsed := formatDuration(now.Sub(r.start.StartedAt))
 		return fmt.Sprintf("%s\t%s\t%s\t%s", r.id, status, elapsed, EscapeArgs(r.start.Command))
+	}
+	if !r.mtime.IsZero() {
+		elapsed := "~" + formatDuration(now.Sub(r.mtime))
+		return fmt.Sprintf("%s\t%s\t%s\t?", r.id, status, elapsed)
 	}
 	return fmt.Sprintf("%s\t%s\t?\t?", r.id, status)
 }

@@ -32,6 +32,15 @@ func RunLockReleased(dir string) bool {
 	return syscall.Flock(int(f.Fd()), syscall.LOCK_SH|syscall.LOCK_NB) == nil
 }
 
+// LockFileExists reports whether dir has a run lock file, regardless of whether
+// it is currently held. It distinguishes "no liveness signal at all" (the
+// supervisor died before acquiring the lock, or the run predates or bypassed
+// the supervisor) from RunLockReleased's "signal present but released."
+func LockFileExists(dir string) bool {
+	_, err := os.Stat(filepath.Join(dir, LockFilename))
+	return err == nil
+}
+
 // acquireRunLock creates dir/lock if needed and takes a non-blocking exclusive flock
 // on it. The caller must keep the returned file open for as long as the lock must be
 // held; closing it releases the lock. A held lock means another supervisor owns the

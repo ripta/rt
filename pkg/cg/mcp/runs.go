@@ -8,6 +8,7 @@ const (
 	stateFinished  = "finished"
 	stateFailed    = "failed"
 	stateAbandoned = "abandoned"
+	stateUnknown   = "unknown"
 )
 
 // runRegistry tracks the Done channels of capture runs that this MCP server

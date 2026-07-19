@@ -157,30 +157,33 @@ func TestHandleListStateAll(t *testing.T) {
 	if out.Runs[0].ID != "AAAAAA" || out.Runs[0].State != "finished" {
 		t.Errorf("Runs[0] = %+v, want AAAAAA/finished", out.Runs[0])
 	}
-	if out.Runs[1].ID != "CCCCCC" || out.Runs[1].State != "running" {
-		t.Errorf("Runs[1] = %+v, want CCCCCC/running", out.Runs[1])
+	if out.Runs[1].ID != "CCCCCC" || out.Runs[1].State != "unknown" {
+		t.Errorf("Runs[1] = %+v, want CCCCCC/unknown", out.Runs[1])
 	}
 	r := out.Runs[1]
 	if r.Command != nil {
-		t.Errorf("in-flight Command = %v, want nil", r.Command)
+		t.Errorf("no-signal Command = %v, want nil", r.Command)
 	}
 	if r.FinishedAt != nil {
-		t.Errorf("in-flight FinishedAt = %v, want nil", r.FinishedAt)
+		t.Errorf("no-signal FinishedAt = %v, want nil", r.FinishedAt)
 	}
 	if r.DurationMs != nil {
-		t.Errorf("in-flight DurationMs = %v, want nil", r.DurationMs)
+		t.Errorf("no-signal DurationMs = %v, want nil", r.DurationMs)
 	}
 	if r.ExitCode != nil {
-		t.Errorf("in-flight ExitCode = %v, want nil", r.ExitCode)
+		t.Errorf("no-signal ExitCode = %v, want nil", r.ExitCode)
 	}
 	if r.StdoutLines != nil || r.StderrLines != nil {
-		t.Errorf("in-flight line counts = %v/%v, want nil", r.StdoutLines, r.StderrLines)
+		t.Errorf("no-signal line counts = %v/%v, want nil", r.StdoutLines, r.StderrLines)
 	}
 	if r.StartedAt == nil {
-		t.Fatalf("in-flight StartedAt = nil, want mtime")
+		t.Fatalf("no-signal StartedAt = nil, want mtime")
 	}
 	if !r.StartedAt.Equal(runMtime) {
-		t.Errorf("in-flight StartedAt = %v, want %v", *r.StartedAt, runMtime)
+		t.Errorf("no-signal StartedAt = %v, want %v", *r.StartedAt, runMtime)
+	}
+	if !r.StartedAtApprox {
+		t.Errorf("no-signal StartedAtApprox = false, want true")
 	}
 }
 
@@ -191,7 +194,8 @@ func TestHandleListStateRunning(t *testing.T) {
 	}
 
 	seedRunDir(t, "AAAAAA", &cg.Meta{RunInfo: cg.RunInfo{ID: "AAAAAA", Command: []string{"echo", "done"}}})
-	seedRunDir(t, "CCCCCC", nil)
+	dir := seedRunDir(t, "CCCCCC", nil)
+	holdRunLock(t, dir)
 
 	_, out, err := handleList(context.Background(), nil, listInput{State: "running"})
 	if err != nil {
@@ -241,8 +245,9 @@ func TestHandleListStateAbandoned(t *testing.T) {
 
 	seedRunDir(t, "AAAAAA", &cg.Meta{RunInfo: cg.RunInfo{ID: "AAAAAA", Command: []string{"echo", "done"}}})
 
-	// In flight on the shell path: no meta.json and no lock file.
-	seedRunDir(t, "DDDDDD", nil)
+	// Live supervised run: the lock is held.
+	dirRun := seedRunDir(t, "DDDDDD", nil)
+	holdRunLock(t, dirRun)
 
 	// Abandoned: the lock file exists but nothing holds it, and start.json
 	// survives from before the supervisor died.
@@ -285,6 +290,46 @@ func TestHandleListStateAbandoned(t *testing.T) {
 	}
 	if len(out.Runs) != 3 {
 		t.Errorf("all filter returned %d runs, want 3: %+v", len(out.Runs), out.Runs)
+	}
+}
+
+func TestHandleListStateUnknown(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	if err := os.MkdirAll(cg.CaptureRoot(), 0o755); err != nil {
+		t.Fatalf("mkdir root: %v", err)
+	}
+
+	// No lock file, no pid file, no start.json: zero liveness signal.
+	dir := seedRunDir(t, "ZZZZZZ", nil)
+	mtime := time.Now().Add(-10 * time.Minute)
+	if err := os.Chtimes(dir, mtime, mtime); err != nil {
+		t.Fatalf("chtimes: %v", err)
+	}
+
+	_, out, err := handleList(context.Background(), nil, listInput{State: "unknown"})
+	if err != nil {
+		t.Fatalf("handleList unknown: %v", err)
+	}
+	if len(out.Runs) != 1 {
+		t.Fatalf("expected 1 unknown run, got %d: %+v", len(out.Runs), out.Runs)
+	}
+	r := out.Runs[0]
+	if r.ID != "ZZZZZZ" || r.State != "unknown" {
+		t.Errorf("Runs[0] = %+v, want ZZZZZZ/unknown", r)
+	}
+	if r.StartedAt == nil || !r.StartedAt.Equal(mtime) {
+		t.Errorf("unknown StartedAt = %v, want %v", r.StartedAt, mtime)
+	}
+	if !r.StartedAtApprox {
+		t.Errorf("unknown StartedAtApprox = false, want true")
+	}
+
+	_, out, err = handleList(context.Background(), nil, listInput{State: "running"})
+	if err != nil {
+		t.Fatalf("handleList running: %v", err)
+	}
+	if len(out.Runs) != 0 {
+		t.Errorf("running filter listed a no-signal run: %+v", out.Runs)
 	}
 }
 

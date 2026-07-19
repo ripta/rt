@@ -225,15 +225,17 @@ func TestLsCommand(t *testing.T) {
 	if len(lines) != 3 {
 		t.Fatalf("expected 3 lines, got %d: %q", len(lines), stdout)
 	}
-	// Columns are space-aligned by a tabwriter; status width is set by the widest
-	// cell ("running"), so the finished rows pad out to match.
-	if lines[0] != "AAAAAA  exit=0   12ms   echo new" {
+	// Columns are space-aligned by a tabwriter; each column's width is set by its
+	// widest cell, so the other rows pad out to match. CCCCCC has no meta.json,
+	// no lock file, and no start.json, so it carries no liveness signal at all
+	// and falls back to an approximate, mtime-derived duration.
+	if lines[0] != "AAAAAA  exit=0   12ms     echo new" {
 		t.Errorf("line 0 = %q", lines[0])
 	}
-	if lines[1] != "CCCCCC  running  ?      ?" {
+	if lines[1] != "CCCCCC  unknown  ~1h0m0s  ?" {
 		t.Errorf("line 1 = %q", lines[1])
 	}
-	if lines[2] != "BBBBBB  exit=2   1.23s  sh -c 'exit 2'" {
+	if lines[2] != "BBBBBB  exit=2   1.23s    sh -c 'exit 2'" {
 		t.Errorf("line 2 = %q", lines[2])
 	}
 }
@@ -419,10 +421,36 @@ func TestFormatLsRowRunning(t *testing.T) {
 func TestFormatLsRowRunningNoStartInfo(t *testing.T) {
 	t.Parallel()
 
+	// A zero mtime carries no timestamp at all, so it stays the unresolved
+	// fallback; real rows always have a directory mtime.
 	got := formatLsRow(lsRow{id: "EEEEEE"}, time.Now())
 	want := "EEEEEE\trunning\t?\t?"
 	if got != want {
 		t.Errorf("formatLsRow running fallback = %q, want %q", got, want)
+	}
+}
+
+func TestFormatLsRowRunningMtimeFallback(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now()
+	row := lsRow{id: "FFFFFF", mtime: now.Add(-90 * time.Second)}
+	got := formatLsRow(row, now)
+	want := "FFFFFF\trunning\t~1m30s\t?"
+	if got != want {
+		t.Errorf("formatLsRow running mtime fallback = %q, want %q", got, want)
+	}
+}
+
+func TestFormatLsRowUnknown(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now()
+	row := lsRow{id: "UUUUUU", mtime: now.Add(-5 * time.Minute), unknown: true}
+	got := formatLsRow(row, now)
+	want := "UUUUUU\tunknown\t~5m0s\t?"
+	if got != want {
+		t.Errorf("formatLsRow unknown = %q, want %q", got, want)
 	}
 }
 
@@ -441,10 +469,11 @@ func TestFormatLsRowAbandoned(t *testing.T) {
 		t.Errorf("formatLsRow abandoned = %q, want %q", got, want)
 	}
 
-	got = formatLsRow(lsRow{id: "ABANDN", abandoned: true}, now)
-	want = "ABANDN\tabandoned\t?\t?"
+	row = lsRow{id: "ABANDN", abandoned: true, mtime: now.Add(-90 * time.Second)}
+	got = formatLsRow(row, now)
+	want = "ABANDN\tabandoned\t~1m30s\t?"
 	if got != want {
-		t.Errorf("formatLsRow abandoned fallback = %q, want %q", got, want)
+		t.Errorf("formatLsRow abandoned mtime fallback = %q, want %q", got, want)
 	}
 }
 
@@ -493,6 +522,35 @@ func TestLsCommandAbandonedRun(t *testing.T) {
 	}
 	if !strings.HasPrefix(lines[1], "DDDDDD") || !strings.Contains(lines[1], "running") {
 		t.Errorf("line 1 = %q, want DDDDDD running", lines[1])
+	}
+}
+
+func TestLsCommandUnknownRun(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	root := CaptureRoot()
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatalf("mkdir root: %v", err)
+	}
+
+	// No lock file, no pid file, no start.json: zero liveness signal.
+	dir := seedRunDir(t, "ZZZZZZ", nil)
+
+	now := time.Now()
+	if err := os.Chtimes(dir, now.Add(-5*time.Minute), now.Add(-5*time.Minute)); err != nil {
+		t.Fatalf("chtimes: %v", err)
+	}
+
+	stdout, _, err := runCgSplit("ls")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	lines := strings.Split(strings.TrimRight(stdout, "\n"), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("expected 1 line, got %d: %q", len(lines), stdout)
+	}
+	if !strings.HasPrefix(lines[0], "ZZZZZZ") || !strings.Contains(lines[0], "unknown") || !strings.Contains(lines[0], "~5m0s") {
+		t.Errorf("line 0 = %q, want ZZZZZZ unknown ~5m0s", lines[0])
 	}
 }
 
