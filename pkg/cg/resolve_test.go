@@ -632,3 +632,348 @@ func TestLsCommandSignaledMeta(t *testing.T) {
 		t.Errorf("stdout = %q, want %q", stdout, want)
 	}
 }
+
+func TestLsCommandStateFilter(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	root := CaptureRoot()
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatalf("mkdir root: %v", err)
+	}
+
+	seedRunDir(t, "AAAAAA", &Meta{RunInfo: RunInfo{ID: "AAAAAA", Command: []string{"echo", "hi"}}})
+
+	dirRunning := seedRunDir(t, "RRRRRR", nil)
+	held, err := acquireRunLock(dirRunning)
+	if err != nil {
+		t.Fatalf("holding lock: %v", err)
+	}
+	defer held.Close()
+
+	dirAband := seedRunDir(t, "BBBBBB", nil)
+	lock, err := acquireRunLock(dirAband)
+	if err != nil {
+		t.Fatalf("acquiring lock: %v", err)
+	}
+	lock.Close()
+
+	seedRunDir(t, "ZZZZZZ", nil) // no lock, no start.json: unknown
+
+	dirFailed := seedRunDir(t, "FFFFFF", nil)
+	if err := WriteStartDebug(dirFailed, &StartDebug{RunInfo: RunInfo{ID: "FFFFFF", Command: []string{"nope"}}, StartError: "exec: not found"}); err != nil {
+		t.Fatalf("WriteStartDebug: %v", err)
+	}
+
+	tests := []struct {
+		state string
+		want  string
+	}{
+		{state: "finished", want: "AAAAAA"},
+		{state: "running", want: "RRRRRR"},
+		{state: "abandoned", want: "BBBBBB"},
+		{state: "unknown", want: "ZZZZZZ"},
+		{state: "failed", want: "FFFFFF"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.state, func(t *testing.T) {
+			stdout, _, err := runCgSplit("ls", "--state", tt.state)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			lines := strings.Split(strings.TrimRight(stdout, "\n"), "\n")
+			if len(lines) != 1 || !strings.HasPrefix(lines[0], tt.want) {
+				t.Errorf("--state %s = %q, want just %s", tt.state, stdout, tt.want)
+			}
+		})
+	}
+
+	stdout, _, err := runCgSplit("ls")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Count(stdout, "\n") != 5 {
+		t.Errorf("default (all) = %q, want 5 rows", stdout)
+	}
+
+	_, stderr, err := runCgSplit("ls", "--state", "bogus")
+	var exitErr *ExitError
+	if !errors.As(err, &exitErr) || exitErr.Code != 2 {
+		t.Fatalf("expected exit code 2, got %v", err)
+	}
+	if !strings.Contains(stderr, "invalid --state") {
+		t.Errorf("stderr = %q, want invalid --state message", stderr)
+	}
+}
+
+func TestLsCommandExitCodeFilter(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	root := CaptureRoot()
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatalf("mkdir root: %v", err)
+	}
+
+	seedRunDir(t, "AAAAAA", &Meta{RunInfo: RunInfo{ID: "AAAAAA", Command: []string{"echo", "ok"}}, ExitCode: 0})
+	seedRunDir(t, "BBBBBB", &Meta{RunInfo: RunInfo{ID: "BBBBBB", Command: []string{"sh", "-c", "exit 1"}}, ExitCode: 1})
+	seedRunDir(t, "CCCCCC", &Meta{RunInfo: RunInfo{ID: "CCCCCC", Command: []string{"sh", "-c", "exit 2"}}, ExitCode: 2})
+	sig := 9
+	seedRunDir(t, "DDDDDD", &Meta{RunInfo: RunInfo{ID: "DDDDDD", Command: []string{"sleep", "10"}}, ExitCode: -1, Signal: &sig})
+
+	tests := []struct {
+		expr    string
+		include []string
+		exclude []string
+	}{
+		{expr: "0", include: []string{"AAAAAA"}, exclude: []string{"BBBBBB", "CCCCCC", "DDDDDD"}},
+		{expr: "!=0", include: []string{"BBBBBB", "CCCCCC", "DDDDDD"}, exclude: []string{"AAAAAA"}},
+		{expr: ">=1", include: []string{"BBBBBB", "CCCCCC"}, exclude: []string{"AAAAAA", "DDDDDD"}},
+		{expr: ">1", include: []string{"CCCCCC"}, exclude: []string{"AAAAAA", "BBBBBB", "DDDDDD"}},
+		{expr: "<1", include: []string{"DDDDDD", "AAAAAA"}, exclude: []string{"BBBBBB", "CCCCCC"}},
+		{expr: "<=1", include: []string{"AAAAAA", "BBBBBB", "DDDDDD"}, exclude: []string{"CCCCCC"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.expr, func(t *testing.T) {
+			stdout, _, err := runCgSplit("ls", "--exit-code", tt.expr)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			for _, id := range tt.include {
+				if !strings.Contains(stdout, id) {
+					t.Errorf("--exit-code %s = %q, want %s included", tt.expr, stdout, id)
+				}
+			}
+			for _, id := range tt.exclude {
+				if strings.Contains(stdout, id) {
+					t.Errorf("--exit-code %s = %q, want %s excluded", tt.expr, stdout, id)
+				}
+			}
+		})
+	}
+
+	_, stderr, err := runCgSplit("ls", "--exit-code", "banana")
+	var exitErr *ExitError
+	if !errors.As(err, &exitErr) || exitErr.Code != 2 {
+		t.Fatalf("expected exit code 2, got %v", err)
+	}
+	if !strings.Contains(stderr, "invalid --exit-code") {
+		t.Errorf("stderr = %q, want invalid --exit-code message", stderr)
+	}
+}
+
+func TestLsCommandExitCodePoolExemption(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	root := CaptureRoot()
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatalf("mkdir root: %v", err)
+	}
+
+	seedPoolWithMembers(t, "PPPPPP", "AAAAAA", "BBBBBB") // exit 0 and exit 1
+	seedRunDir(t, "SSSSSS", &Meta{RunInfo: RunInfo{ID: "SSSSSS", Command: []string{"echo", "solo"}}, ExitCode: 0})
+
+	// Collapsed: the pool row always passes through --exit-code; the solo
+	// exit-0 run does not match "!=0".
+	stdout, _, err := runCgSplit("ls", "--exit-code", "!=0")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(stdout, "PPPPPP") {
+		t.Errorf("pool row missing under --exit-code filter: %q", stdout)
+	}
+	if strings.Contains(stdout, "SSSSSS") {
+		t.Errorf("solo run with exit 0 leaked under --exit-code '!=0': %q", stdout)
+	}
+
+	// Expanded: pool members are filtered normally, with no exemption.
+	stdout, _, err = runCgSplit("ls", "--pool", "any", "--exit-code", "!=0")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(stdout, "PPPPPP") {
+		t.Errorf("pool row missing under --pool any --exit-code filter: %q", stdout)
+	}
+	if strings.Contains(stdout, "AAAAAA") {
+		t.Errorf("matching-zero member AAAAAA leaked under --exit-code '!=0': %q", stdout)
+	}
+	if !strings.Contains(stdout, "BBBBBB") {
+		t.Errorf("non-matching member BBBBBB missing under --exit-code '!=0': %q", stdout)
+	}
+}
+
+func TestLsCommandSinceBeforeFilter(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	root := CaptureRoot()
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatalf("mkdir root: %v", err)
+	}
+
+	now := time.Now()
+	dirOld := seedRunDir(t, "AAAAAA", &Meta{RunInfo: RunInfo{ID: "AAAAAA", Command: []string{"echo", "old"}, StartedAt: now.Add(-3 * time.Hour)}})
+	dirNew := seedRunDir(t, "BBBBBB", &Meta{RunInfo: RunInfo{ID: "BBBBBB", Command: []string{"echo", "new"}, StartedAt: now.Add(-30 * time.Minute)}})
+	chtimes(t, dirOld, now.Add(-3*time.Hour))
+	chtimes(t, dirNew, now.Add(-30*time.Minute))
+
+	// duration-ago form
+	stdout, _, err := runCgSplit("ls", "--since", "1h")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(stdout, "AAAAAA") || !strings.Contains(stdout, "BBBBBB") {
+		t.Errorf("--since 1h = %q, want just BBBBBB", stdout)
+	}
+
+	stdout, _, err = runCgSplit("ls", "--before", "1h")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(stdout, "AAAAAA") || strings.Contains(stdout, "BBBBBB") {
+		t.Errorf("--before 1h = %q, want just AAAAAA", stdout)
+	}
+
+	// RFC3339 form
+	sinceRFC := now.Add(-1 * time.Hour).UTC().Format(time.RFC3339)
+	stdout, _, err = runCgSplit("ls", "--since", sinceRFC)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(stdout, "AAAAAA") || !strings.Contains(stdout, "BBBBBB") {
+		t.Errorf("--since %s = %q, want just BBBBBB", sinceRFC, stdout)
+	}
+
+	// bare date form
+	tomorrow := now.Add(24 * time.Hour).Format("2006-01-02")
+	stdout, _, err = runCgSplit("ls", "--before", tomorrow)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(stdout, "AAAAAA") || !strings.Contains(stdout, "BBBBBB") {
+		t.Errorf("--before %s = %q, want both rows", tomorrow, stdout)
+	}
+
+	// combined range: [now-2h, now-1h) excludes both AAAAAA (now-3h) and
+	// BBBBBB (now-30m, which is after the exclusive upper bound).
+	stdout, _, err = runCgSplit("ls", "--since", "2h", "--before", "1h")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(stdout, "AAAAAA") || strings.Contains(stdout, "BBBBBB") {
+		t.Errorf("--since 2h --before 1h = %q, want neither row", stdout)
+	}
+}
+
+func TestLsCommandSinceAfterBeforeErrors(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+
+	_, stderr, err := runCgSplit("ls", "--since", "1h", "--before", "2h")
+	var exitErr *ExitError
+	if !errors.As(err, &exitErr) || exitErr.Code != 2 {
+		t.Fatalf("expected exit code 2, got %v", err)
+	}
+	if !strings.Contains(stderr, "since") || !strings.Contains(stderr, "before") {
+		t.Errorf("stderr = %q, want a since/before range error", stderr)
+	}
+}
+
+func TestLsCommandSinceBeforeAppliesToPoolRows(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	root := CaptureRoot()
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatalf("mkdir root: %v", err)
+	}
+
+	now := time.Now()
+	finished := now.Add(-2 * time.Hour)
+	dirPool := seedPoolDir(t, "PPPPPP", &PoolManifest{
+		ID:         "PPPPPP",
+		Commands:   [][]string{{"echo", "hi"}},
+		StartedAt:  now.Add(-3 * time.Hour),
+		FinishedAt: &finished,
+		Runs:       []PoolRunRecord{{Command: 0, Status: PoolRunFinished, ExitCode: intp(0)}},
+	})
+	chtimes(t, dirPool, finished)
+
+	// The pool started 3h ago: --since 1h must exclude it, unlike
+	// --exit-code, which always lets pool rows through.
+	stdout, _, err := runCgSplit("ls", "--since", "1h")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(stdout, "PPPPPP") {
+		t.Errorf("--since 1h = %q, want pool excluded (started 3h ago)", stdout)
+	}
+
+	stdout, _, err = runCgSplit("ls", "--before", "1h")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(stdout, "PPPPPP") {
+		t.Errorf("--before 1h = %q, want pool included (started 3h ago)", stdout)
+	}
+}
+
+func TestLsCommandUnknownRowSinceUsesMtime(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	root := CaptureRoot()
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatalf("mkdir root: %v", err)
+	}
+
+	dir := seedRunDir(t, "ZZZZZZ", nil) // no lock, no start.json: unknown
+	chtimes(t, dir, time.Now().Add(-2*time.Hour))
+
+	stdout, _, err := runCgSplit("ls", "--since", "1h")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(stdout, "ZZZZZZ") {
+		t.Errorf("--since 1h = %q, want unknown row excluded (mtime 2h ago)", stdout)
+	}
+
+	stdout, _, err = runCgSplit("ls", "--before", "1h")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(stdout, "ZZZZZZ") {
+		t.Errorf("--before 1h = %q, want unknown row included (mtime 2h ago)", stdout)
+	}
+}
+
+func TestLsCommandCombinedFilters(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	root := CaptureRoot()
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatalf("mkdir root: %v", err)
+	}
+
+	now := time.Now()
+
+	// Matches every filter: finished, exit != 0, started within the last 4h.
+	dirMatch := seedRunDir(t, "AAAAAA", &Meta{
+		RunInfo:  RunInfo{ID: "AAAAAA", Command: []string{"sh", "-c", "exit 1"}, StartedAt: now.Add(-1 * time.Hour)},
+		ExitCode: 1,
+	})
+	chtimes(t, dirMatch, now.Add(-1*time.Hour))
+
+	// Wrong exit code.
+	dirOkExit := seedRunDir(t, "BBBBBB", &Meta{
+		RunInfo:  RunInfo{ID: "BBBBBB", Command: []string{"echo", "ok"}, StartedAt: now.Add(-1 * time.Hour)},
+		ExitCode: 0,
+	})
+	chtimes(t, dirOkExit, now.Add(-1*time.Hour))
+
+	// Too old.
+	dirOld := seedRunDir(t, "CCCCCC", &Meta{
+		RunInfo:  RunInfo{ID: "CCCCCC", Command: []string{"sh", "-c", "exit 1"}, StartedAt: now.Add(-5 * time.Hour)},
+		ExitCode: 1,
+	})
+	chtimes(t, dirOld, now.Add(-5*time.Hour))
+
+	// Not finished at all.
+	seedRunDir(t, "DDDDDD", nil)
+
+	stdout, _, err := runCgSplit("ls", "--state", "finished", "--exit-code", "!=0", "--since", "4h")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	lines := strings.Split(strings.TrimRight(stdout, "\n"), "\n")
+	if len(lines) != 1 || !strings.HasPrefix(lines[0], "AAAAAA") {
+		t.Errorf("combined filters = %q, want just AAAAAA", stdout)
+	}
+}

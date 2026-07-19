@@ -21,8 +21,6 @@ const (
 
 	listStateAll = "all"
 
-	defaultListState = stateFinished
-
 	listPoolNone = "none"
 	listPoolAny  = "any"
 
@@ -31,9 +29,12 @@ const (
 
 // listInput is the argument shape for `cg_list`.
 type listInput struct {
-	Limit int    `json:"limit,omitempty" jsonschema:"maximum number of runs to return; default 20, max 1000"`
-	State string `json:"state,omitempty" jsonschema:"which runs to surface: all|finished|running|failed|abandoned|unknown; default finished, or all when pool is a pool ID"`
-	Pool  string `json:"pool,omitempty" jsonschema:"pool handling: empty collapses members behind one row per pool, a pool ID lists that pool's members, \"none\" lists only standalone runs, \"any\" lists everything uncollapsed"`
+	Limit    int    `json:"limit,omitempty" jsonschema:"maximum number of runs to return; default 20, max 1000"`
+	State    string `json:"state,omitempty" jsonschema:"which runs to surface: all|finished|running|failed|abandoned|unknown; default all"`
+	Pool     string `json:"pool,omitempty" jsonschema:"pool handling: empty collapses members behind one row per pool, a pool ID lists that pool's members, \"none\" lists only standalone runs, \"any\" lists everything uncollapsed"`
+	ExitCode string `json:"exit_code,omitempty" jsonschema:"filter finished runs by exit code: N (equals), !=N, >=N, >N, <N, or <=N; runs with no exit code never match and pool summary rows always pass through regardless"`
+	Since    string `json:"since,omitempty" jsonschema:"only include runs started at or after TIME: a relative duration meaning ago (e.g. 4h, 7d), an RFC3339 timestamp, or a bare YYYY-MM-DD date at local midnight"`
+	Before   string `json:"before,omitempty" jsonschema:"only include runs started strictly before TIME, same grammar as since"`
 }
 
 // listOutput is the result shape for `cg_list`.
@@ -73,7 +74,7 @@ type listRun struct {
 func registerList(s *mcpsdk.Server) {
 	mcpsdk.AddTool(s, &mcpsdk.Tool{
 		Name:        "cg_list",
-		Description: "List recent capture runs, most-recent-first by directory mtime. The `state` input filters to finished (default), running, failed, abandoned, unknown, or all runs. Failed rows include state: \"failed\" and start_error. Running and abandoned rows carry id, state, command, and started_at from start.json, falling back to the run dir's mtime (with started_at_approx: true) when start.json is absent. An abandoned run is one whose supervisor died before recording the run's exit. A run with no lock file, pid file, or start.json at all carries no liveness signal and is reported as state: \"unknown\" rather than \"running\". Pool members collapse behind one row per pool with kind: \"pool\" and member counts; the `pool` input expands them: a pool ID lists that pool's members (state defaults to all), \"none\" lists only standalone runs, \"any\" lists everything uncollapsed.",
+		Description: "List recent capture runs, most-recent-first by directory mtime. The `state` input filters to all (default), finished, running, failed, abandoned, or unknown runs. Failed rows include state: \"failed\" and start_error. Running and abandoned rows carry id, state, command, and started_at from start.json, falling back to the run dir's mtime (with started_at_approx: true) when start.json is absent. An abandoned run is one whose supervisor died before recording the run's exit. A run with no lock file, pid file, or start.json at all carries no liveness signal and is reported as state: \"unknown\" rather than \"running\". The `exit_code` input filters finished runs by exit code: N (equals), !=N, >=N, >N, <N, or <=N; runs with no exit code (running, abandoned, unknown, start-failed) never match, and pool summary rows always pass through regardless of exit_code. The `since`/`before` inputs filter by start time: TIME accepts a relative duration meaning ago (e.g. 4h, 7d), a full RFC3339 timestamp, or a bare YYYY-MM-DD date at local midnight; since is inclusive, before is exclusive, and unlike exit_code these bounds do apply to pool rows, using the pool's own precise started_at. Pool members collapse behind one row per pool with kind: \"pool\" and member counts; the `pool` input expands them: a pool ID lists that pool's members, \"none\" lists only standalone runs, \"any\" lists everything uncollapsed.",
 	}, handleList)
 }
 
@@ -94,19 +95,44 @@ func handleList(_ context.Context, _ *mcpsdk.CallToolRequest, in listInput) (*mc
 	}
 	memberMode := poolFilter != "" && poolFilter != listPoolNone && poolFilter != listPoolAny
 
-	// Asking for a pool's roster implies wanting every member, running and
-	// failed included, so member mode defaults the state filter to all.
 	state := in.State
 	if state == "" {
-		state = defaultListState
-		if memberMode {
-			state = listStateAll
-		}
+		state = listStateAll
 	}
 	switch state {
 	case listStateAll, stateFinished, stateRunning, stateFailed, stateAbandoned, stateUnknown:
 	default:
 		return nil, listOutput{}, fmt.Errorf("invalid state %q: want all|finished|running|failed|abandoned|unknown", in.State)
+	}
+
+	var exitFilter *cg.ExitCodeFilter
+	if in.ExitCode != "" {
+		f, err := cg.ParseExitCodeFilter(in.ExitCode)
+		if err != nil {
+			return nil, listOutput{}, fmt.Errorf("invalid exit_code: %w", err)
+		}
+		exitFilter = &f
+	}
+
+	now := time.Now()
+	var sinceT, beforeT *time.Time
+	if in.Since != "" {
+		t, err := cg.ParseFilterTime(in.Since, now)
+		if err != nil {
+			return nil, listOutput{}, fmt.Errorf("invalid since: %w", err)
+		}
+		sinceT = &t
+	}
+	if in.Before != "" {
+		t, err := cg.ParseFilterTime(in.Before, now)
+		if err != nil {
+			return nil, listOutput{}, fmt.Errorf("invalid before: %w", err)
+		}
+		beforeT = &t
+	}
+	timeFilter, err := cg.NewTimeRangeFilter(sinceT, beforeT)
+	if err != nil {
+		return nil, listOutput{}, err
 	}
 
 	root := cg.CaptureRoot()
@@ -119,8 +145,9 @@ func handleList(_ context.Context, _ *mcpsdk.CallToolRequest, in listInput) (*mc
 	}
 
 	type row struct {
-		mtime time.Time
-		run   listRun
+		mtime       time.Time
+		filterStart time.Time
+		run         listRun
 	}
 	rows := make([]row, 0, len(entries))
 	poolDirs := make(map[string]bool)
@@ -145,7 +172,8 @@ func handleList(_ context.Context, _ *mcpsdk.CallToolRequest, in listInput) (*mc
 				counts := m.Counts()
 				started := m.StartedAt
 				rows = append(rows, row{
-					mtime: mtime,
+					mtime:       mtime,
+					filterStart: m.StartedAt,
 					run: listRun{
 						ID:         name,
 						State:      cg.PoolState(dir, m),
@@ -158,9 +186,10 @@ func handleList(_ context.Context, _ *mcpsdk.CallToolRequest, in listInput) (*mc
 				continue
 			}
 			if dbg, dbgErr := cg.ReadStartDebug(dir); dbgErr == nil {
-				started := mtime
+				started := dbg.StartedAt
 				rows = append(rows, row{
-					mtime: mtime,
+					mtime:       mtime,
+					filterStart: dbg.StartedAt,
 					run: listRun{
 						ID:         name,
 						State:      stateFailed,
@@ -192,17 +221,19 @@ func handleList(_ context.Context, _ *mcpsdk.CallToolRequest, in listInput) (*mc
 			}
 
 			r := listRun{ID: name, State: rowState}
+			filterStart := mtime
 			if hasStart {
 				started := si.StartedAt
 				r.StartedAt = &started
 				r.Command = si.Command
 				r.Pool = si.Pool
+				filterStart = si.StartedAt
 			} else {
 				started := mtime
 				r.StartedAt = &started
 				r.StartedAtApprox = true
 			}
-			rows = append(rows, row{mtime: mtime, run: r})
+			rows = append(rows, row{mtime: mtime, filterStart: filterStart, run: r})
 			continue
 		}
 
@@ -228,7 +259,7 @@ func handleList(_ context.Context, _ *mcpsdk.CallToolRequest, in listInput) (*mc
 			sig := *meta.Signal
 			r.Signal = &sig
 		}
-		rows = append(rows, row{mtime: mtime, run: r})
+		rows = append(rows, row{mtime: mtime, filterStart: meta.StartedAt, run: r})
 	}
 
 	// The pool filter runs before the state filter so collapsing is independent
@@ -263,6 +294,29 @@ func handleList(_ context.Context, _ *mcpsdk.CallToolRequest, in listInput) (*mc
 		kept = rows[:0]
 		for _, r := range rows {
 			if r.run.State == state {
+				kept = append(kept, r)
+			}
+		}
+		rows = kept
+	}
+
+	if exitFilter != nil {
+		kept = rows[:0]
+		for _, r := range rows {
+			switch {
+			case r.run.Kind == listKindPool:
+				kept = append(kept, r) // pool summary rows always pass through
+			case r.run.ExitCode != nil && exitFilter.Match(*r.run.ExitCode):
+				kept = append(kept, r)
+			}
+		}
+		rows = kept
+	}
+
+	if sinceT != nil || beforeT != nil {
+		kept = rows[:0]
+		for _, r := range rows {
+			if timeFilter.Match(r.filterStart) {
 				kept = append(kept, r)
 			}
 		}

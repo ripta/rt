@@ -72,7 +72,7 @@ func TestHandleListEmpty(t *testing.T) {
 	}
 }
 
-func TestHandleListDefaultsToFinished(t *testing.T) {
+func TestHandleListDefaultsToAll(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 	if err := os.MkdirAll(cg.CaptureRoot(), 0o755); err != nil {
 		t.Fatalf("mkdir root: %v", err)
@@ -87,7 +87,7 @@ func TestHandleListDefaultsToFinished(t *testing.T) {
 		ExitCode:   2,
 		DurationMs: 1234,
 	})
-	// Incomplete: dir only, no meta.json. Must be skipped under the default.
+	// No lock, no pid, no start.json: unknown, not skipped, under the default.
 	seedRunDir(t, "CCCCCC", nil)
 	// Non-Crockford dir without meta.json. Must be skipped under every filter.
 	if err := os.MkdirAll(filepath.Join(cg.CaptureRoot(), "lowercase"), 0o755); err != nil {
@@ -106,8 +106,8 @@ func TestHandleListDefaultsToFinished(t *testing.T) {
 	if err != nil {
 		t.Fatalf("handleList: %v", err)
 	}
-	if len(out.Runs) != 2 {
-		t.Fatalf("expected 2 runs, got %d: %+v", len(out.Runs), out.Runs)
+	if len(out.Runs) != 3 {
+		t.Fatalf("expected 3 runs, got %d: %+v", len(out.Runs), out.Runs)
 	}
 	if out.Runs[0].ID != "AAAAAA" {
 		t.Errorf("Runs[0].ID = %q, want AAAAAA", out.Runs[0].ID)
@@ -115,14 +115,54 @@ func TestHandleListDefaultsToFinished(t *testing.T) {
 	if out.Runs[0].State != "finished" {
 		t.Errorf("Runs[0].State = %q, want finished", out.Runs[0].State)
 	}
-	if out.Runs[1].ID != "BBBBBB" {
-		t.Errorf("Runs[1].ID = %q, want BBBBBB", out.Runs[1].ID)
+	if out.Runs[1].ID != "CCCCCC" || out.Runs[1].State != "unknown" {
+		t.Errorf("Runs[1] = %+v, want CCCCCC/unknown", out.Runs[1])
+	}
+	if out.Runs[2].ID != "BBBBBB" {
+		t.Errorf("Runs[2].ID = %q, want BBBBBB", out.Runs[2].ID)
 	}
 	if out.Runs[0].DurationMs == nil || *out.Runs[0].DurationMs != 12 {
 		t.Errorf("Runs[0].DurationMs = %v, want 12", out.Runs[0].DurationMs)
 	}
-	if out.Runs[1].ExitCode == nil || *out.Runs[1].ExitCode != 2 {
-		t.Errorf("Runs[1].ExitCode = %v, want 2", out.Runs[1].ExitCode)
+	if out.Runs[2].ExitCode == nil || *out.Runs[2].ExitCode != 2 {
+		t.Errorf("Runs[2].ExitCode = %v, want 2", out.Runs[2].ExitCode)
+	}
+}
+
+func TestHandleListExplicitStateFinished(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	if err := os.MkdirAll(cg.CaptureRoot(), 0o755); err != nil {
+		t.Fatalf("mkdir root: %v", err)
+	}
+
+	dirNew := seedRunDir(t, "AAAAAA", &cg.Meta{
+		RunInfo:    cg.RunInfo{ID: "AAAAAA", Command: []string{"echo", "new"}},
+		DurationMs: 12,
+	})
+	dirOld := seedRunDir(t, "BBBBBB", &cg.Meta{
+		RunInfo:    cg.RunInfo{ID: "BBBBBB", Command: []string{"echo", "old"}},
+		ExitCode:   2,
+		DurationMs: 1234,
+	})
+	seedRunDir(t, "CCCCCC", nil)
+
+	now := time.Now()
+	if err := os.Chtimes(dirNew, now, now); err != nil {
+		t.Fatalf("chtimes new: %v", err)
+	}
+	if err := os.Chtimes(dirOld, now.Add(-1*time.Hour), now.Add(-1*time.Hour)); err != nil {
+		t.Fatalf("chtimes old: %v", err)
+	}
+
+	_, out, err := handleList(context.Background(), nil, listInput{State: "finished"})
+	if err != nil {
+		t.Fatalf("handleList: %v", err)
+	}
+	if len(out.Runs) != 2 {
+		t.Fatalf("expected 2 runs, got %d: %+v", len(out.Runs), out.Runs)
+	}
+	if out.Runs[0].ID != "AAAAAA" || out.Runs[1].ID != "BBBBBB" {
+		t.Errorf("Runs = %+v, want AAAAAA then BBBBBB", out.Runs)
 	}
 }
 
@@ -520,13 +560,13 @@ func TestHandleListPoolStates(t *testing.T) {
 	})
 	seedLockFile(t, abandoned)
 
-	// The default state filter is finished, so neither pool surfaces.
+	// The default state filter is all, so both pools surface.
 	_, out, err := handleList(context.Background(), nil, listInput{})
 	if err != nil {
 		t.Fatalf("handleList default: %v", err)
 	}
-	if len(out.Runs) != 0 {
-		t.Errorf("default filter listed unfinished pools: %+v", out.Runs)
+	if len(out.Runs) != 2 {
+		t.Errorf("default filter = %+v, want both pools", out.Runs)
 	}
 
 	_, out, err = handleList(context.Background(), nil, listInput{State: "running"})
@@ -682,4 +722,301 @@ func TestHandleListUnknownPoolID(t *testing.T) {
 	if err == nil {
 		t.Fatalf("handleList: expected unknown pool error, got nil; out=%+v", out)
 	}
+}
+
+func TestHandleListExitCodeFilter(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	if err := os.MkdirAll(cg.CaptureRoot(), 0o755); err != nil {
+		t.Fatalf("mkdir root: %v", err)
+	}
+
+	seedRunDir(t, "AAAAAA", &cg.Meta{RunInfo: cg.RunInfo{ID: "AAAAAA", Command: []string{"echo", "ok"}}, ExitCode: 0})
+	seedRunDir(t, "BBBBBB", &cg.Meta{RunInfo: cg.RunInfo{ID: "BBBBBB", Command: []string{"sh", "-c", "exit 1"}}, ExitCode: 1})
+	seedRunDir(t, "CCCCCC", &cg.Meta{RunInfo: cg.RunInfo{ID: "CCCCCC", Command: []string{"sh", "-c", "exit 2"}}, ExitCode: 2})
+
+	tests := []struct {
+		expr string
+		want []string
+	}{
+		{expr: "0", want: []string{"AAAAAA"}},
+		{expr: "!=0", want: []string{"BBBBBB", "CCCCCC"}},
+		{expr: ">=1", want: []string{"BBBBBB", "CCCCCC"}},
+		{expr: ">1", want: []string{"CCCCCC"}},
+		{expr: "<1", want: []string{"AAAAAA"}},
+		{expr: "<=1", want: []string{"AAAAAA", "BBBBBB"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.expr, func(t *testing.T) {
+			_, out, err := handleList(context.Background(), nil, listInput{ExitCode: tt.expr})
+			if err != nil {
+				t.Fatalf("handleList: %v", err)
+			}
+			got := make([]string, len(out.Runs))
+			for i, r := range out.Runs {
+				got[i] = r.ID
+			}
+			if !sameIDSet(got, tt.want) {
+				t.Errorf("exit_code %s = %v, want %v", tt.expr, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestHandleListInvalidExitCode(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+
+	_, out, err := handleList(context.Background(), nil, listInput{ExitCode: "banana"})
+	if err == nil {
+		t.Fatalf("handleList: expected error, got nil; out=%+v", out)
+	}
+}
+
+func TestHandleListExitCodePoolExemption(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	if err := os.MkdirAll(cg.CaptureRoot(), 0o755); err != nil {
+		t.Fatalf("mkdir root: %v", err)
+	}
+
+	seedFinishedPool(t, "PPPPPP", "AAAAAA", "BBBBBB") // exit 0 and exit 1
+	seedRunDir(t, "SSSSSS", &cg.Meta{RunInfo: cg.RunInfo{ID: "SSSSSS", Command: []string{"echo", "solo"}}, ExitCode: 0})
+
+	// Collapsed: the pool row always passes through exit_code; the solo
+	// exit-0 run does not match "!=0".
+	_, out, err := handleList(context.Background(), nil, listInput{ExitCode: "!=0"})
+	if err != nil {
+		t.Fatalf("handleList: %v", err)
+	}
+	if !sameIDSet(runIDs(out.Runs), []string{"PPPPPP"}) {
+		t.Errorf("exit_code '!=0' = %+v, want just the pool row", out.Runs)
+	}
+
+	// Expanded: pool members are filtered normally, with no exemption.
+	_, out, err = handleList(context.Background(), nil, listInput{Pool: "any", ExitCode: "!=0"})
+	if err != nil {
+		t.Fatalf("handleList members: %v", err)
+	}
+	if !sameIDSet(runIDs(out.Runs), []string{"PPPPPP", "BBBBBB"}) {
+		t.Errorf("pool any + exit_code '!=0' = %+v, want pool row plus BBBBBB", out.Runs)
+	}
+}
+
+func TestHandleListSinceBeforeAllForms(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	if err := os.MkdirAll(cg.CaptureRoot(), 0o755); err != nil {
+		t.Fatalf("mkdir root: %v", err)
+	}
+
+	now := time.Now()
+	dirOld := seedRunDir(t, "AAAAAA", &cg.Meta{RunInfo: cg.RunInfo{ID: "AAAAAA", Command: []string{"echo", "old"}, StartedAt: now.Add(-3 * time.Hour)}})
+	dirNew := seedRunDir(t, "BBBBBB", &cg.Meta{RunInfo: cg.RunInfo{ID: "BBBBBB", Command: []string{"echo", "new"}, StartedAt: now.Add(-30 * time.Minute)}})
+	if err := os.Chtimes(dirOld, now.Add(-3*time.Hour), now.Add(-3*time.Hour)); err != nil {
+		t.Fatalf("chtimes old: %v", err)
+	}
+	if err := os.Chtimes(dirNew, now.Add(-30*time.Minute), now.Add(-30*time.Minute)); err != nil {
+		t.Fatalf("chtimes new: %v", err)
+	}
+
+	_, out, err := handleList(context.Background(), nil, listInput{Since: "1h"})
+	if err != nil {
+		t.Fatalf("handleList since duration: %v", err)
+	}
+	if !sameIDSet(runIDs(out.Runs), []string{"BBBBBB"}) {
+		t.Errorf("since=1h = %+v, want just BBBBBB", out.Runs)
+	}
+
+	_, out, err = handleList(context.Background(), nil, listInput{Before: "1h"})
+	if err != nil {
+		t.Fatalf("handleList before duration: %v", err)
+	}
+	if !sameIDSet(runIDs(out.Runs), []string{"AAAAAA"}) {
+		t.Errorf("before=1h = %+v, want just AAAAAA", out.Runs)
+	}
+
+	sinceRFC := now.Add(-1 * time.Hour).UTC().Format(time.RFC3339)
+	_, out, err = handleList(context.Background(), nil, listInput{Since: sinceRFC})
+	if err != nil {
+		t.Fatalf("handleList since rfc3339: %v", err)
+	}
+	if !sameIDSet(runIDs(out.Runs), []string{"BBBBBB"}) {
+		t.Errorf("since=%s = %+v, want just BBBBBB", sinceRFC, out.Runs)
+	}
+
+	tomorrow := now.Add(24 * time.Hour).Format("2006-01-02")
+	_, out, err = handleList(context.Background(), nil, listInput{Before: tomorrow})
+	if err != nil {
+		t.Fatalf("handleList before date: %v", err)
+	}
+	if !sameIDSet(runIDs(out.Runs), []string{"AAAAAA", "BBBBBB"}) {
+		t.Errorf("before=%s = %+v, want both rows", tomorrow, out.Runs)
+	}
+}
+
+func TestHandleListSinceAfterBeforeErrors(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+
+	_, out, err := handleList(context.Background(), nil, listInput{Since: "1h", Before: "2h"})
+	if err == nil {
+		t.Fatalf("handleList: expected error, got nil; out=%+v", out)
+	}
+}
+
+func TestHandleListInvalidSince(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+
+	_, out, err := handleList(context.Background(), nil, listInput{Since: "banana"})
+	if err == nil {
+		t.Fatalf("handleList: expected error, got nil; out=%+v", out)
+	}
+}
+
+func TestHandleListInvalidBefore(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+
+	_, out, err := handleList(context.Background(), nil, listInput{Before: "banana"})
+	if err == nil {
+		t.Fatalf("handleList: expected error, got nil; out=%+v", out)
+	}
+}
+
+func TestHandleListSinceBeforeAppliesToPoolRows(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	if err := os.MkdirAll(cg.CaptureRoot(), 0o755); err != nil {
+		t.Fatalf("mkdir root: %v", err)
+	}
+
+	now := time.Now()
+	finished := now.Add(-2 * time.Hour)
+	dirPool := seedPoolDir(t, "PPPPPP", &cg.PoolManifest{
+		ID:         "PPPPPP",
+		Commands:   [][]string{{"echo", "hi"}},
+		StartedAt:  now.Add(-3 * time.Hour),
+		FinishedAt: &finished,
+		Runs:       []cg.PoolRunRecord{{Command: 0, Status: cg.PoolRunFinished, ExitCode: intp(0)}},
+	})
+	if err := os.Chtimes(dirPool, finished, finished); err != nil {
+		t.Fatalf("chtimes pool: %v", err)
+	}
+
+	// The pool started 3h ago: since=1h must exclude it, unlike exit_code,
+	// which always lets pool rows through.
+	_, out, err := handleList(context.Background(), nil, listInput{Since: "1h"})
+	if err != nil {
+		t.Fatalf("handleList since: %v", err)
+	}
+	if len(out.Runs) != 0 {
+		t.Errorf("since=1h = %+v, want pool excluded (started 3h ago)", out.Runs)
+	}
+
+	_, out, err = handleList(context.Background(), nil, listInput{Before: "1h"})
+	if err != nil {
+		t.Fatalf("handleList before: %v", err)
+	}
+	if !sameIDSet(runIDs(out.Runs), []string{"PPPPPP"}) {
+		t.Errorf("before=1h = %+v, want pool included (started 3h ago)", out.Runs)
+	}
+}
+
+func TestHandleListCombinedFilters(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	if err := os.MkdirAll(cg.CaptureRoot(), 0o755); err != nil {
+		t.Fatalf("mkdir root: %v", err)
+	}
+
+	now := time.Now()
+
+	dirMatch := seedRunDir(t, "AAAAAA", &cg.Meta{
+		RunInfo:  cg.RunInfo{ID: "AAAAAA", Command: []string{"sh", "-c", "exit 1"}, StartedAt: now.Add(-1 * time.Hour)},
+		ExitCode: 1,
+	})
+	if err := os.Chtimes(dirMatch, now.Add(-1*time.Hour), now.Add(-1*time.Hour)); err != nil {
+		t.Fatalf("chtimes match: %v", err)
+	}
+
+	dirOkExit := seedRunDir(t, "BBBBBB", &cg.Meta{
+		RunInfo:  cg.RunInfo{ID: "BBBBBB", Command: []string{"echo", "ok"}, StartedAt: now.Add(-1 * time.Hour)},
+		ExitCode: 0,
+	})
+	if err := os.Chtimes(dirOkExit, now.Add(-1*time.Hour), now.Add(-1*time.Hour)); err != nil {
+		t.Fatalf("chtimes ok exit: %v", err)
+	}
+
+	dirOld := seedRunDir(t, "CCCCCC", &cg.Meta{
+		RunInfo:  cg.RunInfo{ID: "CCCCCC", Command: []string{"sh", "-c", "exit 1"}, StartedAt: now.Add(-5 * time.Hour)},
+		ExitCode: 1,
+	})
+	if err := os.Chtimes(dirOld, now.Add(-5*time.Hour), now.Add(-5*time.Hour)); err != nil {
+		t.Fatalf("chtimes old: %v", err)
+	}
+
+	seedRunDir(t, "DDDDDD", nil)
+
+	_, out, err := handleList(context.Background(), nil, listInput{State: "finished", ExitCode: "!=0", Since: "4h"})
+	if err != nil {
+		t.Fatalf("handleList: %v", err)
+	}
+	if !sameIDSet(runIDs(out.Runs), []string{"AAAAAA"}) {
+		t.Errorf("combined filters = %+v, want just AAAAAA", out.Runs)
+	}
+}
+
+func TestHandleListFailedRowStartedAtUsesDebugTimestamp(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	if err := os.MkdirAll(cg.CaptureRoot(), 0o755); err != nil {
+		t.Fatalf("mkdir root: %v", err)
+	}
+
+	dir := seedRunDir(t, "FFFFFF", nil)
+	started := time.Now().Add(-90 * time.Minute).UTC()
+	if err := cg.WriteStartDebug(dir, &cg.StartDebug{
+		RunInfo:    cg.RunInfo{ID: "FFFFFF", Command: []string{"nope"}, StartedAt: started},
+		StartError: "exec: not found",
+	}); err != nil {
+		t.Fatalf("WriteStartDebug: %v", err)
+	}
+	// mtime deliberately differs from the precise debug.json StartedAt, so a
+	// mismatch would show the fix used the wrong source.
+	if err := os.Chtimes(dir, time.Now(), time.Now()); err != nil {
+		t.Fatalf("chtimes: %v", err)
+	}
+
+	_, out, err := handleList(context.Background(), nil, listInput{State: "failed"})
+	if err != nil {
+		t.Fatalf("handleList: %v", err)
+	}
+	if len(out.Runs) != 1 {
+		t.Fatalf("expected 1 run, got %d: %+v", len(out.Runs), out.Runs)
+	}
+	r := out.Runs[0]
+	if r.StartedAt == nil || !r.StartedAt.Equal(started) {
+		t.Errorf("failed row StartedAt = %v, want debug.json's %v", r.StartedAt, started)
+	}
+}
+
+// runIDs extracts the ID from each row, in order.
+func runIDs(runs []listRun) []string {
+	ids := make([]string, len(runs))
+	for i, r := range runs {
+		ids[i] = r.ID
+	}
+	return ids
+}
+
+// sameIDSet reports whether got and want contain the same IDs, ignoring order.
+func sameIDSet(got, want []string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	seen := make(map[string]int, len(want))
+	for _, id := range want {
+		seen[id]++
+	}
+	for _, id := range got {
+		seen[id]--
+	}
+	for _, n := range seen {
+		if n != 0 {
+			return false
+		}
+	}
+	return true
 }

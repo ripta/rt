@@ -8,9 +8,11 @@ import (
 
 // Run state strings shared by the meta, list, wait, and cancel outputs.
 const (
-	RunStateRunning  = "running"
-	RunStateFinished = "finished"
-	RunStateFailed   = "failed"
+	RunStateRunning   = "running"
+	RunStateFinished  = "finished"
+	RunStateFailed    = "failed"
+	RunStateAbandoned = "abandoned"
+	RunStateUnknown   = "unknown"
 )
 
 // writeJSON marshals v as indented JSON and writes it to w with a trailing

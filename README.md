@@ -146,8 +146,10 @@ I: Finished exitcode=0 in 3ms (out=1 err=1) id=Q3F9K2
 ```
 
 `cg ls` lists recent runs, most-recent-first; `cg ls -n N` overrides the
-default cap of 20. Capture never deletes anything; `cg prune` is the explicit
-cleanup hook:
+default cap of 20. `--state`, `--exit-code`, and `--since`/`--before` narrow
+the listing further; all three are optional and compose with each other and
+with `--pool` (see below for the full grammar). Capture never deletes
+anything; `cg prune` is the explicit cleanup hook:
 
 ```
 ❯ cg ls
@@ -272,6 +274,30 @@ filter. When `start.json` is missing, both `cg ls` and `cg_list` fall back to
 the run directory's mtime for an approximate elapsed time: `cg ls` marks it
 with a `~` prefix, and `cg_list` sets `started_at_approx: true` alongside the
 mtime-derived `started_at`.
+
+`cg ls --state` and `cg_list`'s `state` input both take the same enum:
+`all|finished|running|failed|abandoned|unknown`. `cg ls` defaults to `all`,
+listing every state, and `cg_list` does too. **This is a change from
+`cg_list`'s earlier default of `finished`** — a caller that didn't pass
+`state` explicitly now sees running, failed, abandoned, and unknown rows it
+didn't before; pass `state: "finished"` to keep the old behavior.
+
+`--exit-code` on `cg ls` and `exit_code` on `cg_list` filter finished runs by
+exit code: a bare `N` means equals, or prefix with `!=`, `>=`, `>`, `<`, or
+`<=` for the other five comparisons. Runs with no exit code (running,
+abandoned, unknown, start-failed) never match. A collapsed pool summary row
+has no single exit code to compare — it always passes through untouched,
+regardless of the filter; expand with `--pool any` (or a pool ID) to filter
+individual member rows instead.
+
+`--since`/`--before` on `cg ls` and `since`/`before` on `cg_list` filter by
+start time. `since` is inclusive ("at or after"); `before` is exclusive
+("strictly before"). TIME accepts a relative duration meaning ago (`4h`,
+`7d`, the same grammar `cg prune --older-than` uses), a full RFC3339
+timestamp, or a bare `YYYY-MM-DD` date interpreted as local-timezone
+midnight. Unlike `--exit-code`, these bounds do apply to pool rows, using the
+pool's own precise `started_at` — the exemption is specific to exit codes,
+which pools genuinely don't have one of.
 
 `cg_run_many` runs a flat pool of commands. Each argv in `commands` runs
 `repeat` times, through at most `parallelism` workers. Parallelism defaults to

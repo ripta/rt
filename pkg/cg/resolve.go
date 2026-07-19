@@ -168,10 +168,19 @@ const (
 	lsPoolAny  = "any"
 )
 
+// lsStateAll is the `--state` value that disables state filtering. It is
+// also `cg ls`'s default, matching its current behavior of listing every
+// state.
+const lsStateAll = "all"
+
 // lsOptions holds flags for the `cg ls` subcommand.
 type lsOptions struct {
-	N    int
-	Pool string
+	N        int
+	Pool     string
+	State    string
+	ExitCode string
+	Since    string
+	Before   string
 }
 
 // NewLsCommand returns the `cg ls` subcommand. It lists recent capture runs in
@@ -189,6 +198,10 @@ func NewLsCommand() *cobra.Command {
 	}
 	c.Flags().IntVarP(&opts.N, "limit", "n", 20, "maximum number of runs to list")
 	c.Flags().StringVar(&opts.Pool, "pool", "", "pool handling: a pool ID lists that pool's members, `none` lists only standalone runs, `any` lists everything uncollapsed")
+	c.Flags().StringVar(&opts.State, "state", lsStateAll, "state filter: all|finished|running|failed|abandoned|unknown")
+	c.Flags().StringVar(&opts.ExitCode, "exit-code", "", "filter finished runs by exit code: N (equals), !=N, >=N, >N, <N, or <=N; pool summary rows always pass through")
+	c.Flags().StringVar(&opts.Since, "since", "", "only list runs started at or after TIME: a duration ago (e.g. 4h, 7d), an RFC3339 timestamp, or a YYYY-MM-DD date")
+	c.Flags().StringVar(&opts.Before, "before", "", "only list runs started strictly before TIME, same grammar as --since")
 	return c
 }
 
@@ -205,6 +218,50 @@ type lsRow struct {
 	memberOf  string
 }
 
+// state reports the row's canonical state label for --state filtering. A
+// pool row reports its own pool state, which already uses the same
+// running/finished/abandoned vocabulary. This is independent of the row's
+// display text in formatLsRow (which shows "exit=N"/"pool:X" etc. instead of
+// a bare state word).
+func (r lsRow) state() string {
+	switch {
+	case r.pool != nil:
+		return r.poolState
+	case r.debug != nil:
+		return RunStateFailed
+	case r.meta != nil:
+		return RunStateFinished
+	case r.unknown:
+		return RunStateUnknown
+	case r.abandoned:
+		return RunStateAbandoned
+	default:
+		return RunStateRunning
+	}
+}
+
+// filterStartTime returns the timestamp --since/--before compares this row
+// against, and whether one is available. Pool, finished, and start-failed
+// rows carry a precise recorded StartedAt. Running and abandoned rows do too
+// when start.json survived. Everything else falls back to the directory's
+// mtime, the same approximate source formatLsRow already uses for display.
+func (r lsRow) filterStartTime() (time.Time, bool) {
+	switch {
+	case r.pool != nil:
+		return r.pool.StartedAt, true
+	case r.debug != nil:
+		return r.debug.StartedAt, true
+	case r.meta != nil:
+		return r.meta.StartedAt, true
+	case r.start != nil:
+		return r.start.StartedAt, true
+	case !r.mtime.IsZero():
+		return r.mtime, true
+	default:
+		return time.Time{}, false
+	}
+}
+
 func (opts *lsOptions) run(cmd *cobra.Command, args []string) error {
 	switch {
 	case opts.Pool == "", opts.Pool == lsPoolNone, opts.Pool == lsPoolAny, IsValidRunID(opts.Pool):
@@ -213,6 +270,47 @@ func (opts *lsOptions) run(cmd *cobra.Command, args []string) error {
 		return &ExitError{Code: 2}
 	}
 	memberMode := opts.Pool != "" && opts.Pool != lsPoolNone && opts.Pool != lsPoolAny
+
+	switch opts.State {
+	case lsStateAll, RunStateFinished, RunStateRunning, RunStateFailed, RunStateAbandoned, RunStateUnknown:
+	default:
+		fmt.Fprintf(cmd.ErrOrStderr(), "invalid --state %q: want all|finished|running|failed|abandoned|unknown\n", opts.State)
+		return &ExitError{Code: 2}
+	}
+
+	var exitFilter *ExitCodeFilter
+	if opts.ExitCode != "" {
+		f, err := ParseExitCodeFilter(opts.ExitCode)
+		if err != nil {
+			fmt.Fprintf(cmd.ErrOrStderr(), "invalid --exit-code: %v\n", err)
+			return &ExitError{Code: 2}
+		}
+		exitFilter = &f
+	}
+
+	now := time.Now()
+	var since, before *time.Time
+	if opts.Since != "" {
+		t, err := ParseFilterTime(opts.Since, now)
+		if err != nil {
+			fmt.Fprintf(cmd.ErrOrStderr(), "invalid --since: %v\n", err)
+			return &ExitError{Code: 2}
+		}
+		since = &t
+	}
+	if opts.Before != "" {
+		t, err := ParseFilterTime(opts.Before, now)
+		if err != nil {
+			fmt.Fprintf(cmd.ErrOrStderr(), "invalid --before: %v\n", err)
+			return &ExitError{Code: 2}
+		}
+		before = &t
+	}
+	timeFilter, err := NewTimeRangeFilter(since, before)
+	if err != nil {
+		fmt.Fprintf(cmd.ErrOrStderr(), "%v\n", err)
+		return &ExitError{Code: 2}
+	}
 
 	if opts.N <= 0 {
 		return nil
@@ -289,6 +387,39 @@ func (opts *lsOptions) run(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("unknown pool id: %s", opts.Pool)
 	}
 
+	if opts.State != lsStateAll {
+		kept = rows[:0]
+		for _, r := range rows {
+			if r.state() == opts.State {
+				kept = append(kept, r)
+			}
+		}
+		rows = kept
+	}
+
+	if exitFilter != nil {
+		kept = rows[:0]
+		for _, r := range rows {
+			switch {
+			case r.pool != nil:
+				kept = append(kept, r) // pool summary rows always pass through
+			case r.meta != nil && exitFilter.Match(r.meta.ExitCode):
+				kept = append(kept, r)
+			}
+		}
+		rows = kept
+	}
+
+	if since != nil || before != nil {
+		kept = rows[:0]
+		for _, r := range rows {
+			if t, ok := r.filterStartTime(); ok && timeFilter.Match(t) {
+				kept = append(kept, r)
+			}
+		}
+		rows = kept
+	}
+
 	sort.Slice(rows, func(i, j int) bool {
 		return rows[i].mtime.After(rows[j].mtime)
 	})
@@ -298,7 +429,6 @@ func (opts *lsOptions) run(cmd *cobra.Command, args []string) error {
 	}
 
 	tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
-	now := time.Now()
 	for _, r := range rows {
 		fmt.Fprintln(tw, formatLsRow(r, now))
 	}
