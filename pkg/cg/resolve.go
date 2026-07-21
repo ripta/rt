@@ -236,9 +236,8 @@ type lsRow struct {
 
 // state reports the row's canonical state label for --state filtering. A
 // pool row reports its own pool state, which already uses the same
-// running/finished/abandoned vocabulary. This is independent of the row's
-// display text in formatLsRow (which shows "exit=N"/"pool:X" etc. instead of
-// a bare state word).
+// running/finished/abandoned vocabulary. lsRowValues's displayed STATE column
+// matches this value, except a pool row's is prefixed with "pool:".
 func (r lsRow) state() string {
 	switch {
 	case r.pool != nil:
@@ -477,125 +476,112 @@ func (opts *lsOptions) run(cmd *cobra.Command, args []string) error {
 	return writeLsTable(cmd.OutOrStdout(), rows, now, opts.Output == lsOutputWide)
 }
 
-// writeLsTable renders rows as a tab-separated table with a header row. wide
-// inserts SYSTEM and USER cpu-time columns before COMMAND. CG ID and COMMAND
-// stay tabwriter's natural left-aligned; EXIT, RUNTIME, and (when wide)
-// SYSTEM/USER are right-justified to a shared width computed across the
-// whole listing (a tabwriter can only align every column the same direction,
-// and a single wide outlier like "start_failed" in EXIT would otherwise force
-// every other row's shorter value to trail a long ragged gap instead of
-// hugging the column the way a plain number naturally reads).
+// writeLsTable renders rows as a tab-separated table with a header row.
+// Column order is CG ID, EXIT, RUNTIME, [STATE, SYSTEM, USER,] COMMAND; STATE
+// and the cpu-time columns only appear under wide. CG ID, STATE, and COMMAND
+// stay tabwriter's natural left-aligned; EXIT, RUNTIME, SYSTEM, and USER are
+// right-justified to a shared width computed across the whole listing (a
+// tabwriter can only align every column the same direction). EXIT holds only
+// a bare exit or negated-signal number, or "?" when a row has none, so a long
+// STATE word like "pool:abandoned" never drags EXIT's column wide the way it
+// did when the two were combined.
 func writeLsTable(w io.Writer, rows []lsRow, now time.Time, wide bool) error {
-	labels := []string{"EXIT", "RUNTIME"}
-	if wide {
-		labels = append(labels, "SYSTEM", "USER")
+	type row struct {
+		id, state, exit, runtime, system, user, command string
 	}
 
-	values := make([][]string, len(rows))
-	commands := make([]string, len(rows))
-	widths := make([]int, len(labels))
-	for i, label := range labels {
-		widths[i] = len(label)
-	}
+	data := make([]row, len(rows))
+	exitWidth, runtimeWidth := len("EXIT"), len("RUNTIME")
+	systemWidth, userWidth := len("SYSTEM"), len("USER")
 	for i, r := range rows {
-		v, cmd := lsRowValues(r, now, wide)
-		values[i] = v
-		commands[i] = cmd
-		for j, s := range v {
-			if len(s) > widths[j] {
-				widths[j] = len(s)
-			}
-		}
+		state, exit, runtime, system, user, command := lsRowValues(r, now)
+		data[i] = row{r.id, state, exit, runtime, system, user, command}
+		exitWidth = max(exitWidth, len(exit))
+		runtimeWidth = max(runtimeWidth, len(runtime))
+		systemWidth = max(systemWidth, len(system))
+		userWidth = max(userWidth, len(user))
 	}
 
-	justify := func(cols []string) []string {
-		out := make([]string, len(cols))
-		for i, c := range cols {
-			out[i] = fmt.Sprintf("%*s", widths[i], c)
-		}
-		return out
+	pad := func(s string, width int) string {
+		return fmt.Sprintf("%*s", width, s)
 	}
 
 	tw := tabwriter.NewWriter(w, 0, 0, 3, ' ', 0)
 
-	header := append([]string{"CG ID"}, justify(labels)...)
+	header := []string{"CG ID", pad("EXIT", exitWidth), pad("RUNTIME", runtimeWidth)}
+	if wide {
+		header = append(header, "STATE", pad("SYSTEM", systemWidth), pad("USER", userWidth))
+	}
 	header = append(header, "COMMAND")
 	fmt.Fprintln(tw, strings.Join(header, "\t"))
 
-	for i, r := range rows {
-		cols := append([]string{r.id}, justify(values[i])...)
-		cols = append(cols, commands[i])
+	for _, d := range data {
+		cols := []string{d.id, pad(d.exit, exitWidth), pad(d.runtime, runtimeWidth)}
+		if wide {
+			cols = append(cols, d.state, pad(d.system, systemWidth), pad(d.user, userWidth))
+		}
+		cols = append(cols, d.command)
 		fmt.Fprintln(tw, strings.Join(cols, "\t"))
 	}
 	return tw.Flush()
 }
 
-// lsRowValues returns one row's unpadded EXIT/RUNTIME[/SYSTEM/USER] value
-// columns and its rendered COMMAND text. Finished runs read their exit code
-// (or, for a signaled run, its negated signal number) and duration from
-// meta.json; failed runs read the command from debug.json; in-flight and
-// abandoned runs read the command and exact elapsed time from start.json. A
-// run with no lock file, pid file, or start.json carries no liveness signal
-// at all, so it is reported as unknown rather than running. Runs without
-// start.json fall back to the run directory's mtime for an approximate
-// elapsed time, prefixed with "~" to mark it as an estimate rather than a
-// measurement; the command stays unknown in that case, since mtime carries no
-// command information. Pool rows show the pool state and a member-count
-// summary in place of a command. The caller right-justifies the value
-// columns and aligns everything with a tabwriter.
-func lsRowValues(r lsRow, now time.Time, wide bool) (values []string, command string) {
+// lsRowValues returns one row's STATE, EXIT, RUNTIME, SYSTEM, and USER field
+// values plus its rendered COMMAND text. Finished runs read their exit code
+// (or, for a signaled run, its negated signal number), duration, and cpu
+// usage from meta.json; failed runs read the command from debug.json;
+// in-flight and abandoned runs read the command and exact elapsed time from
+// start.json. A run with no lock file, pid file, or start.json carries no
+// liveness signal at all, so it is reported as unknown rather than running.
+// Runs without start.json fall back to the run directory's mtime for an
+// approximate elapsed time, prefixed with "~" to mark it as an estimate
+// rather than a measurement; the command stays unknown in that case, since
+// mtime carries no command information. Pool rows show the pool state and a
+// member-count summary in place of a command. EXIT, SYSTEM, and USER are "?"
+// for every row kind except a finished run, which alone carries an exit code
+// and resource accounting. The caller right-justifies EXIT/RUNTIME/SYSTEM/USER
+// and aligns everything with a tabwriter.
+func lsRowValues(r lsRow, now time.Time) (state, exit, runtime, system, user, command string) {
 	if r.pool != nil {
 		dur := formatDuration(now.Sub(r.pool.StartedAt))
 		if r.pool.FinishedAt != nil {
 			dur = formatDuration(r.pool.FinishedAt.Sub(r.pool.StartedAt))
 		}
-		return lsValueColumns("pool:"+r.poolState, dur, nil, wide), formatPoolCounts(r.pool.Counts())
+		return "pool:" + r.poolState, "?", dur, "?", "?", formatPoolCounts(r.pool.Counts())
 	}
 	if r.debug != nil {
-		return lsValueColumns("start_failed", "?", nil, wide), formatLsCommand(r.debug.Command)
+		return RunStateFailed, "?", "?", "?", "?", formatLsCommand(r.debug.Command)
 	}
 	if r.meta != nil {
-		head := fmt.Sprintf("%d", r.meta.ExitCode)
+		exit := fmt.Sprintf("%d", r.meta.ExitCode)
 		if r.meta.Signal != nil {
-			head = fmt.Sprintf("%d", -*r.meta.Signal)
+			exit = fmt.Sprintf("%d", -*r.meta.Signal)
 		}
 		dur := formatDuration(time.Duration(r.meta.DurationMs) * time.Millisecond)
-		return lsValueColumns(head, dur, r.meta.Usage, wide), formatLsCommand(r.meta.Command)
+		sys, usr := "?", "?"
+		if r.meta.Usage != nil {
+			sys = formatDuration(r.meta.Usage.systemDuration())
+			usr = formatDuration(r.meta.Usage.userDuration())
+		}
+		return RunStateFinished, exit, dur, sys, usr, formatLsCommand(r.meta.Command)
 	}
 
-	status := "running"
+	status := RunStateRunning
 	switch {
 	case r.unknown:
-		status = "unknown"
+		status = RunStateUnknown
 	case r.abandoned:
-		status = "abandoned"
+		status = RunStateAbandoned
 	}
 	if r.start != nil {
 		elapsed := formatDuration(now.Sub(r.start.StartedAt))
-		return lsValueColumns(status, elapsed, nil, wide), formatLsCommand(r.start.Command)
+		return status, "?", elapsed, "?", "?", formatLsCommand(r.start.Command)
 	}
 	if !r.mtime.IsZero() {
 		elapsed := "~" + formatDuration(now.Sub(r.mtime))
-		return lsValueColumns(status, elapsed, nil, wide), "?"
+		return status, "?", elapsed, "?", "?", "?"
 	}
-	return lsValueColumns(status, "?", nil, wide), "?"
-}
-
-// lsValueColumns builds the exit-or-status and runtime value columns shared
-// by every ls row kind, plus SYSTEM and USER cpu-time columns when wide is
-// true. usage is nil for pool, start-failed, running, abandoned, and unknown
-// rows, which carry no resource accounting; those show "?" in wide mode.
-func lsValueColumns(head, runtime string, usage *Usage, wide bool) []string {
-	cols := []string{head, runtime}
-	if !wide {
-		return cols
-	}
-	sys, usr := "?", "?"
-	if usage != nil {
-		sys = formatDuration(usage.systemDuration())
-		usr = formatDuration(usage.userDuration())
-	}
-	return append(cols, sys, usr)
+	return status, "?", "?", "?", "?", "?"
 }
 
 // formatLsCommand renders cmd for the table/wide COMMAND column: shell-quoted

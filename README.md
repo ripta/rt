@@ -167,22 +167,25 @@ M7P4QX     42       2ms   sh -c 'exit 42'
 ❯ cg prune --dry-run
 ```
 
-EXIT and RUNTIME (and SYSTEM/USER under `-o wide`) are right-justified to a
-shared width across the listing; CG ID and COMMAND stay left-aligned. A wide
-status word like `start_failed` in EXIT widens that column for every row, but
-values still line up against its right edge instead of leaving a ragged gap.
+EXIT and RUNTIME are right-justified to a shared width across the listing; CG
+ID and COMMAND stay left-aligned. EXIT is always a bare number (or `?` when a
+run has none), so a wide STATE word like `pool:abandoned` never drags EXIT's
+column wide the way a combined column would.
 
 `--output`/`-o` picks the rendering: `table` (default, shown above) is
-ID/exit/runtime/command; `wide` adds SYSTEM and USER cpu-time columns before
-command; `json` prints a `{"runs": [...]}` envelope, one object per run in the
-same shape `cg meta` returns (including `cwd`), with `manifest` set instead of
-the usual finished-run fields on a collapsed pool row:
+ID/exit/runtime/command; `wide` inserts STATE after RUNTIME and adds SYSTEM
+and USER cpu-time columns before command; `json` prints a `{"runs": [...]}`
+envelope, one object per run in the same shape `cg meta` returns (including
+`cwd`), with `manifest` set instead of the usual finished-run fields on a
+collapsed pool row. STATE is the same running/finished/failed/abandoned/
+unknown vocabulary as `--state`, with a `pool:` prefix on a collapsed pool
+row's own state:
 
 ```
 ❯ cg ls -o wide
-CG ID    EXIT   RUNTIME   SYSTEM   USER   COMMAND
-Q3F9K2      0       3ms      2ms    1ms   sh -c 'echo out; echo err >&2'
-M7P4QX     42       2ms      2ms    1ms   sh -c 'exit 42'
+CG ID    EXIT   RUNTIME   STATE      SYSTEM   USER   COMMAND
+Q3F9K2      0       3ms   finished      2ms    1ms   sh -c 'echo out; echo err >&2'
+M7P4QX     42       2ms   finished      2ms    1ms   sh -c 'exit 42'
 
 ❯ cg ls -o json
 {

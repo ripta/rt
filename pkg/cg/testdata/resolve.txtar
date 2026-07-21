@@ -17,10 +17,16 @@ exec cg paths ABCDEF
 stdout '/cg/ABCDEF/stdout'
 stdout '/cg/ABCDEF/stderr'
 
-# cg ls renders the single seeded run, with a header row and a bare exit code
+# cg ls renders the single seeded run, with a header row and a bare exit code;
+# STATE is wide-only
 exec cg ls
 stdout '^CG ID\s+EXIT\s+RUNTIME\s+COMMAND$'
 stdout '^ABCDEF\s+0\s+12ms\s+echo hi$'
+
+# cg ls -o wide adds STATE (after RUNTIME) plus SYSTEM/USER cpu-time columns
+exec cg ls -o wide
+stdout '^CG ID\s+EXIT\s+RUNTIME\s+STATE\s+SYSTEM\s+USER\s+COMMAND$'
+stdout '^ABCDEF\s+0\s+12ms\s+finished\s+\S+\s+\S+\s+echo hi$'
 
 # Unknown ID exits 1 with a single-line stderr message
 ! exec cg out NOSUCH

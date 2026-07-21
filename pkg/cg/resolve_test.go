@@ -234,12 +234,12 @@ func TestLsCommand(t *testing.T) {
 	// liveness signal at all and falls back to an approximate, mtime-derived
 	// duration.
 	if got := strings.Fields(lines[0]); !reflect.DeepEqual(got, []string{"CG", "ID", "EXIT", "RUNTIME", "COMMAND"}) {
-		t.Errorf("header = %q, want CG ID / EXIT / RUNTIME / COMMAND", lines[0])
+		t.Errorf("header = %q, want CG ID / EXIT / RUNTIME / COMMAND (STATE is wide-only)", lines[0])
 	}
 	if f := strings.Fields(lines[1]); f[0] != "AAAAAA" || f[1] != "0" || f[2] != "12ms" || strings.Join(f[3:], " ") != "echo new" {
 		t.Errorf("line 1 = %q", lines[1])
 	}
-	if f := strings.Fields(lines[2]); f[0] != "CCCCCC" || f[1] != "unknown" || f[2] != "~1h0m0s" || f[3] != "?" {
+	if f := strings.Fields(lines[2]); f[0] != "CCCCCC" || f[1] != "?" || f[2] != "~1h0m0s" || f[3] != "?" {
 		t.Errorf("line 2 = %q", lines[2])
 	}
 	if f := strings.Fields(lines[3]); f[0] != "BBBBBB" || f[1] != "2" || f[2] != "1.23s" || strings.Join(f[3:], " ") != "sh -c 'exit 2'" {
@@ -292,7 +292,7 @@ func TestLsCommandCollapsesPools(t *testing.T) {
 		t.Fatalf("expected header + pool row + standalone row, got %d: %q", len(lines), stdout)
 	}
 	joined := strings.Join(lines, "\n")
-	if !strings.Contains(joined, "pool:finished") {
+	if !strings.Contains(joined, "PPPPPP") {
 		t.Errorf("no pool row in %q", stdout)
 	}
 	if !strings.Contains(joined, "2 runs: 1 ok, 1 failed") {
@@ -300,6 +300,15 @@ func TestLsCommandCollapsesPools(t *testing.T) {
 	}
 	if !strings.Contains(joined, "SSSSSS") {
 		t.Errorf("standalone row missing from %q", stdout)
+	}
+
+	// The pool's STATE ("pool:finished") is wide-only.
+	stdout, _, err = runCgSplit("ls", "-o", "wide")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(stdout, "pool:finished") {
+		t.Errorf("no pool:finished state in wide output: %q", stdout)
 	}
 
 	stdout, stderr, err = runCgSplit("ls", "--pool", "PPPPPP")
@@ -378,186 +387,168 @@ func TestLsCommandOrphanMemberVisible(t *testing.T) {
 	}
 }
 
-func TestFormatLsRowPool(t *testing.T) {
-	t.Parallel()
+// lsRowValuesTest is one lsRowValues table-test case. row is built lazily so
+// it can reference the shared `now` fixture for relative timestamps.
+type lsRowValuesTest struct {
+	name                                               string
+	row                                                func(now time.Time) lsRow
+	wantState, wantExit, wantRuntime, wantSys, wantUsr string
+	wantCommand                                        string
+}
 
-	now := time.Now()
-	finished := now.Add(-30 * time.Second)
-	row := lsRow{
-		id:        "PPPPPP",
-		poolState: PoolStateFinished,
-		pool: &PoolManifest{
-			StartedAt:  finished.Add(-90 * time.Second),
-			FinishedAt: &finished,
-			Runs: []PoolRunRecord{
-				{Status: PoolRunFinished, ExitCode: intp(0)},
-				{Status: PoolRunSkipped},
-			},
+var lsRowValuesTests = []lsRowValuesTest{
+	{
+		name: "pool finished",
+		row: func(now time.Time) lsRow {
+			finished := now.Add(-30 * time.Second)
+			return lsRow{
+				id:        "PPPPPP",
+				poolState: PoolStateFinished,
+				pool: &PoolManifest{
+					StartedAt:  finished.Add(-90 * time.Second),
+					FinishedAt: &finished,
+					Runs: []PoolRunRecord{
+						{Status: PoolRunFinished, ExitCode: intp(0)},
+						{Status: PoolRunSkipped},
+					},
+				},
+			}
 		},
-	}
-	values, command := lsRowValues(row, now, false)
-	wantValues := []string{"pool:finished", "1m30s"}
-	wantCommand := "2 runs: 1 ok, 1 skipped"
-	if !reflect.DeepEqual(values, wantValues) || command != wantCommand {
-		t.Errorf("lsRowValues pool = %v, %q, want %v, %q", values, command, wantValues, wantCommand)
-	}
-
-	row.pool.FinishedAt = nil
-	row.poolState = PoolStateRunning
-	values, command = lsRowValues(row, now, false)
-	wantValues = []string{"pool:running", "2m0s"}
-	if !reflect.DeepEqual(values, wantValues) || command != wantCommand {
-		t.Errorf("lsRowValues running pool = %v, %q, want %v, %q", values, command, wantValues, wantCommand)
-	}
-}
-
-func TestFormatLsRowPoolWide(t *testing.T) {
-	t.Parallel()
-
-	now := time.Now()
-	finished := now.Add(-30 * time.Second)
-	row := lsRow{
-		id:        "PPPPPP",
-		poolState: PoolStateFinished,
-		pool: &PoolManifest{
-			StartedAt:  finished.Add(-90 * time.Second),
-			FinishedAt: &finished,
-			Runs: []PoolRunRecord{
-				{Status: PoolRunFinished, ExitCode: intp(0)},
-				{Status: PoolRunSkipped},
-			},
+		wantState: "pool:finished", wantExit: "?", wantRuntime: "1m30s", wantSys: "?", wantUsr: "?",
+		wantCommand: "2 runs: 1 ok, 1 skipped",
+	},
+	{
+		name: "pool running",
+		row: func(now time.Time) lsRow {
+			return lsRow{
+				id:        "PPPPPP",
+				poolState: PoolStateRunning,
+				pool: &PoolManifest{
+					StartedAt: now.Add(-2 * time.Minute),
+					Runs: []PoolRunRecord{
+						{Status: PoolRunFinished, ExitCode: intp(0)},
+						{Status: PoolRunSkipped},
+					},
+				},
+			}
 		},
-	}
-	values, command := lsRowValues(row, now, true)
-	wantValues := []string{"pool:finished", "1m30s", "?", "?"}
-	wantCommand := "2 runs: 1 ok, 1 skipped"
-	if !reflect.DeepEqual(values, wantValues) || command != wantCommand {
-		t.Errorf("lsRowValues wide pool = %v, %q, want %v, %q", values, command, wantValues, wantCommand)
-	}
-}
-
-func TestFormatLsRowRunning(t *testing.T) {
-	t.Parallel()
-
-	now := time.Now()
-	row := lsRow{
-		id:    "DDDDDD",
-		start: &StartInfo{RunInfo: RunInfo{Command: []string{"sleep", "30"}, StartedAt: now.Add(-90 * time.Second)}},
-	}
-	values, command := lsRowValues(row, now, false)
-	wantValues := []string{"running", "1m30s"}
-	wantCommand := "sleep 30"
-	if !reflect.DeepEqual(values, wantValues) || command != wantCommand {
-		t.Errorf("lsRowValues running = %v, %q, want %v, %q", values, command, wantValues, wantCommand)
-	}
-}
-
-func TestFormatLsRowRunningNoStartInfo(t *testing.T) {
-	t.Parallel()
-
-	// A zero mtime carries no timestamp at all, so it stays the unresolved
-	// fallback; real rows always have a directory mtime.
-	values, command := lsRowValues(lsRow{id: "EEEEEE"}, time.Now(), false)
-	wantValues := []string{"running", "?"}
-	wantCommand := "?"
-	if !reflect.DeepEqual(values, wantValues) || command != wantCommand {
-		t.Errorf("lsRowValues running fallback = %v, %q, want %v, %q", values, command, wantValues, wantCommand)
-	}
-}
-
-func TestFormatLsRowRunningMtimeFallback(t *testing.T) {
-	t.Parallel()
-
-	now := time.Now()
-	row := lsRow{id: "FFFFFF", mtime: now.Add(-90 * time.Second)}
-	values, command := lsRowValues(row, now, false)
-	wantValues := []string{"running", "~1m30s"}
-	wantCommand := "?"
-	if !reflect.DeepEqual(values, wantValues) || command != wantCommand {
-		t.Errorf("lsRowValues running mtime fallback = %v, %q, want %v, %q", values, command, wantValues, wantCommand)
-	}
-}
-
-func TestFormatLsRowUnknown(t *testing.T) {
-	t.Parallel()
-
-	now := time.Now()
-	row := lsRow{id: "UUUUUU", mtime: now.Add(-5 * time.Minute), unknown: true}
-	values, command := lsRowValues(row, now, false)
-	wantValues := []string{"unknown", "~5m0s"}
-	wantCommand := "?"
-	if !reflect.DeepEqual(values, wantValues) || command != wantCommand {
-		t.Errorf("lsRowValues unknown = %v, %q, want %v, %q", values, command, wantValues, wantCommand)
-	}
-}
-
-func TestFormatLsRowAbandoned(t *testing.T) {
-	t.Parallel()
-
-	now := time.Now()
-	row := lsRow{
-		id:        "ABANDN",
-		start:     &StartInfo{RunInfo: RunInfo{Command: []string{"sleep", "600"}, StartedAt: now.Add(-90 * time.Second)}},
-		abandoned: true,
-	}
-	values, command := lsRowValues(row, now, false)
-	wantValues := []string{"abandoned", "1m30s"}
-	wantCommand := "sleep 600"
-	if !reflect.DeepEqual(values, wantValues) || command != wantCommand {
-		t.Errorf("lsRowValues abandoned = %v, %q, want %v, %q", values, command, wantValues, wantCommand)
-	}
-
-	row = lsRow{id: "ABANDN", abandoned: true, mtime: now.Add(-90 * time.Second)}
-	values, command = lsRowValues(row, now, false)
-	wantValues = []string{"abandoned", "~1m30s"}
-	wantCommand = "?"
-	if !reflect.DeepEqual(values, wantValues) || command != wantCommand {
-		t.Errorf("lsRowValues abandoned mtime fallback = %v, %q, want %v, %q", values, command, wantValues, wantCommand)
-	}
-}
-
-func TestFormatLsRowFinishedWide(t *testing.T) {
-	t.Parallel()
-
-	now := time.Now()
-	row := lsRow{
-		id: "AAAAAA",
-		meta: &Meta{
-			RunInfo:    RunInfo{Command: []string{"echo", "hi"}},
-			DurationMs: 12,
-			Usage:      &Usage{UserUS: 20000, SystemUS: 5000},
+		wantState: "pool:running", wantExit: "?", wantRuntime: "2m0s", wantSys: "?", wantUsr: "?",
+		wantCommand: "2 runs: 1 ok, 1 skipped",
+	},
+	{
+		name: "running with start info",
+		row: func(now time.Time) lsRow {
+			return lsRow{
+				id:    "DDDDDD",
+				start: &StartInfo{RunInfo: RunInfo{Command: []string{"sleep", "30"}, StartedAt: now.Add(-90 * time.Second)}},
+			}
 		},
-	}
-	values, command := lsRowValues(row, now, true)
-	wantValues := []string{"0", "12ms", "5ms", "20ms"}
-	wantCommand := "echo hi"
-	if !reflect.DeepEqual(values, wantValues) || command != wantCommand {
-		t.Errorf("lsRowValues finished wide = %v, %q, want %v, %q", values, command, wantValues, wantCommand)
-	}
-
-	// No usage recorded: SYSTEM/USER fall back to "?".
-	row.meta.Usage = nil
-	values, command = lsRowValues(row, now, true)
-	wantValues = []string{"0", "12ms", "?", "?"}
-	if !reflect.DeepEqual(values, wantValues) || command != wantCommand {
-		t.Errorf("lsRowValues finished wide (no usage) = %v, %q, want %v, %q", values, command, wantValues, wantCommand)
-	}
+		wantState: "running", wantExit: "?", wantRuntime: "1m30s", wantSys: "?", wantUsr: "?",
+		wantCommand: "sleep 30",
+	},
+	{
+		// A zero mtime carries no timestamp at all, so it stays the
+		// unresolved fallback; real rows always have a directory mtime.
+		name:      "running with no start info or mtime",
+		row:       func(now time.Time) lsRow { return lsRow{id: "EEEEEE"} },
+		wantState: "running", wantExit: "?", wantRuntime: "?", wantSys: "?", wantUsr: "?",
+		wantCommand: "?",
+	},
+	{
+		name: "running mtime fallback",
+		row: func(now time.Time) lsRow {
+			return lsRow{id: "FFFFFF", mtime: now.Add(-90 * time.Second)}
+		},
+		wantState: "running", wantExit: "?", wantRuntime: "~1m30s", wantSys: "?", wantUsr: "?",
+		wantCommand: "?",
+	},
+	{
+		name: "unknown",
+		row: func(now time.Time) lsRow {
+			return lsRow{id: "UUUUUU", mtime: now.Add(-5 * time.Minute), unknown: true}
+		},
+		wantState: "unknown", wantExit: "?", wantRuntime: "~5m0s", wantSys: "?", wantUsr: "?",
+		wantCommand: "?",
+	},
+	{
+		name: "abandoned with start info",
+		row: func(now time.Time) lsRow {
+			return lsRow{
+				id:        "ABANDN",
+				start:     &StartInfo{RunInfo: RunInfo{Command: []string{"sleep", "600"}, StartedAt: now.Add(-90 * time.Second)}},
+				abandoned: true,
+			}
+		},
+		wantState: "abandoned", wantExit: "?", wantRuntime: "1m30s", wantSys: "?", wantUsr: "?",
+		wantCommand: "sleep 600",
+	},
+	{
+		name: "abandoned mtime fallback",
+		row: func(now time.Time) lsRow {
+			return lsRow{id: "ABANDN", abandoned: true, mtime: now.Add(-90 * time.Second)}
+		},
+		wantState: "abandoned", wantExit: "?", wantRuntime: "~1m30s", wantSys: "?", wantUsr: "?",
+		wantCommand: "?",
+	},
+	{
+		name: "finished with usage",
+		row: func(now time.Time) lsRow {
+			return lsRow{
+				id: "AAAAAA",
+				meta: &Meta{
+					RunInfo:    RunInfo{Command: []string{"echo", "hi"}},
+					DurationMs: 12,
+					Usage:      &Usage{UserUS: 20000, SystemUS: 5000},
+				},
+			}
+		},
+		wantState: "finished", wantExit: "0", wantRuntime: "12ms", wantSys: "5ms", wantUsr: "20ms",
+		wantCommand: "echo hi",
+	},
+	{
+		name: "finished without usage",
+		row: func(now time.Time) lsRow {
+			return lsRow{id: "AAAAAA", meta: &Meta{RunInfo: RunInfo{Command: []string{"echo", "hi"}}, DurationMs: 12}}
+		},
+		wantState: "finished", wantExit: "0", wantRuntime: "12ms", wantSys: "?", wantUsr: "?",
+		wantCommand: "echo hi",
+	},
+	{
+		name: "signaled",
+		row: func(now time.Time) lsRow {
+			sig := 15
+			return lsRow{
+				id:   "AAAAAA",
+				meta: &Meta{RunInfo: RunInfo{Command: []string{"sleep", "10"}}, ExitCode: -1, Signal: &sig, DurationMs: 5},
+			}
+		},
+		wantState: "finished", wantExit: "-15", wantRuntime: "5ms", wantSys: "?", wantUsr: "?",
+		wantCommand: "sleep 10",
+	},
+	{
+		name: "failed to start",
+		row: func(now time.Time) lsRow {
+			return lsRow{id: "FA1LED", debug: &StartDebug{RunInfo: RunInfo{Command: []string{"nope"}}, StartError: "exec: not found"}}
+		},
+		wantState: RunStateFailed, wantExit: "?", wantRuntime: "?", wantSys: "?", wantUsr: "?",
+		wantCommand: "nope",
+	},
 }
 
-func TestFormatLsRowSignaled(t *testing.T) {
+func TestLsRowValues(t *testing.T) {
 	t.Parallel()
 
-	now := time.Now()
-	sig := 15
-	row := lsRow{
-		id:   "AAAAAA",
-		meta: &Meta{RunInfo: RunInfo{Command: []string{"sleep", "10"}}, ExitCode: -1, Signal: &sig, DurationMs: 5},
-	}
-	values, command := lsRowValues(row, now, false)
-	wantValues := []string{"-15", "5ms"}
-	wantCommand := "sleep 10"
-	if !reflect.DeepEqual(values, wantValues) || command != wantCommand {
-		t.Errorf("lsRowValues signaled = %v, %q, want %v, %q", values, command, wantValues, wantCommand)
+	for _, tt := range lsRowValuesTests {
+		t.Run(tt.name, func(t *testing.T) {
+			now := time.Now()
+			state, exit, runtime, sys, usr, command := lsRowValues(tt.row(now), now)
+			if state != tt.wantState || exit != tt.wantExit || runtime != tt.wantRuntime ||
+				sys != tt.wantSys || usr != tt.wantUsr || command != tt.wantCommand {
+				t.Errorf("lsRowValues = (%q, %q, %q, %q, %q, %q), want (%q, %q, %q, %q, %q, %q)",
+					state, exit, runtime, sys, usr, command,
+					tt.wantState, tt.wantExit, tt.wantRuntime, tt.wantSys, tt.wantUsr, tt.wantCommand)
+			}
+		})
 	}
 }
 
@@ -569,7 +560,7 @@ func TestFormatLsRowEmbeddedNewline(t *testing.T) {
 		id:   "WQKSRR",
 		meta: &Meta{RunInfo: RunInfo{Command: []string{"echo", "line one\nline two", "col1\tcol2"}}},
 	}
-	_, command := lsRowValues(row, now, false)
+	_, _, _, _, _, command := lsRowValues(row, now)
 	if strings.Contains(command, "\n") {
 		t.Fatalf("command contains a raw newline, which would split the tabwriter row: %q", command)
 	}
@@ -610,7 +601,8 @@ func TestLsCommandAbandonedRun(t *testing.T) {
 		t.Fatalf("chtimes held: %v", err)
 	}
 
-	stdout, _, err := runCgSplit("ls")
+	// STATE is wide-only.
+	stdout, _, err := runCgSplit("ls", "-o", "wide")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -642,7 +634,8 @@ func TestLsCommandUnknownRun(t *testing.T) {
 		t.Fatalf("chtimes: %v", err)
 	}
 
-	stdout, _, err := runCgSplit("ls")
+	// STATE is wide-only.
+	stdout, _, err := runCgSplit("ls", "-o", "wide")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -721,7 +714,8 @@ func TestLsCommandRunningReadsStartInfo(t *testing.T) {
 		t.Fatalf("WriteStartInfo: %v", err)
 	}
 
-	stdout, _, err := runCgSplit("ls")
+	// STATE ("running") is wide-only.
+	stdout, _, err := runCgSplit("ls", "-o", "wide")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1145,7 +1139,7 @@ func TestLsCommandWideOutput(t *testing.T) {
 		t.Fatalf("expected header + 2 rows, got %d: %q", len(lines), stdout)
 	}
 
-	wantHeader := []string{"CG", "ID", "EXIT", "RUNTIME", "SYSTEM", "USER", "COMMAND"}
+	wantHeader := []string{"CG", "ID", "EXIT", "RUNTIME", "STATE", "SYSTEM", "USER", "COMMAND"}
 	if got := strings.Fields(lines[0]); !reflect.DeepEqual(got, wantHeader) {
 		t.Errorf("header = %q, want %v", lines[0], wantHeader)
 	}
@@ -1159,11 +1153,11 @@ func TestLsCommandWideOutput(t *testing.T) {
 			unknown = l
 		}
 	}
-	if f := strings.Fields(finished); f[3] != "5ms" || f[4] != "20ms" {
-		t.Errorf("finished wide row = %q, want system=5ms user=20ms", finished)
+	if f := strings.Fields(finished); f[3] != "finished" || f[4] != "5ms" || f[5] != "20ms" {
+		t.Errorf("finished wide row = %q, want state=finished system=5ms user=20ms", finished)
 	}
-	if f := strings.Fields(unknown); f[3] != "?" || f[4] != "?" {
-		t.Errorf("unknown wide row = %q, want ?/? placeholders (no usage recorded)", unknown)
+	if f := strings.Fields(unknown); f[3] != "unknown" || f[4] != "?" || f[5] != "?" {
+		t.Errorf("unknown wide row = %q, want state=unknown ?/? placeholders (no usage recorded)", unknown)
 	}
 }
 
