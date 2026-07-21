@@ -7,12 +7,12 @@ import (
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/ripta/rt/pkg/cg"
+	"github.com/ripta/rt/pkg/cg/model"
 )
 
 // note is the wire shape for a single note. It aliases the store's record type
 // so the MCP response and the `cg note` CLI stay identical.
-type note = cg.Note
+type note = model.Note
 
 // noteAddInput is the argument shape for `cg_note_add`. Message is required; the
 // store enforces the message and keys size bounds.
@@ -74,7 +74,7 @@ func registerNotes(s *mcpsdk.Server) {
 }
 
 func handleNoteAdd(_ context.Context, _ *mcpsdk.CallToolRequest, in noteAddInput) (*mcpsdk.CallToolResult, note, error) {
-	n, err := cg.AddNote(in.Message, in.Keys)
+	n, err := model.AddNote(in.Message, in.Keys)
 	if err != nil {
 		return nil, note{}, err
 	}
@@ -90,13 +90,13 @@ func handleNoteList(_ context.Context, _ *mcpsdk.CallToolRequest, in noteListInp
 		limit = maxListLimit
 	}
 
-	opts := cg.ListNoteOptions{Key: in.Key, Limit: limit}
+	opts := model.ListNoteOptions{Key: in.Key, Limit: limit}
 	if in.Value != nil {
 		opts.HasValue = true
 		opts.Value = *in.Value
 	}
 
-	notes, err := cg.ListNotes(opts)
+	notes, err := model.ListNotes(opts)
 	if err != nil {
 		return nil, noteListOutput{}, err
 	}
@@ -107,14 +107,14 @@ func handleNoteList(_ context.Context, _ *mcpsdk.CallToolRequest, in noteListInp
 }
 
 func handleNoteDelete(_ context.Context, _ *mcpsdk.CallToolRequest, in noteDeleteInput) (*mcpsdk.CallToolResult, noteDeleteOutput, error) {
-	// cg.DeleteNote joins the ID into a path with no sanitization, so validate
+	// model.DeleteNote joins the ID into a path with no sanitization, so validate
 	// the untrusted ID before it reaches the filesystem.
-	if !cg.IsValidRunID(in.ID) {
+	if !model.IsValidRunID(in.ID) {
 		return nil, noteDeleteOutput{}, fmt.Errorf("invalid note id: %s", in.ID)
 	}
 
-	if err := cg.DeleteNote(in.ID); err != nil {
-		if errors.Is(err, cg.ErrUnknownNoteID) {
+	if err := model.DeleteNote(in.ID); err != nil {
+		if errors.Is(err, model.ErrUnknownNoteID) {
 			return nil, noteDeleteOutput{}, fmt.Errorf("unknown note id: %s", in.ID)
 		}
 		return nil, noteDeleteOutput{}, err
@@ -123,7 +123,7 @@ func handleNoteDelete(_ context.Context, _ *mcpsdk.CallToolRequest, in noteDelet
 }
 
 func handleNoteGrep(_ context.Context, _ *mcpsdk.CallToolRequest, in noteGrepInput) (*mcpsdk.CallToolResult, noteListOutput, error) {
-	notes, err := cg.GrepNotes(cg.GrepNoteOptions{
+	notes, err := model.GrepNotes(model.GrepNoteOptions{
 		Text:            in.Text,
 		Pattern:         in.Pattern,
 		CaseInsensitive: in.CaseInsensitive,

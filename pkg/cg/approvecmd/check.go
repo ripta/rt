@@ -12,8 +12,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/ripta/rt/pkg/cg"
 	"github.com/ripta/rt/pkg/cg/approve"
+	"github.com/ripta/rt/pkg/cg/model"
 )
 
 // checkOptions holds the flags for `cg check`.
@@ -79,26 +79,26 @@ func NewCheckCommand() *cobra.Command {
 func (opts *checkOptions) run(cmd *cobra.Command, args []string) error {
 	if len(args) == 0 {
 		_ = cmd.Usage()
-		return &cg.ExitError{Code: 2}
+		return &model.ExitError{Code: 2}
 	}
 
 	switch opts.Output {
 	case "text", "json":
 	default:
 		fmt.Fprintf(cmd.ErrOrStderr(), "unsupported --output value: %q (supported: text, json)\n", opts.Output)
-		return &cg.ExitError{Code: 2}
+		return &model.ExitError{Code: 2}
 	}
 
 	store, err := approve.Load(approve.LoadOptions{ProjectFiles: opts.ProjectConfig})
 	if err != nil {
 		fmt.Fprintf(cmd.ErrOrStderr(), "loading approval rules: %v\n", err)
-		return &cg.ExitError{Code: 2}
+		return &model.ExitError{Code: 2}
 	}
 
 	// A command that fails to resolve is not an error here: it just means
 	// canonical/resolved path rules cannot match, mirroring how the cg_run gate
-	// treats an unresolvable executable. See cg.ResolveCommand and gate.check.
-	resolved, _ := cg.ResolveCommand(args, opts.Cwd)
+	// treats an unresolvable executable. See model.ResolveCommand and gate.check.
+	resolved, _ := model.ResolveCommand(args, opts.Cwd)
 	subject := approve.Subject{Argv: args, Canonical: resolved.CanonicalArgv(), Resolved: resolved.ResolvedArgv()}
 	v := store.Ruleset().Evaluate(subject, opts.Env)
 
@@ -114,9 +114,9 @@ func (opts *checkOptions) run(cmd *cobra.Command, args []string) error {
 	case approve.DecisionRun:
 		return nil
 	case approve.DecisionRefuse:
-		return &cg.ExitError{Code: 1}
+		return &model.ExitError{Code: 1}
 	default:
-		return &cg.ExitError{Code: 3}
+		return &model.ExitError{Code: 3}
 	}
 }
 
@@ -138,7 +138,7 @@ func checkResultFrom(argv []string, v approve.Verdict) checkResult {
 
 // writeCheckText renders a verdict as a short human-readable report.
 func writeCheckText(w io.Writer, argv []string, v approve.Verdict, projectPath string) {
-	fmt.Fprintf(w, "%s: %s\n", decisionString(v.Decision), cg.EscapeArgs(argv))
+	fmt.Fprintf(w, "%s: %s\n", decisionString(v.Decision), model.EscapeArgs(argv))
 
 	if v.Rule != nil {
 		fmt.Fprintf(w, "  rule: %s %s\n", ruleSectionFor(v), describeRulePattern(v.Rule))

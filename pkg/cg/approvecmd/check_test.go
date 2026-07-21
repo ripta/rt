@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ripta/rt/pkg/cg"
+	"github.com/ripta/rt/pkg/cg/model"
 )
 
 // runCheck executes `cg check` with args, isolated from the real user config:
@@ -44,9 +44,9 @@ func exitCode(t *testing.T, err error) int {
 	if err == nil {
 		return 0
 	}
-	var exitErr *cg.ExitError
+	var exitErr *model.ExitError
 	if !errors.As(err, &exitErr) {
-		t.Fatalf("expected *cg.ExitError, got %T: %v", err, err)
+		t.Fatalf("expected *model.ExitError, got %T: %v", err, err)
 	}
 	return exitErr.Code
 }

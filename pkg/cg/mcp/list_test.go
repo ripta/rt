@@ -8,14 +8,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ripta/rt/pkg/cg"
+	"github.com/ripta/rt/pkg/cg/model"
 )
 
 // seedRunDir creates $TMPDIR/cg/<id>/ with empty stdout and stderr files. When
 // meta is non-nil it is written to meta.json so the run looks complete.
-func seedRunDir(t *testing.T, id string, meta *cg.Meta) string {
+func seedRunDir(t *testing.T, id string, meta *model.Meta) string {
 	t.Helper()
-	dir := filepath.Join(cg.CaptureRoot(), id)
+	dir := filepath.Join(model.CaptureRoot(), id)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("mkdir %s: %v", dir, err)
 	}
@@ -27,7 +27,7 @@ func seedRunDir(t *testing.T, id string, meta *cg.Meta) string {
 		f.Close()
 	}
 	if meta != nil {
-		if err := cg.WriteMeta(dir, meta); err != nil {
+		if err := model.WriteMeta(dir, meta); err != nil {
 			t.Fatalf("WriteMeta: %v", err)
 		}
 	}
@@ -38,7 +38,7 @@ func seedRunDir(t *testing.T, id string, meta *cg.Meta) string {
 // supervisor has died.
 func seedLockFile(t *testing.T, dir string) {
 	t.Helper()
-	f, err := os.Create(filepath.Join(dir, cg.LockFilename))
+	f, err := os.Create(filepath.Join(dir, model.LockFilename))
 	if err != nil {
 		t.Fatalf("creating lock file: %v", err)
 	}
@@ -49,7 +49,7 @@ func seedLockFile(t *testing.T, dir string) {
 // it on test cleanup.
 func holdRunLock(t *testing.T, dir string) {
 	t.Helper()
-	f, err := os.OpenFile(filepath.Join(dir, cg.LockFilename), os.O_CREATE|os.O_RDWR, 0o644)
+	f, err := os.OpenFile(filepath.Join(dir, model.LockFilename), os.O_CREATE|os.O_RDWR, 0o644)
 	if err != nil {
 		t.Fatalf("opening lock file: %v", err)
 	}
@@ -74,23 +74,23 @@ func TestHandleListEmpty(t *testing.T) {
 
 func TestHandleListDefaultsToAll(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
-	if err := os.MkdirAll(cg.CaptureRoot(), 0o755); err != nil {
+	if err := os.MkdirAll(model.CaptureRoot(), 0o755); err != nil {
 		t.Fatalf("mkdir root: %v", err)
 	}
 
-	dirNew := seedRunDir(t, "AAAAAA", &cg.Meta{
-		RunInfo:    cg.RunInfo{ID: "AAAAAA", Command: []string{"echo", "new"}},
+	dirNew := seedRunDir(t, "AAAAAA", &model.Meta{
+		RunInfo:    model.RunInfo{ID: "AAAAAA", Command: []string{"echo", "new"}},
 		DurationMs: 12,
 	})
-	dirOld := seedRunDir(t, "BBBBBB", &cg.Meta{
-		RunInfo:    cg.RunInfo{ID: "BBBBBB", Command: []string{"echo", "old"}},
+	dirOld := seedRunDir(t, "BBBBBB", &model.Meta{
+		RunInfo:    model.RunInfo{ID: "BBBBBB", Command: []string{"echo", "old"}},
 		ExitCode:   2,
 		DurationMs: 1234,
 	})
 	// No lock, no pid, no start.json: unknown, not skipped, under the default.
 	seedRunDir(t, "CCCCCC", nil)
 	// Non-Crockford dir without meta.json. Must be skipped under every filter.
-	if err := os.MkdirAll(filepath.Join(cg.CaptureRoot(), "lowercase"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(model.CaptureRoot(), "lowercase"), 0o755); err != nil {
 		t.Fatalf("mkdir junk: %v", err)
 	}
 
@@ -131,16 +131,16 @@ func TestHandleListDefaultsToAll(t *testing.T) {
 
 func TestHandleListExplicitStateFinished(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
-	if err := os.MkdirAll(cg.CaptureRoot(), 0o755); err != nil {
+	if err := os.MkdirAll(model.CaptureRoot(), 0o755); err != nil {
 		t.Fatalf("mkdir root: %v", err)
 	}
 
-	dirNew := seedRunDir(t, "AAAAAA", &cg.Meta{
-		RunInfo:    cg.RunInfo{ID: "AAAAAA", Command: []string{"echo", "new"}},
+	dirNew := seedRunDir(t, "AAAAAA", &model.Meta{
+		RunInfo:    model.RunInfo{ID: "AAAAAA", Command: []string{"echo", "new"}},
 		DurationMs: 12,
 	})
-	dirOld := seedRunDir(t, "BBBBBB", &cg.Meta{
-		RunInfo:    cg.RunInfo{ID: "BBBBBB", Command: []string{"echo", "old"}},
+	dirOld := seedRunDir(t, "BBBBBB", &model.Meta{
+		RunInfo:    model.RunInfo{ID: "BBBBBB", Command: []string{"echo", "old"}},
 		ExitCode:   2,
 		DurationMs: 1234,
 	})
@@ -168,12 +168,12 @@ func TestHandleListExplicitStateFinished(t *testing.T) {
 
 func TestHandleListStateAll(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
-	if err := os.MkdirAll(cg.CaptureRoot(), 0o755); err != nil {
+	if err := os.MkdirAll(model.CaptureRoot(), 0o755); err != nil {
 		t.Fatalf("mkdir root: %v", err)
 	}
 
-	dirFin := seedRunDir(t, "AAAAAA", &cg.Meta{
-		RunInfo:    cg.RunInfo{ID: "AAAAAA", Command: []string{"echo", "done"}},
+	dirFin := seedRunDir(t, "AAAAAA", &model.Meta{
+		RunInfo:    model.RunInfo{ID: "AAAAAA", Command: []string{"echo", "done"}},
 		DurationMs: 7,
 	})
 	dirRun := seedRunDir(t, "CCCCCC", nil)
@@ -229,11 +229,11 @@ func TestHandleListStateAll(t *testing.T) {
 
 func TestHandleListStateRunning(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
-	if err := os.MkdirAll(cg.CaptureRoot(), 0o755); err != nil {
+	if err := os.MkdirAll(model.CaptureRoot(), 0o755); err != nil {
 		t.Fatalf("mkdir root: %v", err)
 	}
 
-	seedRunDir(t, "AAAAAA", &cg.Meta{RunInfo: cg.RunInfo{ID: "AAAAAA", Command: []string{"echo", "done"}}})
+	seedRunDir(t, "AAAAAA", &model.Meta{RunInfo: model.RunInfo{ID: "AAAAAA", Command: []string{"echo", "done"}}})
 	dir := seedRunDir(t, "CCCCCC", nil)
 	holdRunLock(t, dir)
 
@@ -251,13 +251,13 @@ func TestHandleListStateRunning(t *testing.T) {
 
 func TestHandleListRunningReadsStartInfo(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
-	if err := os.MkdirAll(cg.CaptureRoot(), 0o755); err != nil {
+	if err := os.MkdirAll(model.CaptureRoot(), 0o755); err != nil {
 		t.Fatalf("mkdir root: %v", err)
 	}
 
 	dir := seedRunDir(t, "CCCCCC", nil)
 	started := time.Now().Add(-2 * time.Minute).UTC()
-	if err := cg.WriteStartInfo(dir, &cg.StartInfo{RunInfo: cg.RunInfo{Command: []string{"sleep", "30"}, StartedAt: started}}); err != nil {
+	if err := model.WriteStartInfo(dir, &model.StartInfo{RunInfo: model.RunInfo{Command: []string{"sleep", "30"}, StartedAt: started}}); err != nil {
 		t.Fatalf("WriteStartInfo: %v", err)
 	}
 
@@ -279,11 +279,11 @@ func TestHandleListRunningReadsStartInfo(t *testing.T) {
 
 func TestHandleListStateAbandoned(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
-	if err := os.MkdirAll(cg.CaptureRoot(), 0o755); err != nil {
+	if err := os.MkdirAll(model.CaptureRoot(), 0o755); err != nil {
 		t.Fatalf("mkdir root: %v", err)
 	}
 
-	seedRunDir(t, "AAAAAA", &cg.Meta{RunInfo: cg.RunInfo{ID: "AAAAAA", Command: []string{"echo", "done"}}})
+	seedRunDir(t, "AAAAAA", &model.Meta{RunInfo: model.RunInfo{ID: "AAAAAA", Command: []string{"echo", "done"}}})
 
 	// Live supervised run: the lock is held.
 	dirRun := seedRunDir(t, "DDDDDD", nil)
@@ -294,7 +294,7 @@ func TestHandleListStateAbandoned(t *testing.T) {
 	dirAband := seedRunDir(t, "CCCCCC", nil)
 	seedLockFile(t, dirAband)
 	started := time.Now().Add(-5 * time.Minute).UTC()
-	if err := cg.WriteStartInfo(dirAband, &cg.StartInfo{RunInfo: cg.RunInfo{Command: []string{"sleep", "600"}, StartedAt: started}}); err != nil {
+	if err := model.WriteStartInfo(dirAband, &model.StartInfo{RunInfo: model.RunInfo{Command: []string{"sleep", "600"}, StartedAt: started}}); err != nil {
 		t.Fatalf("WriteStartInfo: %v", err)
 	}
 
@@ -335,7 +335,7 @@ func TestHandleListStateAbandoned(t *testing.T) {
 
 func TestHandleListStateUnknown(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
-	if err := os.MkdirAll(cg.CaptureRoot(), 0o755); err != nil {
+	if err := os.MkdirAll(model.CaptureRoot(), 0o755); err != nil {
 		t.Fatalf("mkdir root: %v", err)
 	}
 
@@ -375,7 +375,7 @@ func TestHandleListStateUnknown(t *testing.T) {
 
 func TestHandleListHeldLockListsRunning(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
-	if err := os.MkdirAll(cg.CaptureRoot(), 0o755); err != nil {
+	if err := os.MkdirAll(model.CaptureRoot(), 0o755); err != nil {
 		t.Fatalf("mkdir root: %v", err)
 	}
 
@@ -413,14 +413,14 @@ func TestHandleListInvalidState(t *testing.T) {
 
 func TestHandleListSkipsInvalidIDs(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
-	if err := os.MkdirAll(cg.CaptureRoot(), 0o755); err != nil {
+	if err := os.MkdirAll(model.CaptureRoot(), 0o755); err != nil {
 		t.Fatalf("mkdir root: %v", err)
 	}
 
-	if err := os.MkdirAll(filepath.Join(cg.CaptureRoot(), "lowercase"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(model.CaptureRoot(), "lowercase"), 0o755); err != nil {
 		t.Fatalf("mkdir junk: %v", err)
 	}
-	if err := os.MkdirAll(filepath.Join(cg.CaptureRoot(), "ABC"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(model.CaptureRoot(), "ABC"), 0o755); err != nil {
 		t.Fatalf("mkdir short: %v", err)
 	}
 
@@ -435,12 +435,12 @@ func TestHandleListSkipsInvalidIDs(t *testing.T) {
 
 func TestHandleListLimit(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
-	if err := os.MkdirAll(cg.CaptureRoot(), 0o755); err != nil {
+	if err := os.MkdirAll(model.CaptureRoot(), 0o755); err != nil {
 		t.Fatalf("mkdir root: %v", err)
 	}
 
-	dirA := seedRunDir(t, "AAAAAA", &cg.Meta{RunInfo: cg.RunInfo{ID: "AAAAAA", Command: []string{"echo", "a"}}})
-	dirB := seedRunDir(t, "BBBBBB", &cg.Meta{RunInfo: cg.RunInfo{ID: "BBBBBB", Command: []string{"echo", "b"}}})
+	dirA := seedRunDir(t, "AAAAAA", &model.Meta{RunInfo: model.RunInfo{ID: "AAAAAA", Command: []string{"echo", "a"}}})
+	dirB := seedRunDir(t, "BBBBBB", &model.Meta{RunInfo: model.RunInfo{ID: "BBBBBB", Command: []string{"echo", "b"}}})
 
 	now := time.Now()
 	if err := os.Chtimes(dirA, now, now); err != nil {
@@ -476,22 +476,22 @@ func TestHandleListLimitClampedToMax(t *testing.T) {
 
 // seedFinishedPool seeds a finished pool with two finished members, one green
 // and one failed, plus the member run dirs whose meta names the pool.
-func seedFinishedPool(t *testing.T, poolID, okID, badID string) *cg.PoolManifest {
+func seedFinishedPool(t *testing.T, poolID, okID, badID string) *model.PoolManifest {
 	t.Helper()
 	finished := time.Now().UTC()
-	m := &cg.PoolManifest{
+	m := &model.PoolManifest{
 		ID:         poolID,
 		Commands:   [][]string{{"echo", "hi"}},
 		StartedAt:  finished.Add(-time.Minute),
 		FinishedAt: &finished,
-		Runs: []cg.PoolRunRecord{
-			{Command: 0, RunID: okID, Status: cg.PoolRunFinished, ExitCode: intp(0)},
-			{Command: 0, RunID: badID, Status: cg.PoolRunFinished, ExitCode: intp(1)},
+		Runs: []model.PoolRunRecord{
+			{Command: 0, RunID: okID, Status: model.PoolRunFinished, ExitCode: intp(0)},
+			{Command: 0, RunID: badID, Status: model.PoolRunFinished, ExitCode: intp(1)},
 		},
 	}
 	seedPoolDir(t, poolID, m)
-	seedRunDir(t, okID, &cg.Meta{RunInfo: cg.RunInfo{ID: okID, Command: []string{"echo", "hi"}, Pool: poolID}})
-	seedRunDir(t, badID, &cg.Meta{RunInfo: cg.RunInfo{ID: badID, Command: []string{"echo", "hi"}, Pool: poolID}, ExitCode: 1})
+	seedRunDir(t, okID, &model.Meta{RunInfo: model.RunInfo{ID: okID, Command: []string{"echo", "hi"}, Pool: poolID}})
+	seedRunDir(t, badID, &model.Meta{RunInfo: model.RunInfo{ID: badID, Command: []string{"echo", "hi"}, Pool: poolID}, ExitCode: 1})
 	return m
 }
 
@@ -501,12 +501,12 @@ func intp(v int) *int {
 
 func TestHandleListCollapsesPools(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
-	if err := os.MkdirAll(cg.CaptureRoot(), 0o755); err != nil {
+	if err := os.MkdirAll(model.CaptureRoot(), 0o755); err != nil {
 		t.Fatalf("mkdir root: %v", err)
 	}
 
 	seedFinishedPool(t, "PPPPPP", "AAAAAA", "BBBBBB")
-	seedRunDir(t, "SSSSSS", &cg.Meta{RunInfo: cg.RunInfo{ID: "SSSSSS", Command: []string{"echo", "solo"}}})
+	seedRunDir(t, "SSSSSS", &model.Meta{RunInfo: model.RunInfo{ID: "SSSSSS", Command: []string{"echo", "solo"}}})
 
 	_, out, err := handleList(context.Background(), nil, listInput{})
 	if err != nil {
@@ -530,7 +530,7 @@ func TestHandleListCollapsesPools(t *testing.T) {
 	if pool.ID != "PPPPPP" || pool.State != "finished" {
 		t.Errorf("pool row = %+v, want PPPPPP/finished", pool)
 	}
-	if pool.Counts == nil || *pool.Counts != (cg.PoolCounts{Total: 2, Succeeded: 1, Failed: 1}) {
+	if pool.Counts == nil || *pool.Counts != (model.PoolCounts{Total: 2, Succeeded: 1, Failed: 1}) {
 		t.Errorf("pool counts = %+v, want total 2, 1 ok, 1 failed", pool.Counts)
 	}
 	if pool.FinishedAt == nil {
@@ -540,23 +540,23 @@ func TestHandleListCollapsesPools(t *testing.T) {
 
 func TestHandleListPoolStates(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
-	if err := os.MkdirAll(cg.CaptureRoot(), 0o755); err != nil {
+	if err := os.MkdirAll(model.CaptureRoot(), 0o755); err != nil {
 		t.Fatalf("mkdir root: %v", err)
 	}
 
-	running := seedPoolDir(t, "QQQQQQ", &cg.PoolManifest{
+	running := seedPoolDir(t, "QQQQQQ", &model.PoolManifest{
 		ID:        "QQQQQQ",
 		Commands:  [][]string{{"sleep", "60"}},
 		StartedAt: time.Now().UTC(),
-		Runs:      []cg.PoolRunRecord{{Command: 0, Status: cg.PoolRunRunning, RunID: "AAAAAA"}},
+		Runs:      []model.PoolRunRecord{{Command: 0, Status: model.PoolRunRunning, RunID: "AAAAAA"}},
 	})
 	holdRunLock(t, running)
 
-	abandoned := seedPoolDir(t, "XXXXXX", &cg.PoolManifest{
+	abandoned := seedPoolDir(t, "XXXXXX", &model.PoolManifest{
 		ID:        "XXXXXX",
 		Commands:  [][]string{{"sleep", "60"}},
 		StartedAt: time.Now().UTC(),
-		Runs:      []cg.PoolRunRecord{{Command: 0, Status: cg.PoolRunRunning}},
+		Runs:      []model.PoolRunRecord{{Command: 0, Status: model.PoolRunRunning}},
 	})
 	seedLockFile(t, abandoned)
 
@@ -588,7 +588,7 @@ func TestHandleListPoolStates(t *testing.T) {
 
 func TestHandleListPoolMembers(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
-	if err := os.MkdirAll(cg.CaptureRoot(), 0o755); err != nil {
+	if err := os.MkdirAll(model.CaptureRoot(), 0o755); err != nil {
 		t.Fatalf("mkdir root: %v", err)
 	}
 
@@ -597,11 +597,11 @@ func TestHandleListPoolMembers(t *testing.T) {
 	// An in-flight member: no meta.json yet, start.json names the pool. Member
 	// mode must default the state filter to all so this row is not hidden.
 	dirRun := seedRunDir(t, "CCCCCC", nil)
-	if err := cg.WriteStartInfo(dirRun, &cg.StartInfo{RunInfo: cg.RunInfo{Command: []string{"sleep", "30"}, StartedAt: time.Now().UTC(), Pool: "PPPPPP"}}); err != nil {
+	if err := model.WriteStartInfo(dirRun, &model.StartInfo{RunInfo: model.RunInfo{Command: []string{"sleep", "30"}, StartedAt: time.Now().UTC(), Pool: "PPPPPP"}}); err != nil {
 		t.Fatalf("WriteStartInfo: %v", err)
 	}
 
-	seedRunDir(t, "SSSSSS", &cg.Meta{RunInfo: cg.RunInfo{ID: "SSSSSS", Command: []string{"echo", "solo"}}})
+	seedRunDir(t, "SSSSSS", &model.Meta{RunInfo: model.RunInfo{ID: "SSSSSS", Command: []string{"echo", "solo"}}})
 
 	_, out, err := handleList(context.Background(), nil, listInput{Pool: "PPPPPP"})
 	if err != nil {
@@ -630,12 +630,12 @@ func TestHandleListPoolMembers(t *testing.T) {
 
 func TestHandleListPoolNoneAndAny(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
-	if err := os.MkdirAll(cg.CaptureRoot(), 0o755); err != nil {
+	if err := os.MkdirAll(model.CaptureRoot(), 0o755); err != nil {
 		t.Fatalf("mkdir root: %v", err)
 	}
 
 	seedFinishedPool(t, "PPPPPP", "AAAAAA", "BBBBBB")
-	seedRunDir(t, "SSSSSS", &cg.Meta{RunInfo: cg.RunInfo{ID: "SSSSSS", Command: []string{"echo", "solo"}}})
+	seedRunDir(t, "SSSSSS", &model.Meta{RunInfo: model.RunInfo{ID: "SSSSSS", Command: []string{"echo", "solo"}}})
 
 	_, out, err := handleList(context.Background(), nil, listInput{Pool: "none"})
 	if err != nil {
@@ -656,12 +656,12 @@ func TestHandleListPoolNoneAndAny(t *testing.T) {
 
 func TestHandleListOrphanMemberIsStandalone(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
-	if err := os.MkdirAll(cg.CaptureRoot(), 0o755); err != nil {
+	if err := os.MkdirAll(model.CaptureRoot(), 0o755); err != nil {
 		t.Fatalf("mkdir root: %v", err)
 	}
 
 	// A member whose pool dir is gone: it must stay visible as standalone.
-	seedRunDir(t, "AAAAAA", &cg.Meta{RunInfo: cg.RunInfo{ID: "AAAAAA", Command: []string{"echo", "hi"}, Pool: "PPPPPP"}})
+	seedRunDir(t, "AAAAAA", &model.Meta{RunInfo: model.RunInfo{ID: "AAAAAA", Command: []string{"echo", "hi"}, Pool: "PPPPPP"}})
 
 	_, out, err := handleList(context.Background(), nil, listInput{})
 	if err != nil {
@@ -682,12 +682,12 @@ func TestHandleListOrphanMemberIsStandalone(t *testing.T) {
 
 func TestHandleListLimitCountsCollapsedRows(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
-	if err := os.MkdirAll(cg.CaptureRoot(), 0o755); err != nil {
+	if err := os.MkdirAll(model.CaptureRoot(), 0o755); err != nil {
 		t.Fatalf("mkdir root: %v", err)
 	}
 
 	seedFinishedPool(t, "PPPPPP", "AAAAAA", "BBBBBB")
-	dirSolo := seedRunDir(t, "SSSSSS", &cg.Meta{RunInfo: cg.RunInfo{ID: "SSSSSS", Command: []string{"echo", "solo"}}})
+	dirSolo := seedRunDir(t, "SSSSSS", &model.Meta{RunInfo: model.RunInfo{ID: "SSSSSS", Command: []string{"echo", "solo"}}})
 
 	now := time.Now()
 	if err := os.Chtimes(dirSolo, now, now); err != nil {
@@ -714,7 +714,7 @@ func TestHandleListInvalidPool(t *testing.T) {
 
 func TestHandleListUnknownPoolID(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
-	if err := os.MkdirAll(cg.CaptureRoot(), 0o755); err != nil {
+	if err := os.MkdirAll(model.CaptureRoot(), 0o755); err != nil {
 		t.Fatalf("mkdir root: %v", err)
 	}
 
@@ -726,13 +726,13 @@ func TestHandleListUnknownPoolID(t *testing.T) {
 
 func TestHandleListExitCodeFilter(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
-	if err := os.MkdirAll(cg.CaptureRoot(), 0o755); err != nil {
+	if err := os.MkdirAll(model.CaptureRoot(), 0o755); err != nil {
 		t.Fatalf("mkdir root: %v", err)
 	}
 
-	seedRunDir(t, "AAAAAA", &cg.Meta{RunInfo: cg.RunInfo{ID: "AAAAAA", Command: []string{"echo", "ok"}}, ExitCode: 0})
-	seedRunDir(t, "BBBBBB", &cg.Meta{RunInfo: cg.RunInfo{ID: "BBBBBB", Command: []string{"sh", "-c", "exit 1"}}, ExitCode: 1})
-	seedRunDir(t, "CCCCCC", &cg.Meta{RunInfo: cg.RunInfo{ID: "CCCCCC", Command: []string{"sh", "-c", "exit 2"}}, ExitCode: 2})
+	seedRunDir(t, "AAAAAA", &model.Meta{RunInfo: model.RunInfo{ID: "AAAAAA", Command: []string{"echo", "ok"}}, ExitCode: 0})
+	seedRunDir(t, "BBBBBB", &model.Meta{RunInfo: model.RunInfo{ID: "BBBBBB", Command: []string{"sh", "-c", "exit 1"}}, ExitCode: 1})
+	seedRunDir(t, "CCCCCC", &model.Meta{RunInfo: model.RunInfo{ID: "CCCCCC", Command: []string{"sh", "-c", "exit 2"}}, ExitCode: 2})
 
 	tests := []struct {
 		expr string
@@ -773,12 +773,12 @@ func TestHandleListInvalidExitCode(t *testing.T) {
 
 func TestHandleListExitCodePoolExemption(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
-	if err := os.MkdirAll(cg.CaptureRoot(), 0o755); err != nil {
+	if err := os.MkdirAll(model.CaptureRoot(), 0o755); err != nil {
 		t.Fatalf("mkdir root: %v", err)
 	}
 
 	seedFinishedPool(t, "PPPPPP", "AAAAAA", "BBBBBB") // exit 0 and exit 1
-	seedRunDir(t, "SSSSSS", &cg.Meta{RunInfo: cg.RunInfo{ID: "SSSSSS", Command: []string{"echo", "solo"}}, ExitCode: 0})
+	seedRunDir(t, "SSSSSS", &model.Meta{RunInfo: model.RunInfo{ID: "SSSSSS", Command: []string{"echo", "solo"}}, ExitCode: 0})
 
 	// Collapsed: the pool row always passes through exit_code; the solo
 	// exit-0 run does not match "!=0".
@@ -802,13 +802,13 @@ func TestHandleListExitCodePoolExemption(t *testing.T) {
 
 func TestHandleListSinceBeforeAllForms(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
-	if err := os.MkdirAll(cg.CaptureRoot(), 0o755); err != nil {
+	if err := os.MkdirAll(model.CaptureRoot(), 0o755); err != nil {
 		t.Fatalf("mkdir root: %v", err)
 	}
 
 	now := time.Now()
-	dirOld := seedRunDir(t, "AAAAAA", &cg.Meta{RunInfo: cg.RunInfo{ID: "AAAAAA", Command: []string{"echo", "old"}, StartedAt: now.Add(-3 * time.Hour)}})
-	dirNew := seedRunDir(t, "BBBBBB", &cg.Meta{RunInfo: cg.RunInfo{ID: "BBBBBB", Command: []string{"echo", "new"}, StartedAt: now.Add(-30 * time.Minute)}})
+	dirOld := seedRunDir(t, "AAAAAA", &model.Meta{RunInfo: model.RunInfo{ID: "AAAAAA", Command: []string{"echo", "old"}, StartedAt: now.Add(-3 * time.Hour)}})
+	dirNew := seedRunDir(t, "BBBBBB", &model.Meta{RunInfo: model.RunInfo{ID: "BBBBBB", Command: []string{"echo", "new"}, StartedAt: now.Add(-30 * time.Minute)}})
 	if err := os.Chtimes(dirOld, now.Add(-3*time.Hour), now.Add(-3*time.Hour)); err != nil {
 		t.Fatalf("chtimes old: %v", err)
 	}
@@ -880,18 +880,18 @@ func TestHandleListInvalidBefore(t *testing.T) {
 
 func TestHandleListSinceBeforeAppliesToPoolRows(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
-	if err := os.MkdirAll(cg.CaptureRoot(), 0o755); err != nil {
+	if err := os.MkdirAll(model.CaptureRoot(), 0o755); err != nil {
 		t.Fatalf("mkdir root: %v", err)
 	}
 
 	now := time.Now()
 	finished := now.Add(-2 * time.Hour)
-	dirPool := seedPoolDir(t, "PPPPPP", &cg.PoolManifest{
+	dirPool := seedPoolDir(t, "PPPPPP", &model.PoolManifest{
 		ID:         "PPPPPP",
 		Commands:   [][]string{{"echo", "hi"}},
 		StartedAt:  now.Add(-3 * time.Hour),
 		FinishedAt: &finished,
-		Runs:       []cg.PoolRunRecord{{Command: 0, Status: cg.PoolRunFinished, ExitCode: intp(0)}},
+		Runs:       []model.PoolRunRecord{{Command: 0, Status: model.PoolRunFinished, ExitCode: intp(0)}},
 	})
 	if err := os.Chtimes(dirPool, finished, finished); err != nil {
 		t.Fatalf("chtimes pool: %v", err)
@@ -918,30 +918,30 @@ func TestHandleListSinceBeforeAppliesToPoolRows(t *testing.T) {
 
 func TestHandleListCombinedFilters(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
-	if err := os.MkdirAll(cg.CaptureRoot(), 0o755); err != nil {
+	if err := os.MkdirAll(model.CaptureRoot(), 0o755); err != nil {
 		t.Fatalf("mkdir root: %v", err)
 	}
 
 	now := time.Now()
 
-	dirMatch := seedRunDir(t, "AAAAAA", &cg.Meta{
-		RunInfo:  cg.RunInfo{ID: "AAAAAA", Command: []string{"sh", "-c", "exit 1"}, StartedAt: now.Add(-1 * time.Hour)},
+	dirMatch := seedRunDir(t, "AAAAAA", &model.Meta{
+		RunInfo:  model.RunInfo{ID: "AAAAAA", Command: []string{"sh", "-c", "exit 1"}, StartedAt: now.Add(-1 * time.Hour)},
 		ExitCode: 1,
 	})
 	if err := os.Chtimes(dirMatch, now.Add(-1*time.Hour), now.Add(-1*time.Hour)); err != nil {
 		t.Fatalf("chtimes match: %v", err)
 	}
 
-	dirOkExit := seedRunDir(t, "BBBBBB", &cg.Meta{
-		RunInfo:  cg.RunInfo{ID: "BBBBBB", Command: []string{"echo", "ok"}, StartedAt: now.Add(-1 * time.Hour)},
+	dirOkExit := seedRunDir(t, "BBBBBB", &model.Meta{
+		RunInfo:  model.RunInfo{ID: "BBBBBB", Command: []string{"echo", "ok"}, StartedAt: now.Add(-1 * time.Hour)},
 		ExitCode: 0,
 	})
 	if err := os.Chtimes(dirOkExit, now.Add(-1*time.Hour), now.Add(-1*time.Hour)); err != nil {
 		t.Fatalf("chtimes ok exit: %v", err)
 	}
 
-	dirOld := seedRunDir(t, "CCCCCC", &cg.Meta{
-		RunInfo:  cg.RunInfo{ID: "CCCCCC", Command: []string{"sh", "-c", "exit 1"}, StartedAt: now.Add(-5 * time.Hour)},
+	dirOld := seedRunDir(t, "CCCCCC", &model.Meta{
+		RunInfo:  model.RunInfo{ID: "CCCCCC", Command: []string{"sh", "-c", "exit 1"}, StartedAt: now.Add(-5 * time.Hour)},
 		ExitCode: 1,
 	})
 	if err := os.Chtimes(dirOld, now.Add(-5*time.Hour), now.Add(-5*time.Hour)); err != nil {
@@ -961,14 +961,14 @@ func TestHandleListCombinedFilters(t *testing.T) {
 
 func TestHandleListFailedRowStartedAtUsesDebugTimestamp(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
-	if err := os.MkdirAll(cg.CaptureRoot(), 0o755); err != nil {
+	if err := os.MkdirAll(model.CaptureRoot(), 0o755); err != nil {
 		t.Fatalf("mkdir root: %v", err)
 	}
 
 	dir := seedRunDir(t, "FFFFFF", nil)
 	started := time.Now().Add(-90 * time.Minute).UTC()
-	if err := cg.WriteStartDebug(dir, &cg.StartDebug{
-		RunInfo:    cg.RunInfo{ID: "FFFFFF", Command: []string{"nope"}, StartedAt: started},
+	if err := model.WriteStartDebug(dir, &model.StartDebug{
+		RunInfo:    model.RunInfo{ID: "FFFFFF", Command: []string{"nope"}, StartedAt: started},
 		StartError: "exec: not found",
 	}); err != nil {
 		t.Fatalf("WriteStartDebug: %v", err)

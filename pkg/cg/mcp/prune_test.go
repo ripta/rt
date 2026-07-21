@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ripta/rt/pkg/cg"
+	"github.com/ripta/rt/pkg/cg/model"
 )
 
 func intPtr(i int) *int { return &i }
@@ -30,11 +30,11 @@ func TestHandlePruneEmptyRoot(t *testing.T) {
 
 func TestHandlePruneKeepDefault(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
-	if err := os.MkdirAll(cg.CaptureRoot(), 0o755); err != nil {
+	if err := os.MkdirAll(model.CaptureRoot(), 0o755); err != nil {
 		t.Fatalf("mkdir root: %v", err)
 	}
-	seedRunDir(t, "AAAAAA", &cg.Meta{RunInfo: cg.RunInfo{ID: "AAAAAA", Command: []string{"echo", "a"}}})
-	seedRunDir(t, "BBBBBB", &cg.Meta{RunInfo: cg.RunInfo{ID: "BBBBBB", Command: []string{"echo", "b"}}})
+	seedRunDir(t, "AAAAAA", &model.Meta{RunInfo: model.RunInfo{ID: "AAAAAA", Command: []string{"echo", "a"}}})
+	seedRunDir(t, "BBBBBB", &model.Meta{RunInfo: model.RunInfo{ID: "BBBBBB", Command: []string{"echo", "b"}}})
 
 	_, out, err := handlePrune(context.Background(), nil, pruneInput{})
 	if err != nil {
@@ -44,7 +44,7 @@ func TestHandlePruneKeepDefault(t *testing.T) {
 		t.Errorf("Removed = %v, want empty (under default keep)", out.Removed)
 	}
 	for _, id := range []string{"AAAAAA", "BBBBBB"} {
-		if _, err := os.Stat(filepath.Join(cg.CaptureRoot(), id)); err != nil {
+		if _, err := os.Stat(filepath.Join(model.CaptureRoot(), id)); err != nil {
 			t.Errorf("run %s removed unexpectedly: %v", id, err)
 		}
 	}
@@ -52,14 +52,14 @@ func TestHandlePruneKeepDefault(t *testing.T) {
 
 func TestHandlePruneKeepEvictsOldest(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
-	if err := os.MkdirAll(cg.CaptureRoot(), 0o755); err != nil {
+	if err := os.MkdirAll(model.CaptureRoot(), 0o755); err != nil {
 		t.Fatalf("mkdir root: %v", err)
 	}
 
 	now := time.Now()
-	dirA := seedRunDir(t, "AAAAAA", &cg.Meta{RunInfo: cg.RunInfo{ID: "AAAAAA", Command: []string{"echo", "a"}}})
-	dirB := seedRunDir(t, "BBBBBB", &cg.Meta{RunInfo: cg.RunInfo{ID: "BBBBBB", Command: []string{"echo", "b"}}})
-	dirC := seedRunDir(t, "CCCCCC", &cg.Meta{RunInfo: cg.RunInfo{ID: "CCCCCC", Command: []string{"echo", "c"}}})
+	dirA := seedRunDir(t, "AAAAAA", &model.Meta{RunInfo: model.RunInfo{ID: "AAAAAA", Command: []string{"echo", "a"}}})
+	dirB := seedRunDir(t, "BBBBBB", &model.Meta{RunInfo: model.RunInfo{ID: "BBBBBB", Command: []string{"echo", "b"}}})
+	dirC := seedRunDir(t, "CCCCCC", &model.Meta{RunInfo: model.RunInfo{ID: "CCCCCC", Command: []string{"echo", "c"}}})
 	if err := os.Chtimes(dirA, now, now); err != nil {
 		t.Fatalf("chtimes a: %v", err)
 	}
@@ -91,14 +91,14 @@ func TestHandlePruneKeepEvictsOldest(t *testing.T) {
 
 func TestHandlePruneEvictsPoolAsUnit(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
-	if err := os.MkdirAll(cg.CaptureRoot(), 0o755); err != nil {
+	if err := os.MkdirAll(model.CaptureRoot(), 0o755); err != nil {
 		t.Fatalf("mkdir root: %v", err)
 	}
 
 	now := time.Now()
 	seedFinishedPool(t, "PPPPPP", "AAAAAA", "BBBBBB")
-	dirPool := filepath.Join(cg.CaptureRoot(), "PPPPPP")
-	dirSolo := seedRunDir(t, "SSSSSS", &cg.Meta{RunInfo: cg.RunInfo{ID: "SSSSSS", Command: []string{"echo", "solo"}}})
+	dirPool := filepath.Join(model.CaptureRoot(), "PPPPPP")
+	dirSolo := seedRunDir(t, "SSSSSS", &model.Meta{RunInfo: model.RunInfo{ID: "SSSSSS", Command: []string{"echo", "solo"}}})
 	if err := os.Chtimes(dirSolo, now, now); err != nil {
 		t.Fatalf("chtimes solo: %v", err)
 	}
@@ -115,7 +115,7 @@ func TestHandlePruneEvictsPoolAsUnit(t *testing.T) {
 		t.Errorf("Removed = %v, want %v", out.Removed, want)
 	}
 	for _, id := range want {
-		if _, err := os.Stat(filepath.Join(cg.CaptureRoot(), id)); !os.IsNotExist(err) {
+		if _, err := os.Stat(filepath.Join(model.CaptureRoot(), id)); !os.IsNotExist(err) {
 			t.Errorf("%s still exists: %v", id, err)
 		}
 	}
@@ -126,13 +126,13 @@ func TestHandlePruneEvictsPoolAsUnit(t *testing.T) {
 
 func TestHandlePruneDryRun(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
-	if err := os.MkdirAll(cg.CaptureRoot(), 0o755); err != nil {
+	if err := os.MkdirAll(model.CaptureRoot(), 0o755); err != nil {
 		t.Fatalf("mkdir root: %v", err)
 	}
 
 	now := time.Now()
-	dirA := seedRunDir(t, "AAAAAA", &cg.Meta{RunInfo: cg.RunInfo{ID: "AAAAAA", Command: []string{"echo", "a"}}})
-	dirB := seedRunDir(t, "BBBBBB", &cg.Meta{RunInfo: cg.RunInfo{ID: "BBBBBB", Command: []string{"echo", "b"}}})
+	dirA := seedRunDir(t, "AAAAAA", &model.Meta{RunInfo: model.RunInfo{ID: "AAAAAA", Command: []string{"echo", "a"}}})
+	dirB := seedRunDir(t, "BBBBBB", &model.Meta{RunInfo: model.RunInfo{ID: "BBBBBB", Command: []string{"echo", "b"}}})
 	if err := os.Chtimes(dirA, now, now); err != nil {
 		t.Fatalf("chtimes a: %v", err)
 	}
@@ -157,14 +157,14 @@ func TestHandlePruneDryRun(t *testing.T) {
 
 func TestHandlePruneOlderThan(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
-	if err := os.MkdirAll(cg.CaptureRoot(), 0o755); err != nil {
+	if err := os.MkdirAll(model.CaptureRoot(), 0o755); err != nil {
 		t.Fatalf("mkdir root: %v", err)
 	}
 
 	now := time.Now()
-	dirA := seedRunDir(t, "AAAAAA", &cg.Meta{RunInfo: cg.RunInfo{ID: "AAAAAA", Command: []string{"echo", "a"}}})
-	dirB := seedRunDir(t, "BBBBBB", &cg.Meta{RunInfo: cg.RunInfo{ID: "BBBBBB", Command: []string{"echo", "b"}}})
-	dirC := seedRunDir(t, "CCCCCC", &cg.Meta{RunInfo: cg.RunInfo{ID: "CCCCCC", Command: []string{"echo", "c"}}})
+	dirA := seedRunDir(t, "AAAAAA", &model.Meta{RunInfo: model.RunInfo{ID: "AAAAAA", Command: []string{"echo", "a"}}})
+	dirB := seedRunDir(t, "BBBBBB", &model.Meta{RunInfo: model.RunInfo{ID: "BBBBBB", Command: []string{"echo", "b"}}})
+	dirC := seedRunDir(t, "CCCCCC", &model.Meta{RunInfo: model.RunInfo{ID: "CCCCCC", Command: []string{"echo", "c"}}})
 	if err := os.Chtimes(dirA, now, now); err != nil {
 		t.Fatalf("chtimes a: %v", err)
 	}
@@ -195,13 +195,13 @@ func TestHandlePruneOlderThan(t *testing.T) {
 
 func TestHandlePruneOlderThanDaySuffix(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
-	if err := os.MkdirAll(cg.CaptureRoot(), 0o755); err != nil {
+	if err := os.MkdirAll(model.CaptureRoot(), 0o755); err != nil {
 		t.Fatalf("mkdir root: %v", err)
 	}
 
 	now := time.Now()
-	dirA := seedRunDir(t, "AAAAAA", &cg.Meta{RunInfo: cg.RunInfo{ID: "AAAAAA", Command: []string{"echo", "a"}}})
-	dirB := seedRunDir(t, "BBBBBB", &cg.Meta{RunInfo: cg.RunInfo{ID: "BBBBBB", Command: []string{"echo", "b"}}})
+	dirA := seedRunDir(t, "AAAAAA", &model.Meta{RunInfo: model.RunInfo{ID: "AAAAAA", Command: []string{"echo", "a"}}})
+	dirB := seedRunDir(t, "BBBBBB", &model.Meta{RunInfo: model.RunInfo{ID: "BBBBBB", Command: []string{"echo", "b"}}})
 	if err := os.Chtimes(dirA, now, now); err != nil {
 		t.Fatalf("chtimes a: %v", err)
 	}
@@ -220,12 +220,12 @@ func TestHandlePruneOlderThanDaySuffix(t *testing.T) {
 
 func TestHandlePruneEvictsAbandonedRuns(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
-	if err := os.MkdirAll(cg.CaptureRoot(), 0o755); err != nil {
+	if err := os.MkdirAll(model.CaptureRoot(), 0o755); err != nil {
 		t.Fatalf("mkdir root: %v", err)
 	}
 
 	now := time.Now()
-	dirFin := seedRunDir(t, "AAAAAA", &cg.Meta{RunInfo: cg.RunInfo{ID: "AAAAAA", Command: []string{"echo", "a"}}})
+	dirFin := seedRunDir(t, "AAAAAA", &model.Meta{RunInfo: model.RunInfo{ID: "AAAAAA", Command: []string{"echo", "a"}}})
 
 	// Abandoned: the lock file exists but nothing holds it.
 	dirAband := seedRunDir(t, "ABANDN", nil)
@@ -238,7 +238,7 @@ func TestHandlePruneEvictsAbandonedRuns(t *testing.T) {
 	// Live shell-path run: no lock file, but start.json survives, so it is
 	// presumed running.
 	dirRunning := seedRunDir(t, "FFFFFF", nil)
-	if err := cg.WriteStartInfo(dirRunning, &cg.StartInfo{RunInfo: cg.RunInfo{ID: "FFFFFF", Command: []string{"sleep", "60"}, StartedAt: now}}); err != nil {
+	if err := model.WriteStartInfo(dirRunning, &model.StartInfo{RunInfo: model.RunInfo{ID: "FFFFFF", Command: []string{"sleep", "60"}, StartedAt: now}}); err != nil {
 		t.Fatalf("WriteStartInfo: %v", err)
 	}
 
@@ -304,7 +304,7 @@ func TestHandlePruneInvalidOlderThan(t *testing.T) {
 
 func TestHandlePruneSkipsNonRunEntries(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
-	root := cg.CaptureRoot()
+	root := model.CaptureRoot()
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatalf("mkdir root: %v", err)
 	}
@@ -317,8 +317,8 @@ func TestHandlePruneSkipsNonRunEntries(t *testing.T) {
 	seedRunDir(t, "INCOMP", nil)
 
 	now := time.Now()
-	dirA := seedRunDir(t, "AAAAAA", &cg.Meta{RunInfo: cg.RunInfo{ID: "AAAAAA", Command: []string{"echo", "a"}}})
-	dirB := seedRunDir(t, "BBBBBB", &cg.Meta{RunInfo: cg.RunInfo{ID: "BBBBBB", Command: []string{"echo", "b"}}})
+	dirA := seedRunDir(t, "AAAAAA", &model.Meta{RunInfo: model.RunInfo{ID: "AAAAAA", Command: []string{"echo", "a"}}})
+	dirB := seedRunDir(t, "BBBBBB", &model.Meta{RunInfo: model.RunInfo{ID: "BBBBBB", Command: []string{"echo", "b"}}})
 	if err := os.Chtimes(dirA, now, now); err != nil {
 		t.Fatalf("chtimes a: %v", err)
 	}

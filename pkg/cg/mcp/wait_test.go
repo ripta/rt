@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ripta/rt/pkg/cg"
+	"github.com/ripta/rt/pkg/cg/model"
 )
 
 func TestHandleWaitUnknownID(t *testing.T) {
@@ -26,8 +26,8 @@ func TestHandleWaitAlreadyFinished(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 
 	exit := 3
-	seedRunDir(t, "AAAAAA", &cg.Meta{
-		RunInfo:    cg.RunInfo{ID: "AAAAAA", Command: []string{"echo", "done"}},
+	seedRunDir(t, "AAAAAA", &model.Meta{
+		RunInfo:    model.RunInfo{ID: "AAAAAA", Command: []string{"echo", "done"}},
 		ExitCode:   exit,
 		DurationMs: 5,
 	})
@@ -59,8 +59,8 @@ func TestHandleWaitFastPath(t *testing.T) {
 	// Close Done after a short delay and write meta.json as the real run would.
 	go func() {
 		time.Sleep(50 * time.Millisecond)
-		if err := cg.WriteMeta(cg.CaptureRoot()+"/AAAAAA", &cg.Meta{
-			RunInfo:    cg.RunInfo{ID: "AAAAAA", Command: []string{"echo", "fp"}},
+		if err := model.WriteMeta(model.CaptureRoot()+"/AAAAAA", &model.Meta{
+			RunInfo:    model.RunInfo{ID: "AAAAAA", Command: []string{"echo", "fp"}},
 			DurationMs: 9,
 		}); err != nil {
 			t.Errorf("WriteMeta: %v", err)
@@ -124,8 +124,8 @@ func TestHandleWaitSlowPath(t *testing.T) {
 
 	go func() {
 		time.Sleep(250 * time.Millisecond)
-		_ = cg.WriteMeta(cg.CaptureRoot()+"/AAAAAA", &cg.Meta{
-			RunInfo:    cg.RunInfo{ID: "AAAAAA", Command: []string{"echo", "sp"}},
+		_ = model.WriteMeta(model.CaptureRoot()+"/AAAAAA", &model.Meta{
+			RunInfo:    model.RunInfo{ID: "AAAAAA", Command: []string{"echo", "sp"}},
 			DurationMs: 11,
 		})
 	}()
@@ -164,33 +164,33 @@ func TestHandleWaitTimeout(t *testing.T) {
 
 // seedPoolDir writes a pool directory with the given manifest, standing in for
 // a pool started by another process.
-func seedPoolDir(t *testing.T, id string, m *cg.PoolManifest) string {
+func seedPoolDir(t *testing.T, id string, m *model.PoolManifest) string {
 	t.Helper()
 
-	dir := cg.CaptureRoot() + "/" + id
+	dir := model.CaptureRoot() + "/" + id
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}
-	if err := cg.WritePoolManifest(dir, m); err != nil {
+	if err := model.WritePoolManifest(dir, m); err != nil {
 		t.Fatalf("WritePoolManifest: %v", err)
 	}
 	return dir
 }
 
 // runningPoolManifest builds an in-flight manifest with one running member.
-func runningPoolManifest(id string) *cg.PoolManifest {
-	return &cg.PoolManifest{
+func runningPoolManifest(id string) *model.PoolManifest {
+	return &model.PoolManifest{
 		ID:       id,
 		Commands: [][]string{{"echo", "member"}},
-		Runs:     []cg.PoolRunRecord{{Command: 0, RunID: "BBBBBB", Status: cg.PoolRunRunning}},
+		Runs:     []model.PoolRunRecord{{Command: 0, RunID: "BBBBBB", Status: model.PoolRunRunning}},
 	}
 }
 
 // finishPoolManifest marks the manifest's single member finished with exit 0
 // and stamps finished_at.
-func finishPoolManifest(m *cg.PoolManifest) {
+func finishPoolManifest(m *model.PoolManifest) {
 	exit := 0
-	m.Runs[0].Status = cg.PoolRunFinished
+	m.Runs[0].Status = model.PoolRunFinished
 	m.Runs[0].ExitCode = &exit
 	now := time.Now().UTC()
 	m.FinishedAt = &now
@@ -229,7 +229,7 @@ func TestHandleWaitPoolFastPath(t *testing.T) {
 	go func() {
 		time.Sleep(50 * time.Millisecond)
 		finishPoolManifest(m)
-		if err := cg.WritePoolManifest(dir, m); err != nil {
+		if err := model.WritePoolManifest(dir, m); err != nil {
 			t.Errorf("WritePoolManifest: %v", err)
 		}
 		close(done)
@@ -261,7 +261,7 @@ func TestHandleWaitPoolSlowPath(t *testing.T) {
 	go func() {
 		time.Sleep(250 * time.Millisecond)
 		finishPoolManifest(m)
-		_ = cg.WritePoolManifest(dir, m)
+		_ = model.WritePoolManifest(dir, m)
 	}()
 
 	_, out, err := handleWait(context.Background(), newRunRegistry(), waitInput{ID: "AAAAAA", TimeoutMs: 5000})
@@ -291,7 +291,7 @@ func TestHandleWaitPoolTimeoutPartialSummary(t *testing.T) {
 	if out.Total != 1 || out.Running != 1 {
 		t.Errorf("counts = %+v, want one running record in the partial summary", out.poolSummary)
 	}
-	if len(out.Runs) != 1 || out.Runs[0].Status != cg.PoolRunRunning {
+	if len(out.Runs) != 1 || out.Runs[0].Status != model.PoolRunRunning {
 		t.Errorf("Runs = %+v, want the running member visible", out.Runs)
 	}
 }

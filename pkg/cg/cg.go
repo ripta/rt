@@ -1,10 +1,24 @@
+// Package cg assembles the full `cg` command tree: the capture-run model's
+// own subcommands (package model), the MCP server (package mcp), and the
+// approval-rules subcommands (package approvecmd). It is the single place
+// that has to know about every subcommand package, so any binary that calls
+// NewCommand gets all of them without repeating the wiring itself.
 package cg
 
 import (
 	"fmt"
 
 	"github.com/spf13/cobra"
+
+	"github.com/ripta/rt/pkg/cg/approvecmd"
+	"github.com/ripta/rt/pkg/cg/mcp"
+	"github.com/ripta/rt/pkg/cg/model"
 )
+
+// ExitError re-exports model.ExitError so callers that only import cg for
+// NewCommand don't also need to import model to unwrap the exit code from a
+// returned error.
+type ExitError = model.ExitError
 
 // NewCommand creates the cg cobra command. cg is dispatch-only: it executes
 // programs through the `cg run` subcommand and exposes the capture-run model
@@ -23,19 +37,23 @@ func NewCommand() *cobra.Command {
 		RunE: dispatchOnly,
 	}
 
-	c.AddCommand(NewRunCommand())
-	c.AddCommand(NewOutCommand())
-	c.AddCommand(NewErrCommand())
-	c.AddCommand(NewPathsCommand())
-	c.AddCommand(NewLsCommand())
-	c.AddCommand(NewPruneCommand())
-	c.AddCommand(NewMetaCommand())
-	c.AddCommand(NewWaitCommand())
-	c.AddCommand(NewCancelCommand())
-	c.AddCommand(NewGrepCommand())
-	c.AddCommand(NewNoteCommand())
-	c.AddCommand(NewSuperviseRunCommand())
-	c.AddCommand(NewSupervisePoolCommand())
+	c.AddCommand(model.NewRunCommand())
+	c.AddCommand(model.NewOutCommand())
+	c.AddCommand(model.NewErrCommand())
+	c.AddCommand(model.NewPathsCommand())
+	c.AddCommand(model.NewLsCommand())
+	c.AddCommand(model.NewPruneCommand())
+	c.AddCommand(model.NewMetaCommand())
+	c.AddCommand(model.NewWaitCommand())
+	c.AddCommand(model.NewCancelCommand())
+	c.AddCommand(model.NewGrepCommand())
+	c.AddCommand(model.NewNoteCommand())
+	c.AddCommand(model.NewSuperviseRunCommand())
+	c.AddCommand(model.NewSupervisePoolCommand())
+
+	c.AddCommand(mcp.NewCommand())
+	c.AddCommand(approvecmd.NewCheckCommand())
+	c.AddCommand(approvecmd.NewLintCommand())
 
 	return c
 }

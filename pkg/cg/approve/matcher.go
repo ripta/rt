@@ -5,7 +5,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/ripta/rt/pkg/cg"
+	"github.com/ripta/rt/pkg/cg/model"
 )
 
 // matchForm is one argv representation a rule can match against: the token slice
@@ -76,16 +76,16 @@ func (rs *Ruleset) Match(subj Subject) MatchResult {
 // leaves the tail intact.
 func (s Subject) forms() (canonical, resolved, basename matchForm) {
 	if s.Canonical != nil {
-		canonical = matchForm{argv: s.Canonical, quoted: cg.EscapeArgs(s.Canonical), ok: true}
+		canonical = matchForm{argv: s.Canonical, quoted: model.EscapeArgs(s.Canonical), ok: true}
 		if s.Resolved != nil && s.Resolved[0] != s.Canonical[0] {
-			resolved = matchForm{argv: s.Resolved, quoted: cg.EscapeArgs(s.Resolved), ok: true}
+			resolved = matchForm{argv: s.Resolved, quoted: model.EscapeArgs(s.Resolved), ok: true}
 		}
 	}
 
 	base := make([]string, len(s.Argv))
 	copy(base, s.Argv)
 	base[0] = filepath.Base(s.Argv[0])
-	basename = matchForm{argv: base, quoted: cg.EscapeArgs(base), ok: true}
+	basename = matchForm{argv: base, quoted: model.EscapeArgs(base), ok: true}
 
 	return canonical, resolved, basename
 }

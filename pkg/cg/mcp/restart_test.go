@@ -12,14 +12,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ripta/rt/pkg/cg"
+	"github.com/ripta/rt/pkg/cg/model"
 )
 
 // spawnRunMain is the body of the spawn-run TestMain dispatch. It stands in
 // for an MCP server that started a run and then gets terminated: it spawns the
 // supervised child, reports the run ID on stdout, and blocks until killed.
 func spawnRunMain(args []string) int {
-	run, err := cg.RunSupervised(args, cg.SuperviseOptions{})
+	run, err := model.RunSupervised(args, model.SuperviseOptions{})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "RunSupervised: %v\n", err)
 		return 1
@@ -57,10 +57,10 @@ func startServerRun(t *testing.T, args ...string) (*exec.Cmd, string, string) {
 		t.Fatalf("reading run ID from helper: %v", err)
 	}
 	id := strings.TrimSpace(line)
-	dir := filepath.Join(cg.CaptureRoot(), id)
+	dir := filepath.Join(model.CaptureRoot(), id)
 
 	t.Cleanup(func() {
-		if pid, perr := cg.ReadPidFile(dir); perr == nil {
+		if pid, perr := model.ReadPidFile(dir); perr == nil {
 			_ = syscall.Kill(-pid, syscall.SIGKILL)
 		}
 	})
@@ -90,14 +90,14 @@ func waitStdoutContains(t *testing.T, dir, s string, timeout time.Duration) {
 // blocks until killed. That shape is what the restart test needs: while the
 // first run blocks, the other two stay pending.
 func spawnPoolMain(args []string) int {
-	pc := cg.PoolCommand{Argv: args}
-	if resolved, _ := cg.ResolveCommand(args, ""); resolved != nil {
+	pc := model.PoolCommand{Argv: args}
+	if resolved, _ := model.ResolveCommand(args, ""); resolved != nil {
 		pc.Resolved = resolved.Resolved
 		pc.Canonical = resolved.Canonical
 	}
 
-	pool, err := cg.PoolSupervised(&cg.PoolSpec{
-		Commands:    []cg.PoolCommand{pc},
+	pool, err := model.PoolSupervised(&model.PoolSpec{
+		Commands:    []model.PoolCommand{pc},
 		Repeat:      3,
 		Parallelism: 1,
 	})
@@ -139,10 +139,10 @@ func startServerPool(t *testing.T, args ...string) (*exec.Cmd, string, string) {
 		t.Fatalf("reading pool ID from helper: %v", err)
 	}
 	id := strings.TrimSpace(line)
-	dir := filepath.Join(cg.CaptureRoot(), id)
+	dir := filepath.Join(model.CaptureRoot(), id)
 
 	t.Cleanup(func() {
-		if pid, perr := cg.ReadPidFile(dir); perr == nil {
+		if pid, perr := model.ReadPidFile(dir); perr == nil {
 			_ = syscall.Kill(pid, syscall.SIGINT)
 		}
 	})
@@ -156,8 +156,8 @@ func waitPoolRunning(t *testing.T, dir string, i int, timeout time.Duration) {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		m, err := cg.ReadPoolManifest(dir)
-		if err == nil && i < len(m.Runs) && m.Runs[i].Status == cg.PoolRunRunning {
+		m, err := model.ReadPoolManifest(dir)
+		if err == nil && i < len(m.Runs) && m.Runs[i].Status == model.PoolRunRunning {
 			return
 		}
 		time.Sleep(10 * time.Millisecond)
@@ -244,7 +244,7 @@ func TestRestartToleranceWaitAndList(t *testing.T) {
 		t.Errorf("ExitCode = %v, want 0", out.ExitCode)
 	}
 
-	m, err := cg.ReadMeta(dir)
+	m, err := model.ReadMeta(dir)
 	if err != nil {
 		t.Fatalf("ReadMeta: %v", err)
 	}
@@ -298,7 +298,7 @@ func TestRestartToleranceCancel(t *testing.T) {
 		t.Fatalf("Finished = false, want true after cancel")
 	}
 
-	m, err := cg.ReadMeta(dir)
+	m, err := model.ReadMeta(dir)
 	if err != nil {
 		t.Fatalf("ReadMeta: %v", err)
 	}
@@ -320,7 +320,7 @@ func TestRestartTolerancePool(t *testing.T) {
 	// The detached supervisor owns scheduling: after the server's death the
 	// pool must still be live, with the first run in flight and the rest
 	// pending, not abandoned.
-	m, err := cg.ReadPoolManifest(dir)
+	m, err := model.ReadPoolManifest(dir)
 	if err != nil {
 		t.Fatalf("ReadPoolManifest: %v", err)
 	}
@@ -328,11 +328,11 @@ func TestRestartTolerancePool(t *testing.T) {
 		t.Fatalf("len(Runs) = %d, want 3", len(m.Runs))
 	}
 	for i := 1; i < len(m.Runs); i++ {
-		if m.Runs[i].Status != cg.PoolRunPending {
+		if m.Runs[i].Status != model.PoolRunPending {
 			t.Errorf("Runs[%d].Status = %q, want pending", i, m.Runs[i].Status)
 		}
 	}
-	if cg.RunLockReleased(dir) {
+	if model.RunLockReleased(dir) {
 		t.Fatalf("pool lock released after server death, want held by the supervisor")
 	}
 
@@ -362,7 +362,7 @@ func TestRestartTolerancePool(t *testing.T) {
 		if r.RunID == "" {
 			t.Errorf("Runs[%d].RunID is empty, want a member run ID", i)
 		}
-		if r.Status != cg.PoolRunFinished {
+		if r.Status != model.PoolRunFinished {
 			t.Errorf("Runs[%d].Status = %q, want finished", i, r.Status)
 		}
 		if r.ExitCode == nil || *r.ExitCode != 0 {
@@ -372,7 +372,7 @@ func TestRestartTolerancePool(t *testing.T) {
 
 	// Together with the pending check above, a completed manifest proves the
 	// last two runs were scheduled after the server died.
-	m, err = cg.ReadPoolManifest(dir)
+	m, err = model.ReadPoolManifest(dir)
 	if err != nil {
 		t.Fatalf("ReadPoolManifest after wait: %v", err)
 	}

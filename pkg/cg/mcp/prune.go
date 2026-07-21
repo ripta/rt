@@ -6,7 +6,7 @@ import (
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/ripta/rt/pkg/cg"
+	"github.com/ripta/rt/pkg/cg/model"
 )
 
 const defaultPruneKeep = 50
@@ -36,9 +36,9 @@ func handlePrune(_ context.Context, _ *mcpsdk.CallToolRequest, in pruneInput) (*
 		return nil, pruneOutput{}, fmt.Errorf("keep and older_than are mutually exclusive")
 	}
 
-	opts := cg.PruneOptions{DryRun: in.DryRun}
+	opts := model.PruneOptions{DryRun: in.DryRun}
 	if in.OlderThan != "" {
-		d, err := cg.ParsePruneDuration(in.OlderThan)
+		d, err := model.ParsePruneDuration(in.OlderThan)
 		if err != nil {
 			return nil, pruneOutput{}, fmt.Errorf("invalid older_than: %w", err)
 		}
@@ -50,7 +50,7 @@ func handlePrune(_ context.Context, _ *mcpsdk.CallToolRequest, in pruneInput) (*
 		opts.Keep = defaultPruneKeep
 	}
 
-	removed, err := cg.PruneRuns(opts)
+	removed, err := model.PruneRuns(opts)
 	if err != nil {
 		return nil, pruneOutput{}, err
 	}

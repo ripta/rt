@@ -8,7 +8,7 @@ import (
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/ripta/rt/pkg/cg"
+	"github.com/ripta/rt/pkg/cg/model"
 )
 
 const waitPollInterval = 100 * time.Millisecond
@@ -45,22 +45,22 @@ func handleWait(ctx context.Context, reg *runRegistry, in waitInput) (*mcpsdk.Ca
 		timeoutMs = defaultWaitTimeoutMs
 	}
 
-	dir, err := cg.LookupRunDir(in.ID)
+	dir, err := model.LookupRunDir(in.ID)
 	switch {
-	case errors.Is(err, cg.ErrUnknownRunID):
+	case errors.Is(err, model.ErrUnknownRunID):
 		return nil, waitOutput{}, fmt.Errorf("unknown run id: %s", in.ID)
 	case err == nil:
 		out, ferr := finishedWaitOutput(in.ID, dir)
 		return nil, out, ferr
-	case errors.Is(err, cg.ErrFailedRun):
+	case errors.Is(err, model.ErrFailedRun):
 		return nil, waitOutput{ID: in.ID, Finished: true}, nil
-	case !errors.Is(err, cg.ErrIncompleteRun):
+	case !errors.Is(err, model.ErrIncompleteRun):
 		return nil, waitOutput{}, err
 	}
 
 	// A directory without meta.json is either an in-flight run or a pool; the
 	// manifest's presence is what distinguishes the two.
-	if m, perr := cg.ReadPoolManifest(dir); perr == nil {
+	if m, perr := model.ReadPoolManifest(dir); perr == nil {
 		return handlePoolWait(ctx, reg, in.ID, dir, m, time.Duration(timeoutMs)*time.Millisecond)
 	}
 
@@ -107,17 +107,17 @@ func awaitFinish(ctx context.Context, reg *runRegistry, id string, timeout time.
 		case <-ctx.Done():
 			return false, ctx.Err()
 		case <-ticker.C:
-			_, e := cg.LookupRunDir(id)
+			_, e := model.LookupRunDir(id)
 			if e == nil {
 				return true, nil
 			}
-			if errors.Is(e, cg.ErrUnknownRunID) {
+			if errors.Is(e, model.ErrUnknownRunID) {
 				return false, fmt.Errorf("unknown run id: %s", id)
 			}
-			if errors.Is(e, cg.ErrFailedRun) {
+			if errors.Is(e, model.ErrFailedRun) {
 				return true, nil
 			}
-			if !errors.Is(e, cg.ErrIncompleteRun) {
+			if !errors.Is(e, model.ErrIncompleteRun) {
 				return false, e
 			}
 		}
@@ -128,7 +128,7 @@ func awaitFinish(ctx context.Context, reg *runRegistry, id string, timeout time.
 // returns the same summary as the sync cg_run_many call, built with the
 // default excerpt size. A timeout returns finished: false with the partial
 // summary; the pool keeps running.
-func handlePoolWait(ctx context.Context, reg *runRegistry, id, dir string, m *cg.PoolManifest, timeout time.Duration) (*mcpsdk.CallToolResult, waitOutput, error) {
+func handlePoolWait(ctx context.Context, reg *runRegistry, id, dir string, m *model.PoolManifest, timeout time.Duration) (*mcpsdk.CallToolResult, waitOutput, error) {
 	finished := m.FinishedAt != nil
 	if !finished {
 		f, err := awaitPoolFinish(ctx, reg, id, dir, timeout)
@@ -175,7 +175,7 @@ func awaitPoolFinish(ctx context.Context, reg *runRegistry, id, dir string, time
 		case <-ctx.Done():
 			return false, ctx.Err()
 		case <-ticker.C:
-			m, err := cg.ReadPoolManifest(dir)
+			m, err := model.ReadPoolManifest(dir)
 			if err != nil {
 				return false, fmt.Errorf("reading pool.json for %s: %w", id, err)
 			}
@@ -191,7 +191,7 @@ func awaitPoolFinish(ctx context.Context, reg *runRegistry, id, dir string, time
 // response — the caller asked us to wait for finish, and the dir clearly
 // transitioned to that state.
 func finishedWaitOutput(id, dir string) (waitOutput, error) {
-	m, err := cg.ReadMeta(dir)
+	m, err := model.ReadMeta(dir)
 	if err != nil {
 		return waitOutput{}, fmt.Errorf("reading meta.json for %s: %w", id, err)
 	}

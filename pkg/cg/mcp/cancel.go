@@ -9,7 +9,7 @@ import (
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/ripta/rt/pkg/cg"
+	"github.com/ripta/rt/pkg/cg/model"
 )
 
 // cancelInput is the argument shape for `cg_cancel`.
@@ -43,40 +43,40 @@ func registerCancel(s *mcpsdk.Server, reg *runRegistry) {
 }
 
 func handleCancel(ctx context.Context, reg *runRegistry, in cancelInput) (*mcpsdk.CallToolResult, cancelOutput, error) {
-	sig, err := cg.ParseSignal(in.Signal, syscall.SIGTERM)
+	sig, err := model.ParseSignal(in.Signal, syscall.SIGTERM)
 	if err != nil {
 		return nil, cancelOutput{}, fmt.Errorf("signal: %w", err)
 	}
-	escSig, err := cg.ParseSignal(in.EscalateSignal, syscall.SIGKILL)
+	escSig, err := model.ParseSignal(in.EscalateSignal, syscall.SIGKILL)
 	if err != nil {
 		return nil, cancelOutput{}, fmt.Errorf("escalate_signal: %w", err)
 	}
 
 	out := cancelOutput{ID: in.ID, Signal: int(sig)}
 
-	dir, lerr := cg.LookupRunDir(in.ID)
+	dir, lerr := model.LookupRunDir(in.ID)
 	switch {
-	case errors.Is(lerr, cg.ErrUnknownRunID):
+	case errors.Is(lerr, model.ErrUnknownRunID):
 		return nil, cancelOutput{}, fmt.Errorf("unknown run id: %s", in.ID)
 	case lerr == nil:
 		// Finished run: the thing you wanted dead is already dead.
 		out.Finished = true
 		return nil, out, nil
-	case errors.Is(lerr, cg.ErrFailedRun):
+	case errors.Is(lerr, model.ErrFailedRun):
 		// Child never started; nothing to cancel.
 		out.Finished = true
 		return nil, out, nil
-	case !errors.Is(lerr, cg.ErrIncompleteRun):
+	case !errors.Is(lerr, model.ErrIncompleteRun):
 		return nil, cancelOutput{}, lerr
 	}
 
 	// A directory without meta.json is either an in-flight run or a pool; the
 	// manifest's presence is what distinguishes the two.
-	if m, perr := cg.ReadPoolManifest(dir); perr == nil {
+	if m, perr := model.ReadPoolManifest(dir); perr == nil {
 		return handlePoolCancel(ctx, reg, in, out, dir, m, sig, escSig)
 	}
 
-	pid, perr := cg.ReadPidFile(dir)
+	pid, perr := model.ReadPidFile(dir)
 	if perr != nil {
 		return nil, cancelOutput{}, fmt.Errorf("cannot cancel %s: no pid recorded for this run: %w", in.ID, perr)
 	}
@@ -116,10 +116,10 @@ func handleCancel(ctx context.Context, reg *runRegistry, in cancelInput) (*mcpsd
 // own sessions, so a group signal would reach nothing else anyway, and the
 // protocol is defined on the supervisor process. Escalation waits for the pool
 // to finish and then signals the supervisor again with escSig.
-func handlePoolCancel(ctx context.Context, reg *runRegistry, in cancelInput, out cancelOutput, dir string, m *cg.PoolManifest, sig, escSig syscall.Signal) (*mcpsdk.CallToolResult, cancelOutput, error) {
+func handlePoolCancel(ctx context.Context, reg *runRegistry, in cancelInput, out cancelOutput, dir string, m *model.PoolManifest, sig, escSig syscall.Signal) (*mcpsdk.CallToolResult, cancelOutput, error) {
 	out.Pool = true
 
-	pid, finished, err := cg.PoolSupervisorPid(dir, m)
+	pid, finished, err := model.PoolSupervisorPid(dir, m)
 	if err != nil {
 		return nil, cancelOutput{}, fmt.Errorf("cannot cancel %s: %w", in.ID, err)
 	}

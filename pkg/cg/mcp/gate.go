@@ -7,8 +7,8 @@ import (
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/ripta/rt/pkg/cg"
 	"github.com/ripta/rt/pkg/cg/approve"
+	"github.com/ripta/rt/pkg/cg/model"
 )
 
 // elicitor is the subset of *mcpsdk.ServerSession the gate needs to prompt the
@@ -34,7 +34,7 @@ type gate struct {
 // best-effort persistence diagnostic to surface alongside a permitted run,
 // empty when there is nothing to report. tool names the calling MCP tool in
 // refusal messages.
-func (g *gate) check(ctx context.Context, tool string, in runInput, resolved *cg.Resolution, el elicitor) (string, error) {
+func (g *gate) check(ctx context.Context, tool string, in runInput, resolved *model.Resolution, el elicitor) (string, error) {
 	if g == nil || g.blindlyAllow {
 		return "", nil
 	}
@@ -59,7 +59,7 @@ func (g *gate) check(ctx context.Context, tool string, in runInput, resolved *cg
 // DecisionPrompt, so reaching here means the env is clean. With no elicitor
 // the gate fails closed; otherwise it prompts for approval. resolved carries
 // the canonical executable path the prompt pre-fills as a strict rule.
-func (g *gate) promptOrFailClosed(ctx context.Context, tool string, in runInput, resolved *cg.Resolution, el elicitor) (string, error) {
+func (g *gate) promptOrFailClosed(ctx context.Context, tool string, in runInput, resolved *model.Resolution, el elicitor) (string, error) {
 	if el == nil {
 		return "", g.failClosedError(tool)
 	}

@@ -8,7 +8,6 @@ import (
 
 	"github.com/ripta/rt/pkg/calc"
 	"github.com/ripta/rt/pkg/cg"
-	"github.com/ripta/rt/pkg/cg/mcp"
 	"github.com/ripta/rt/pkg/enc"
 	"github.com/ripta/rt/pkg/grpcto"
 	"github.com/ripta/rt/pkg/hashsum"
@@ -40,9 +39,7 @@ func main() {
 	root.AddCommand(streamdiff.NewCommand())
 
 	root.AddCommand(calc.NewCommand())
-	cgCmd := cg.NewCommand()
-	cgCmd.AddCommand(mcp.NewCommand())
-	root.AddCommand(cgCmd)
+	root.AddCommand(cg.NewCommand())
 
 	v := version.NewCommand()
 	root.Root().AddCommand(v)

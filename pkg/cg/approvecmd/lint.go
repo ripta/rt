@@ -7,8 +7,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/ripta/rt/pkg/cg"
 	"github.com/ripta/rt/pkg/cg/approve"
+	"github.com/ripta/rt/pkg/cg/model"
 )
 
 // lintOptions holds the flags for `cg lint`.
@@ -64,13 +64,13 @@ func (opts *lintOptions) run(cmd *cobra.Command, _ []string) error {
 	case "text", "json":
 	default:
 		fmt.Fprintf(cmd.ErrOrStderr(), "unsupported --output value: %q (supported: text, json)\n", opts.Output)
-		return &cg.ExitError{Code: 2}
+		return &model.ExitError{Code: 2}
 	}
 
 	global, project, err := approve.Diagnose(approve.LoadOptions{ProjectFiles: opts.ProjectConfig})
 	if err != nil {
 		fmt.Fprintf(cmd.ErrOrStderr(), "locating approval rules: %v\n", err)
-		return &cg.ExitError{Code: 2}
+		return &model.ExitError{Code: 2}
 	}
 
 	res := lintResult{Global: lintLayerResultFrom(global), Project: lintLayerResultFrom(project)}
@@ -85,7 +85,7 @@ func (opts *lintOptions) run(cmd *cobra.Command, _ []string) error {
 	}
 
 	if len(res.Global.Issues) > 0 || len(res.Project.Issues) > 0 {
-		return &cg.ExitError{Code: 1}
+		return &model.ExitError{Code: 1}
 	}
 
 	return nil

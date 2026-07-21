@@ -11,7 +11,7 @@ import (
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/ripta/rt/pkg/cg"
+	"github.com/ripta/rt/pkg/cg/model"
 )
 
 const (
@@ -74,7 +74,7 @@ func handleRun(ctx context.Context, reg *runRegistry, g *gate, el elicitor, in r
 		return nil, runOutput{}, fmt.Errorf("command must contain at least one element")
 	}
 
-	resolved, _ := cg.ResolveCommand(in.Command, in.Cwd)
+	resolved, _ := model.ResolveCommand(in.Command, in.Cwd)
 
 	warning, err := g.check(ctx, "cg_run", in, resolved, el)
 	if err != nil {
@@ -100,9 +100,9 @@ func handleRun(ctx context.Context, reg *runRegistry, g *gate, el elicitor, in r
 		wait = *in.Wait
 	}
 
-	run, err := cg.RunSupervised(in.Command, cg.SuperviseOptions{Resolved: resolved, Cwd: in.Cwd, Env: in.Env})
+	run, err := model.RunSupervised(in.Command, model.SuperviseOptions{Resolved: resolved, Cwd: in.Cwd, Env: in.Env})
 	if err != nil {
-		var sf *cg.StartFailure
+		var sf *model.StartFailure
 		if errors.As(err, &sf) {
 			return nil, runOutput{ID: sf.RunID, StartError: err.Error()}, nil
 		}
@@ -142,11 +142,11 @@ func handleRun(ctx context.Context, reg *runRegistry, g *gate, el elicitor, in r
 
 // finishedOutput builds the result for a fully completed run, reading
 // meta.json to fill exit/signal/duration/line-count fields.
-func finishedOutput(run *cg.CaptureRun, excerpt int, excerptFrom string) runOutput {
+func finishedOutput(run *model.CaptureRun, excerpt int, excerptFrom string) runOutput {
 	out := runOutput{ID: run.ID}
 
 	failed := false
-	if meta, err := cg.ReadMeta(run.Dir); err == nil {
+	if meta, err := model.ReadMeta(run.Dir); err == nil {
 		ec := meta.ExitCode
 		dur := meta.DurationMs
 		outLines := meta.StdoutLines
@@ -178,7 +178,7 @@ func finishedOutput(run *cg.CaptureRun, excerpt int, excerptFrom string) runOutp
 // timedOutOutput builds the result for a run still in flight when the wait
 // timeout fires. The child is left alone; capture continues on disk. The
 // caller can use cg_meta / cg_stdout to check on it later.
-func timedOutOutput(run *cg.CaptureRun, excerpt int, excerptFrom string) runOutput {
+func timedOutOutput(run *model.CaptureRun, excerpt int, excerptFrom string) runOutput {
 	window := resolveExcerptWindow(excerptFrom, true)
 	stdout, outMore, _ := readWindow(filepath.Join(run.Dir, "stdout"), excerpt, window)
 	stderr, errMore, _ := readWindow(filepath.Join(run.Dir, "stderr"), excerpt, window)

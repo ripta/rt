@@ -10,7 +10,7 @@ import (
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/ripta/rt/pkg/cg"
+	"github.com/ripta/rt/pkg/cg/model"
 )
 
 const (
@@ -127,7 +127,7 @@ func handleRunMany(ctx context.Context, reg *runRegistry, g *gate, el elicitor, 
 	// Every distinct argv passes the gate before the first spawn; a denial
 	// fails the whole call with nothing started. Identical argvs are checked
 	// once, so repeat does not multiply prompts.
-	resolutions := make(map[string]*cg.Resolution, len(in.Commands))
+	resolutions := make(map[string]*model.Resolution, len(in.Commands))
 	var warnings []string
 	for _, argv := range in.Commands {
 		key := argvKey(argv)
@@ -135,7 +135,7 @@ func handleRunMany(ctx context.Context, reg *runRegistry, g *gate, el elicitor, 
 			continue
 		}
 
-		resolved, _ := cg.ResolveCommand(argv, in.Cwd)
+		resolved, _ := model.ResolveCommand(argv, in.Cwd)
 		warning, err := g.check(ctx, "cg_run_many", runInput{Command: argv, Cwd: in.Cwd, Env: in.Env}, resolved, el)
 		if err != nil {
 			return nil, runManyOutput{}, err
@@ -147,8 +147,8 @@ func handleRunMany(ctx context.Context, reg *runRegistry, g *gate, el elicitor, 
 	}
 	warning := strings.Join(warnings, "; ")
 
-	spec := &cg.PoolSpec{
-		Commands:    make([]cg.PoolCommand, 0, len(in.Commands)),
+	spec := &model.PoolSpec{
+		Commands:    make([]model.PoolCommand, 0, len(in.Commands)),
 		Repeat:      repeat,
 		Parallelism: parallelism,
 		OnError:     in.OnError,
@@ -156,7 +156,7 @@ func handleRunMany(ctx context.Context, reg *runRegistry, g *gate, el elicitor, 
 		Env:         in.Env,
 	}
 	for _, argv := range in.Commands {
-		pc := cg.PoolCommand{Argv: argv}
+		pc := model.PoolCommand{Argv: argv}
 		if r := resolutions[argvKey(argv)]; r != nil {
 			pc.Resolved = r.Resolved
 			pc.Canonical = r.Canonical
@@ -164,9 +164,9 @@ func handleRunMany(ctx context.Context, reg *runRegistry, g *gate, el elicitor, 
 		spec.Commands = append(spec.Commands, pc)
 	}
 
-	pool, err := cg.PoolSupervised(spec)
+	pool, err := model.PoolSupervised(spec)
 	if err != nil {
-		var sf *cg.StartFailure
+		var sf *model.StartFailure
 		if errors.As(err, &sf) {
 			return nil, runManyOutput{ID: sf.RunID, StartError: err.Error()}, nil
 		}
@@ -254,9 +254,9 @@ func validateRunMany(in runManyInput) (repeat, parallelism int, err error) {
 	}
 
 	switch in.OnError {
-	case "", cg.OnErrorContinue, cg.OnErrorStop, cg.OnErrorKill:
+	case "", model.OnErrorContinue, model.OnErrorStop, model.OnErrorKill:
 	default:
-		violations = append(violations, fmt.Sprintf("unknown on_error: %q (want %q, %q, or %q)", in.OnError, cg.OnErrorContinue, cg.OnErrorStop, cg.OnErrorKill))
+		violations = append(violations, fmt.Sprintf("unknown on_error: %q (want %q, %q, or %q)", in.OnError, model.OnErrorContinue, model.OnErrorStop, model.OnErrorKill))
 	}
 
 	if len(violations) > 0 {
@@ -279,7 +279,7 @@ func argvKey(argv []string) string {
 // excerpts to failed runs at response time; excerpts never live in the
 // manifest. excerpt is the per-stream cap, 0 to disable.
 func buildPoolSummary(dir string, excerpt int) (poolSummary, error) {
-	m, err := cg.ReadPoolManifest(dir)
+	m, err := model.ReadPoolManifest(dir)
 	if err != nil {
 		return poolSummary{}, fmt.Errorf("reading pool.json: %w", err)
 	}
@@ -309,7 +309,7 @@ func buildPoolSummary(dir string, excerpt int) (poolSummary, error) {
 		}
 
 		if r.Failed() && excerpt > 0 && rec.RunID != "" {
-			attachPoolExcerpts(&rec, filepath.Join(cg.CaptureRoot(), rec.RunID), excerpt, &budget)
+			attachPoolExcerpts(&rec, filepath.Join(model.CaptureRoot(), rec.RunID), excerpt, &budget)
 		}
 
 		s.Runs = append(s.Runs, rec)

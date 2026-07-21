@@ -12,7 +12,7 @@ import (
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/ripta/rt/pkg/cg"
+	"github.com/ripta/rt/pkg/cg/model"
 )
 
 const (
@@ -54,21 +54,21 @@ type listOutput struct {
 // Pool rows carry kind: "pool" and member counts instead of a command; their
 // timestamps come from the manifest. Member rows name their pool in `pool`.
 type listRun struct {
-	ID              string         `json:"id"`
-	State           string         `json:"state"`
-	Kind            string         `json:"kind,omitempty"`
-	Pool            string         `json:"pool,omitempty"`
-	Counts          *cg.PoolCounts `json:"counts,omitempty"`
-	Command         []string       `json:"command,omitempty"`
-	StartedAt       *time.Time     `json:"started_at,omitempty"`
-	StartedAtApprox bool           `json:"started_at_approx,omitempty"`
-	FinishedAt      *time.Time     `json:"finished_at,omitempty"`
-	DurationMs      *int64         `json:"duration_ms,omitempty"`
-	ExitCode        *int           `json:"exit_code,omitempty"`
-	Signal          *int           `json:"signal,omitempty"`
-	StdoutLines     *int64         `json:"stdout_lines,omitempty"`
-	StderrLines     *int64         `json:"stderr_lines,omitempty"`
-	StartError      string         `json:"start_error,omitempty"`
+	ID              string            `json:"id"`
+	State           string            `json:"state"`
+	Kind            string            `json:"kind,omitempty"`
+	Pool            string            `json:"pool,omitempty"`
+	Counts          *model.PoolCounts `json:"counts,omitempty"`
+	Command         []string          `json:"command,omitempty"`
+	StartedAt       *time.Time        `json:"started_at,omitempty"`
+	StartedAtApprox bool              `json:"started_at_approx,omitempty"`
+	FinishedAt      *time.Time        `json:"finished_at,omitempty"`
+	DurationMs      *int64            `json:"duration_ms,omitempty"`
+	ExitCode        *int              `json:"exit_code,omitempty"`
+	Signal          *int              `json:"signal,omitempty"`
+	StdoutLines     *int64            `json:"stdout_lines,omitempty"`
+	StderrLines     *int64            `json:"stderr_lines,omitempty"`
+	StartError      string            `json:"start_error,omitempty"`
 }
 
 func registerList(s *mcpsdk.Server) {
@@ -89,7 +89,7 @@ func handleList(_ context.Context, _ *mcpsdk.CallToolRequest, in listInput) (*mc
 
 	poolFilter := in.Pool
 	switch {
-	case poolFilter == "", poolFilter == listPoolNone, poolFilter == listPoolAny, cg.IsValidRunID(poolFilter):
+	case poolFilter == "", poolFilter == listPoolNone, poolFilter == listPoolAny, model.IsValidRunID(poolFilter):
 	default:
 		return nil, listOutput{}, fmt.Errorf("invalid pool %q: want a pool ID, none, or any", in.Pool)
 	}
@@ -105,9 +105,9 @@ func handleList(_ context.Context, _ *mcpsdk.CallToolRequest, in listInput) (*mc
 		return nil, listOutput{}, fmt.Errorf("invalid state %q: want all|finished|running|failed|abandoned|unknown", in.State)
 	}
 
-	var exitFilter *cg.ExitCodeFilter
+	var exitFilter *model.ExitCodeFilter
 	if in.ExitCode != "" {
-		f, err := cg.ParseExitCodeFilter(in.ExitCode)
+		f, err := model.ParseExitCodeFilter(in.ExitCode)
 		if err != nil {
 			return nil, listOutput{}, fmt.Errorf("invalid exit_code: %w", err)
 		}
@@ -117,25 +117,25 @@ func handleList(_ context.Context, _ *mcpsdk.CallToolRequest, in listInput) (*mc
 	now := time.Now()
 	var sinceT, beforeT *time.Time
 	if in.Since != "" {
-		t, err := cg.ParseFilterTime(in.Since, now)
+		t, err := model.ParseFilterTime(in.Since, now)
 		if err != nil {
 			return nil, listOutput{}, fmt.Errorf("invalid since: %w", err)
 		}
 		sinceT = &t
 	}
 	if in.Before != "" {
-		t, err := cg.ParseFilterTime(in.Before, now)
+		t, err := model.ParseFilterTime(in.Before, now)
 		if err != nil {
 			return nil, listOutput{}, fmt.Errorf("invalid before: %w", err)
 		}
 		beforeT = &t
 	}
-	timeFilter, err := cg.NewTimeRangeFilter(sinceT, beforeT)
+	timeFilter, err := model.NewTimeRangeFilter(sinceT, beforeT)
 	if err != nil {
 		return nil, listOutput{}, err
 	}
 
-	root := cg.CaptureRoot()
+	root := model.CaptureRoot()
 	entries, err := os.ReadDir(root)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, listOutput{Runs: []listRun{}}, nil
@@ -153,7 +153,7 @@ func handleList(_ context.Context, _ *mcpsdk.CallToolRequest, in listInput) (*mc
 	poolDirs := make(map[string]bool)
 	for _, e := range entries {
 		name := e.Name()
-		if !e.IsDir() || !cg.IsValidRunID(name) {
+		if !e.IsDir() || !model.IsValidRunID(name) {
 			continue
 		}
 		info, err := e.Info()
@@ -163,11 +163,11 @@ func handleList(_ context.Context, _ *mcpsdk.CallToolRequest, in listInput) (*mc
 		mtime := info.ModTime()
 		dir := filepath.Join(root, name)
 
-		meta, err := cg.ReadMeta(dir)
+		meta, err := model.ReadMeta(dir)
 		if err != nil {
 			// No meta.json: a pool dir (has pool.json), a failed run (has
 			// debug.json), or a run still in flight (none of them present yet).
-			if m, perr := cg.ReadPoolManifest(dir); perr == nil {
+			if m, perr := model.ReadPoolManifest(dir); perr == nil {
 				poolDirs[name] = true
 				counts := m.Counts()
 				started := m.StartedAt
@@ -176,7 +176,7 @@ func handleList(_ context.Context, _ *mcpsdk.CallToolRequest, in listInput) (*mc
 					filterStart: m.StartedAt,
 					run: listRun{
 						ID:         name,
-						State:      cg.PoolState(dir, m),
+						State:      model.PoolState(dir, m),
 						Kind:       listKindPool,
 						Counts:     &counts,
 						StartedAt:  &started,
@@ -185,7 +185,7 @@ func handleList(_ context.Context, _ *mcpsdk.CallToolRequest, in listInput) (*mc
 				})
 				continue
 			}
-			if dbg, dbgErr := cg.ReadStartDebug(dir); dbgErr == nil {
+			if dbg, dbgErr := model.ReadStartDebug(dir); dbgErr == nil {
 				started := dbg.StartedAt
 				rows = append(rows, row{
 					mtime:       mtime,
@@ -203,8 +203,8 @@ func handleList(_ context.Context, _ *mcpsdk.CallToolRequest, in listInput) (*mc
 			}
 			// A running capture writes start.json with its command and precise
 			// start time; fall back to the run dir's mtime when it is absent.
-			hasLock := cg.LockFileExists(dir)
-			si, siErr := cg.ReadStartInfo(dir)
+			hasLock := model.LockFileExists(dir)
+			si, siErr := model.ReadStartInfo(dir)
 			hasStart := siErr == nil
 
 			// A released run lock with no meta.json means the supervisor died
@@ -216,7 +216,7 @@ func handleList(_ context.Context, _ *mcpsdk.CallToolRequest, in listInput) (*mc
 			switch {
 			case !hasLock && !hasStart:
 				rowState = stateUnknown
-			case cg.RunLockReleased(dir):
+			case model.RunLockReleased(dir):
 				rowState = stateAbandoned
 			}
 

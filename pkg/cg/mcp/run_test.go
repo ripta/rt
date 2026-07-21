@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ripta/rt/pkg/cg"
+	"github.com/ripta/rt/pkg/cg/model"
 )
 
 func TestHandleRunSyncSuccess(t *testing.T) {
@@ -85,7 +85,7 @@ func TestHandleRunAsync(t *testing.T) {
 	// doesn't leave files unattended.
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		if _, err := os.Stat(filepath.Join(cg.CaptureRoot(), out.ID, "meta.json")); err == nil {
+		if _, err := os.Stat(filepath.Join(model.CaptureRoot(), out.ID, "meta.json")); err == nil {
 			return
 		}
 		time.Sleep(10 * time.Millisecond)

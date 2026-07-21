@@ -12,7 +12,7 @@ import (
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/ripta/rt/pkg/cg"
+	"github.com/ripta/rt/pkg/cg/model"
 )
 
 const (
@@ -94,8 +94,8 @@ func handleStream(fileName string, in streamInput) (*mcpsdk.CallToolResult, stre
 		clamped = true
 	}
 
-	dir, err := cg.LookupRunDir(in.ID)
-	if err != nil && !errors.Is(err, cg.ErrIncompleteRun) && !errors.Is(err, cg.ErrFailedRun) {
+	dir, err := model.LookupRunDir(in.ID)
+	if err != nil && !errors.Is(err, model.ErrIncompleteRun) && !errors.Is(err, model.ErrFailedRun) {
 		return nil, streamOutput{}, mapLookupError(in.ID, err)
 	}
 

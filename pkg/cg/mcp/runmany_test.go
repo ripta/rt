@@ -14,7 +14,7 @@ import (
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/ripta/rt/pkg/cg"
+	"github.com/ripta/rt/pkg/cg/model"
 )
 
 // runManyBoundsTest is one rejected cg_run_many call: the input and the
@@ -106,7 +106,7 @@ func TestRunManyBoundsReject(t *testing.T) {
 func assertCaptureRootEmpty(t *testing.T) {
 	t.Helper()
 
-	entries, err := os.ReadDir(cg.CaptureRoot())
+	entries, err := os.ReadDir(model.CaptureRoot())
 	if errors.Is(err, fs.ErrNotExist) {
 		return
 	}
@@ -130,7 +130,7 @@ func TestRunManyParallelismClampsToPoolSize(t *testing.T) {
 		t.Fatalf("handleRunMany: %v", err)
 	}
 
-	m, err := cg.ReadPoolManifest(filepath.Join(cg.CaptureRoot(), out.ID))
+	m, err := model.ReadPoolManifest(filepath.Join(model.CaptureRoot(), out.ID))
 	if err != nil {
 		t.Fatalf("ReadPoolManifest: %v", err)
 	}
@@ -207,7 +207,7 @@ func TestRunManySyncSummary(t *testing.T) {
 	}
 
 	ok := out.Runs[0]
-	if ok.Command != 0 || ok.RunID == "" || ok.Status != cg.PoolRunFinished {
+	if ok.Command != 0 || ok.RunID == "" || ok.Status != model.PoolRunFinished {
 		t.Errorf("runs[0] = %+v, want finished command 0 with a run ID", ok)
 	}
 	if ok.StdoutExcerpt != "" || ok.StderrExcerpt != "" {
@@ -293,7 +293,7 @@ func TestRunManyTimeoutPartialSummary(t *testing.T) {
 
 	// Let the pool finish before TMPDIR cleanup so the supervisor stops
 	// rewriting the manifest under the removal.
-	waitForPoolFinished(t, filepath.Join(cg.CaptureRoot(), out.ID))
+	waitForPoolFinished(t, filepath.Join(model.CaptureRoot(), out.ID))
 }
 
 // waitForPoolFinished polls the manifest until finished_at lands.
@@ -302,7 +302,7 @@ func waitForPoolFinished(t *testing.T, dir string) {
 
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
-		if m, err := cg.ReadPoolManifest(dir); err == nil && m.FinishedAt != nil {
+		if m, err := model.ReadPoolManifest(dir); err == nil && m.FinishedAt != nil {
 			return
 		}
 		time.Sleep(20 * time.Millisecond)

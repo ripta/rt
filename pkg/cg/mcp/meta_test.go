@@ -5,20 +5,20 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ripta/rt/pkg/cg"
+	"github.com/ripta/rt/pkg/cg/model"
 )
 
 func TestHandleMetaSuccess(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 
 	sig := 15
-	seedRunDir(t, "AAAAAA", &cg.Meta{
-		RunInfo:     cg.RunInfo{ID: "AAAAAA", Command: []string{"echo", "hi"}},
+	seedRunDir(t, "AAAAAA", &model.Meta{
+		RunInfo:     model.RunInfo{ID: "AAAAAA", Command: []string{"echo", "hi"}},
 		ExitCode:    -1,
 		Signal:      &sig,
 		DurationMs:  12,
 		StdoutLines: 1,
-		Usage:       &cg.Usage{Source: cg.UsageSourceRusageChildren, UserUS: 8000, SystemUS: 3000},
+		Usage:       &model.Usage{Source: model.UsageSourceRusageChildren, UserUS: 8000, SystemUS: 3000},
 	})
 
 	_, out, err := handleMeta(context.Background(), nil, metaInput{ID: "AAAAAA"})
@@ -40,8 +40,8 @@ func TestHandleMetaSuccess(t *testing.T) {
 	if out.StdoutLines == nil || *out.StdoutLines != 1 {
 		t.Errorf("StdoutLines = %v, want 1", out.StdoutLines)
 	}
-	if out.Usage == nil || out.Usage.Source != cg.UsageSourceRusageChildren || out.Usage.UserUS != 8000 {
-		t.Errorf("Usage = %+v, want source=%s user_us=8000", out.Usage, cg.UsageSourceRusageChildren)
+	if out.Usage == nil || out.Usage.Source != model.UsageSourceRusageChildren || out.Usage.UserUS != 8000 {
+		t.Errorf("Usage = %+v, want source=%s user_us=8000", out.Usage, model.UsageSourceRusageChildren)
 	}
 }
 
@@ -126,7 +126,7 @@ func TestHandleMetaPool(t *testing.T) {
 	}
 
 	finishPoolManifest(m)
-	if err := cg.WritePoolManifest(dir, m); err != nil {
+	if err := model.WritePoolManifest(dir, m); err != nil {
 		t.Fatalf("WritePoolManifest: %v", err)
 	}
 	_, out, err = handleMeta(context.Background(), nil, metaInput{ID: "PPPPPP"})
@@ -145,7 +145,7 @@ func TestHandleMetaInFlightWithStartInfo(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 
 	dir := seedRunDir(t, "AAAAAA", nil)
-	if err := cg.WriteStartInfo(dir, &cg.StartInfo{RunInfo: cg.RunInfo{Command: []string{"sleep", "9"}, Cwd: "/work"}}); err != nil {
+	if err := model.WriteStartInfo(dir, &model.StartInfo{RunInfo: model.RunInfo{Command: []string{"sleep", "9"}, Cwd: "/work"}}); err != nil {
 		t.Fatalf("WriteStartInfo: %v", err)
 	}
 

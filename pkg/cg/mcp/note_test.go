@@ -10,18 +10,18 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ripta/rt/pkg/cg"
+	"github.com/ripta/rt/pkg/cg/model"
 )
 
-// seedNote writes a note JSON file directly under cg.NotesRoot with a controlled
+// seedNote writes a note JSON file directly under model.NotesRoot with a controlled
 // ID and created_at, so ordering tests do not depend on wall-clock resolution.
 func seedNote(t *testing.T, id string, createdAt time.Time, keys map[string]string, message string) {
 	t.Helper()
-	root := cg.NotesRoot()
+	root := model.NotesRoot()
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatalf("mkdir notes root: %v", err)
 	}
-	n := cg.Note{ID: id, CreatedAt: createdAt, Keys: keys, Message: message}
+	n := model.Note{ID: id, CreatedAt: createdAt, Keys: keys, Message: message}
 	data, err := json.MarshalIndent(&n, "", "  ")
 	if err != nil {
 		t.Fatalf("marshal note: %v", err)
@@ -53,7 +53,7 @@ func TestHandleNoteAddThenList(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 
 	added := noteAdd(t, noteAddInput{Message: "baseline suite is green", Keys: map[string]string{"run": "4KQ2ZP"}})
-	if !cg.IsValidRunID(added.ID) {
+	if !model.IsValidRunID(added.ID) {
 		t.Errorf("added ID %q is not a valid Crockford ID", added.ID)
 	}
 	if added.Message != "baseline suite is green" {

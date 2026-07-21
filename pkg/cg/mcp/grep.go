@@ -6,7 +6,7 @@ import (
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/ripta/rt/pkg/cg"
+	"github.com/ripta/rt/pkg/cg/model"
 )
 
 // grepInput is the argument shape for `cg_grep`. Exactly one of text or pattern
@@ -23,8 +23,8 @@ type grepInput struct {
 
 // grepMatch and grepOutput are the wire shapes for `cg_grep`. They alias the
 // shared engine types so the MCP response and the `cg grep` CLI stay identical.
-type grepMatch = cg.GrepMatch
-type grepOutput = cg.GrepResult
+type grepMatch = model.GrepMatch
+type grepOutput = model.GrepResult
 
 func registerGrep(s *mcpsdk.Server) {
 	mcpsdk.AddTool(s, &mcpsdk.Tool{
@@ -34,7 +34,7 @@ func registerGrep(s *mcpsdk.Server) {
 }
 
 func handleGrep(_ context.Context, _ *mcpsdk.CallToolRequest, in grepInput) (*mcpsdk.CallToolResult, grepOutput, error) {
-	out, err := cg.Grep(in.ID, cg.GrepOptions{
+	out, err := model.Grep(in.ID, model.GrepOptions{
 		Text:            in.Text,
 		Pattern:         in.Pattern,
 		Streams:         in.Streams,
@@ -43,7 +43,7 @@ func handleGrep(_ context.Context, _ *mcpsdk.CallToolRequest, in grepInput) (*mc
 		MaxMatches:      in.MaxMatches,
 	})
 	if err != nil {
-		if errors.Is(err, cg.ErrUnknownRunID) {
+		if errors.Is(err, model.ErrUnknownRunID) {
 			return nil, grepOutput{}, mapLookupError(in.ID, err)
 		}
 		return nil, grepOutput{}, err

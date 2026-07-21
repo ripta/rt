@@ -6,7 +6,9 @@ import (
 	"os"
 	"testing"
 
-	"github.com/ripta/rt/pkg/cg"
+	"github.com/spf13/cobra"
+
+	"github.com/ripta/rt/pkg/cg/model"
 )
 
 func TestMain(m *testing.M) {
@@ -34,13 +36,22 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
+// cgMain dispatches to the two hidden commands RunSupervised/PoolSupervised
+// re-exec: it does not need the full cg command tree, just these, so it
+// builds its own minimal root rather than importing package cg. Package cg
+// imports package mcp, so mcp importing cg back would cycle in the test
+// build.
 func cgMain() int {
-	err := cg.NewCommand().Execute()
+	root := &cobra.Command{Use: "cg", SilenceErrors: true, SilenceUsage: true}
+	root.AddCommand(model.NewSuperviseRunCommand())
+	root.AddCommand(model.NewSupervisePoolCommand())
+
+	err := root.Execute()
 	if err == nil {
 		return 0
 	}
 
-	var exitErr *cg.ExitError
+	var exitErr *model.ExitError
 	if errors.As(err, &exitErr) {
 		return exitErr.Code
 	}

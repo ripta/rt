@@ -11,8 +11,8 @@ import (
 	"github.com/pmezard/go-difflib/difflib"
 	"gopkg.in/yaml.v3"
 
-	"github.com/ripta/rt/pkg/cg"
 	"github.com/ripta/rt/pkg/cg/approve"
+	"github.com/ripta/rt/pkg/cg/model"
 )
 
 const (
@@ -39,7 +39,7 @@ const (
 //
 // A non-empty first return is a best-effort persistence diagnostic the caller
 // surfaces in the tool result; the command was still approved and runs.
-func (g *gate) prompt(ctx context.Context, tool string, in runInput, resolved *cg.Resolution, el elicitor) (string, error) {
+func (g *gate) prompt(ctx context.Context, tool string, in runInput, resolved *model.Resolution, el elicitor) (string, error) {
 	suggestion := approve.SuggestPrefix(in.Command, resolved.RulePath())
 	res, err := el.Elicit(ctx, &mcpsdk.ElicitParams{
 		Message:         approvalMessage(in),
@@ -137,7 +137,7 @@ func approvalMessage(in runInput) string {
 		cwd = "(server cwd)"
 	}
 
-	return fmt.Sprintf("Allow this command?\n\n  %s\n\nworking directory: %s", cg.EscapeArgs(in.Command), cwd)
+	return fmt.Sprintf("Allow this command?\n\n  %s\n\nworking directory: %s", model.EscapeArgs(in.Command), cwd)
 }
 
 // approvalSchema builds the elicitation form: an editable rule field pre-filled
