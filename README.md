@@ -157,15 +157,20 @@ cleanup hook:
 
 ```
 ❯ cg ls
-CG ID   EXIT   RUNTIME   COMMAND
-Q3F9K2  0      3ms       sh -c 'echo out; echo err >&2'
-M7P4QX  42     2ms       sh -c 'exit 42'
+CG ID    EXIT   RUNTIME   COMMAND
+Q3F9K2      0       3ms   sh -c 'echo out; echo err >&2'
+M7P4QX     42       2ms   sh -c 'exit 42'
 
 ❯ cg prune                  # keep the 50 most recent by mtime
 ❯ cg prune --keep 10
 ❯ cg prune --older-than 7d
 ❯ cg prune --dry-run
 ```
+
+EXIT and RUNTIME (and SYSTEM/USER under `-o wide`) are right-justified to a
+shared width across the listing; CG ID and COMMAND stay left-aligned. A wide
+status word like `start_failed` in EXIT widens that column for every row, but
+values still line up against its right edge instead of leaving a ragged gap.
 
 `--output`/`-o` picks the rendering: `table` (default, shown above) is
 ID/exit/runtime/command; `wide` adds SYSTEM and USER cpu-time columns before
@@ -175,9 +180,9 @@ the usual finished-run fields on a collapsed pool row:
 
 ```
 ❯ cg ls -o wide
-CG ID   EXIT   RUNTIME   SYSTEM   USER   COMMAND
-Q3F9K2  0      3ms       2ms      1ms    sh -c 'echo out; echo err >&2'
-M7P4QX  42     2ms       2ms      1ms    sh -c 'exit 42'
+CG ID    EXIT   RUNTIME   SYSTEM   USER   COMMAND
+Q3F9K2      0       3ms      2ms    1ms   sh -c 'echo out; echo err >&2'
+M7P4QX     42       2ms      2ms    1ms   sh -c 'exit 42'
 
 ❯ cg ls -o json
 {

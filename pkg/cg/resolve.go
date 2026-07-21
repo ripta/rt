@@ -478,46 +478,81 @@ func (opts *lsOptions) run(cmd *cobra.Command, args []string) error {
 }
 
 // writeLsTable renders rows as a tab-separated table with a header row. wide
-// inserts SYSTEM and USER cpu-time columns before COMMAND.
+// inserts SYSTEM and USER cpu-time columns before COMMAND. CG ID and COMMAND
+// stay tabwriter's natural left-aligned; EXIT, RUNTIME, and (when wide)
+// SYSTEM/USER are right-justified to a shared width computed across the
+// whole listing (a tabwriter can only align every column the same direction,
+// and a single wide outlier like "start_failed" in EXIT would otherwise force
+// every other row's shorter value to trail a long ragged gap instead of
+// hugging the column the way a plain number naturally reads).
 func writeLsTable(w io.Writer, rows []lsRow, now time.Time, wide bool) error {
-	tw := tabwriter.NewWriter(w, 0, 0, 3, ' ', 0)
+	labels := []string{"EXIT", "RUNTIME"}
 	if wide {
-		fmt.Fprintln(tw, "CG ID\tEXIT\tRUNTIME\tSYSTEM\tUSER\tCOMMAND")
-	} else {
-		fmt.Fprintln(tw, "CG ID\tEXIT\tRUNTIME\tCOMMAND")
+		labels = append(labels, "SYSTEM", "USER")
 	}
-	for _, r := range rows {
-		fmt.Fprintln(tw, formatLsRow(r, now, wide))
+
+	values := make([][]string, len(rows))
+	commands := make([]string, len(rows))
+	widths := make([]int, len(labels))
+	for i, label := range labels {
+		widths[i] = len(label)
+	}
+	for i, r := range rows {
+		v, cmd := lsRowValues(r, now, wide)
+		values[i] = v
+		commands[i] = cmd
+		for j, s := range v {
+			if len(s) > widths[j] {
+				widths[j] = len(s)
+			}
+		}
+	}
+
+	justify := func(cols []string) []string {
+		out := make([]string, len(cols))
+		for i, c := range cols {
+			out[i] = fmt.Sprintf("%*s", widths[i], c)
+		}
+		return out
+	}
+
+	tw := tabwriter.NewWriter(w, 0, 0, 3, ' ', 0)
+
+	header := append([]string{"CG ID"}, justify(labels)...)
+	header = append(header, "COMMAND")
+	fmt.Fprintln(tw, strings.Join(header, "\t"))
+
+	for i, r := range rows {
+		cols := append([]string{r.id}, justify(values[i])...)
+		cols = append(cols, commands[i])
+		fmt.Fprintln(tw, strings.Join(cols, "\t"))
 	}
 	return tw.Flush()
 }
 
-// formatLsRow renders one tab-separated ls row: id, exit/status, runtime,
-// (system, user when wide,) command. Finished runs read their exit code (or,
-// for a signaled run, its negated signal number) and duration from meta.json;
-// failed runs read the command from debug.json; in-flight and abandoned runs
-// read the command and exact elapsed time from start.json. A run with no lock
-// file, pid file, or start.json carries no liveness signal at all, so it is
-// reported as unknown rather than running. Runs without start.json fall back
-// to the run directory's mtime for an approximate elapsed time, prefixed with
-// "~" to mark it as an estimate rather than a measurement; the command stays
-// unknown in that case, since mtime carries no command information. Pool rows
-// show the pool state and a member-count summary in place of a command. The
-// caller aligns the columns with a tabwriter.
-func formatLsRow(r lsRow, now time.Time, wide bool) string {
+// lsRowValues returns one row's unpadded EXIT/RUNTIME[/SYSTEM/USER] value
+// columns and its rendered COMMAND text. Finished runs read their exit code
+// (or, for a signaled run, its negated signal number) and duration from
+// meta.json; failed runs read the command from debug.json; in-flight and
+// abandoned runs read the command and exact elapsed time from start.json. A
+// run with no lock file, pid file, or start.json carries no liveness signal
+// at all, so it is reported as unknown rather than running. Runs without
+// start.json fall back to the run directory's mtime for an approximate
+// elapsed time, prefixed with "~" to mark it as an estimate rather than a
+// measurement; the command stays unknown in that case, since mtime carries no
+// command information. Pool rows show the pool state and a member-count
+// summary in place of a command. The caller right-justifies the value
+// columns and aligns everything with a tabwriter.
+func lsRowValues(r lsRow, now time.Time, wide bool) (values []string, command string) {
 	if r.pool != nil {
 		dur := formatDuration(now.Sub(r.pool.StartedAt))
 		if r.pool.FinishedAt != nil {
 			dur = formatDuration(r.pool.FinishedAt.Sub(r.pool.StartedAt))
 		}
-		cols := lsRowColumns(r.id, "pool:"+r.poolState, dur, nil, wide)
-		cols = append(cols, formatPoolCounts(r.pool.Counts()))
-		return strings.Join(cols, "\t")
+		return lsValueColumns("pool:"+r.poolState, dur, nil, wide), formatPoolCounts(r.pool.Counts())
 	}
 	if r.debug != nil {
-		cols := lsRowColumns(r.id, "start_failed", "?", nil, wide)
-		cols = append(cols, formatLsCommand(r.debug.Command))
-		return strings.Join(cols, "\t")
+		return lsValueColumns("start_failed", "?", nil, wide), formatLsCommand(r.debug.Command)
 	}
 	if r.meta != nil {
 		head := fmt.Sprintf("%d", r.meta.ExitCode)
@@ -525,9 +560,7 @@ func formatLsRow(r lsRow, now time.Time, wide bool) string {
 			head = fmt.Sprintf("%d", -*r.meta.Signal)
 		}
 		dur := formatDuration(time.Duration(r.meta.DurationMs) * time.Millisecond)
-		cols := lsRowColumns(r.id, head, dur, r.meta.Usage, wide)
-		cols = append(cols, formatLsCommand(r.meta.Command))
-		return strings.Join(cols, "\t")
+		return lsValueColumns(head, dur, r.meta.Usage, wide), formatLsCommand(r.meta.Command)
 	}
 
 	status := "running"
@@ -539,27 +572,21 @@ func formatLsRow(r lsRow, now time.Time, wide bool) string {
 	}
 	if r.start != nil {
 		elapsed := formatDuration(now.Sub(r.start.StartedAt))
-		cols := lsRowColumns(r.id, status, elapsed, nil, wide)
-		cols = append(cols, formatLsCommand(r.start.Command))
-		return strings.Join(cols, "\t")
+		return lsValueColumns(status, elapsed, nil, wide), formatLsCommand(r.start.Command)
 	}
 	if !r.mtime.IsZero() {
 		elapsed := "~" + formatDuration(now.Sub(r.mtime))
-		cols := lsRowColumns(r.id, status, elapsed, nil, wide)
-		cols = append(cols, "?")
-		return strings.Join(cols, "\t")
+		return lsValueColumns(status, elapsed, nil, wide), "?"
 	}
-	cols := lsRowColumns(r.id, status, "?", nil, wide)
-	cols = append(cols, "?")
-	return strings.Join(cols, "\t")
+	return lsValueColumns(status, "?", nil, wide), "?"
 }
 
-// lsRowColumns builds the id/exit-or-status/runtime columns shared by every
-// ls row kind, plus SYSTEM and USER cpu-time columns when wide is true. usage
-// is nil for pool, start-failed, running, abandoned, and unknown rows, which
-// carry no resource accounting; those show "?" in wide mode.
-func lsRowColumns(id, head, runtime string, usage *Usage, wide bool) []string {
-	cols := []string{id, head, runtime}
+// lsValueColumns builds the exit-or-status and runtime value columns shared
+// by every ls row kind, plus SYSTEM and USER cpu-time columns when wide is
+// true. usage is nil for pool, start-failed, running, abandoned, and unknown
+// rows, which carry no resource accounting; those show "?" in wide mode.
+func lsValueColumns(head, runtime string, usage *Usage, wide bool) []string {
+	cols := []string{head, runtime}
 	if !wide {
 		return cols
 	}

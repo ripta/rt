@@ -395,18 +395,19 @@ func TestFormatLsRowPool(t *testing.T) {
 			},
 		},
 	}
-	got := formatLsRow(row, now, false)
-	want := "PPPPPP\tpool:finished\t1m30s\t2 runs: 1 ok, 1 skipped"
-	if got != want {
-		t.Errorf("formatLsRow pool = %q, want %q", got, want)
+	values, command := lsRowValues(row, now, false)
+	wantValues := []string{"pool:finished", "1m30s"}
+	wantCommand := "2 runs: 1 ok, 1 skipped"
+	if !reflect.DeepEqual(values, wantValues) || command != wantCommand {
+		t.Errorf("lsRowValues pool = %v, %q, want %v, %q", values, command, wantValues, wantCommand)
 	}
 
 	row.pool.FinishedAt = nil
 	row.poolState = PoolStateRunning
-	got = formatLsRow(row, now, false)
-	want = "PPPPPP\tpool:running\t2m0s\t2 runs: 1 ok, 1 skipped"
-	if got != want {
-		t.Errorf("formatLsRow running pool = %q, want %q", got, want)
+	values, command = lsRowValues(row, now, false)
+	wantValues = []string{"pool:running", "2m0s"}
+	if !reflect.DeepEqual(values, wantValues) || command != wantCommand {
+		t.Errorf("lsRowValues running pool = %v, %q, want %v, %q", values, command, wantValues, wantCommand)
 	}
 }
 
@@ -427,10 +428,11 @@ func TestFormatLsRowPoolWide(t *testing.T) {
 			},
 		},
 	}
-	got := formatLsRow(row, now, true)
-	want := "PPPPPP\tpool:finished\t1m30s\t?\t?\t2 runs: 1 ok, 1 skipped"
-	if got != want {
-		t.Errorf("formatLsRow wide pool = %q, want %q", got, want)
+	values, command := lsRowValues(row, now, true)
+	wantValues := []string{"pool:finished", "1m30s", "?", "?"}
+	wantCommand := "2 runs: 1 ok, 1 skipped"
+	if !reflect.DeepEqual(values, wantValues) || command != wantCommand {
+		t.Errorf("lsRowValues wide pool = %v, %q, want %v, %q", values, command, wantValues, wantCommand)
 	}
 }
 
@@ -442,10 +444,11 @@ func TestFormatLsRowRunning(t *testing.T) {
 		id:    "DDDDDD",
 		start: &StartInfo{RunInfo: RunInfo{Command: []string{"sleep", "30"}, StartedAt: now.Add(-90 * time.Second)}},
 	}
-	got := formatLsRow(row, now, false)
-	want := "DDDDDD\trunning\t1m30s\tsleep 30"
-	if got != want {
-		t.Errorf("formatLsRow running = %q, want %q", got, want)
+	values, command := lsRowValues(row, now, false)
+	wantValues := []string{"running", "1m30s"}
+	wantCommand := "sleep 30"
+	if !reflect.DeepEqual(values, wantValues) || command != wantCommand {
+		t.Errorf("lsRowValues running = %v, %q, want %v, %q", values, command, wantValues, wantCommand)
 	}
 }
 
@@ -454,10 +457,11 @@ func TestFormatLsRowRunningNoStartInfo(t *testing.T) {
 
 	// A zero mtime carries no timestamp at all, so it stays the unresolved
 	// fallback; real rows always have a directory mtime.
-	got := formatLsRow(lsRow{id: "EEEEEE"}, time.Now(), false)
-	want := "EEEEEE\trunning\t?\t?"
-	if got != want {
-		t.Errorf("formatLsRow running fallback = %q, want %q", got, want)
+	values, command := lsRowValues(lsRow{id: "EEEEEE"}, time.Now(), false)
+	wantValues := []string{"running", "?"}
+	wantCommand := "?"
+	if !reflect.DeepEqual(values, wantValues) || command != wantCommand {
+		t.Errorf("lsRowValues running fallback = %v, %q, want %v, %q", values, command, wantValues, wantCommand)
 	}
 }
 
@@ -466,10 +470,11 @@ func TestFormatLsRowRunningMtimeFallback(t *testing.T) {
 
 	now := time.Now()
 	row := lsRow{id: "FFFFFF", mtime: now.Add(-90 * time.Second)}
-	got := formatLsRow(row, now, false)
-	want := "FFFFFF\trunning\t~1m30s\t?"
-	if got != want {
-		t.Errorf("formatLsRow running mtime fallback = %q, want %q", got, want)
+	values, command := lsRowValues(row, now, false)
+	wantValues := []string{"running", "~1m30s"}
+	wantCommand := "?"
+	if !reflect.DeepEqual(values, wantValues) || command != wantCommand {
+		t.Errorf("lsRowValues running mtime fallback = %v, %q, want %v, %q", values, command, wantValues, wantCommand)
 	}
 }
 
@@ -478,10 +483,11 @@ func TestFormatLsRowUnknown(t *testing.T) {
 
 	now := time.Now()
 	row := lsRow{id: "UUUUUU", mtime: now.Add(-5 * time.Minute), unknown: true}
-	got := formatLsRow(row, now, false)
-	want := "UUUUUU\tunknown\t~5m0s\t?"
-	if got != want {
-		t.Errorf("formatLsRow unknown = %q, want %q", got, want)
+	values, command := lsRowValues(row, now, false)
+	wantValues := []string{"unknown", "~5m0s"}
+	wantCommand := "?"
+	if !reflect.DeepEqual(values, wantValues) || command != wantCommand {
+		t.Errorf("lsRowValues unknown = %v, %q, want %v, %q", values, command, wantValues, wantCommand)
 	}
 }
 
@@ -494,17 +500,19 @@ func TestFormatLsRowAbandoned(t *testing.T) {
 		start:     &StartInfo{RunInfo: RunInfo{Command: []string{"sleep", "600"}, StartedAt: now.Add(-90 * time.Second)}},
 		abandoned: true,
 	}
-	got := formatLsRow(row, now, false)
-	want := "ABANDN\tabandoned\t1m30s\tsleep 600"
-	if got != want {
-		t.Errorf("formatLsRow abandoned = %q, want %q", got, want)
+	values, command := lsRowValues(row, now, false)
+	wantValues := []string{"abandoned", "1m30s"}
+	wantCommand := "sleep 600"
+	if !reflect.DeepEqual(values, wantValues) || command != wantCommand {
+		t.Errorf("lsRowValues abandoned = %v, %q, want %v, %q", values, command, wantValues, wantCommand)
 	}
 
 	row = lsRow{id: "ABANDN", abandoned: true, mtime: now.Add(-90 * time.Second)}
-	got = formatLsRow(row, now, false)
-	want = "ABANDN\tabandoned\t~1m30s\t?"
-	if got != want {
-		t.Errorf("formatLsRow abandoned mtime fallback = %q, want %q", got, want)
+	values, command = lsRowValues(row, now, false)
+	wantValues = []string{"abandoned", "~1m30s"}
+	wantCommand = "?"
+	if !reflect.DeepEqual(values, wantValues) || command != wantCommand {
+		t.Errorf("lsRowValues abandoned mtime fallback = %v, %q, want %v, %q", values, command, wantValues, wantCommand)
 	}
 }
 
@@ -520,18 +528,19 @@ func TestFormatLsRowFinishedWide(t *testing.T) {
 			Usage:      &Usage{UserUS: 20000, SystemUS: 5000},
 		},
 	}
-	got := formatLsRow(row, now, true)
-	want := "AAAAAA\t0\t12ms\t5ms\t20ms\techo hi"
-	if got != want {
-		t.Errorf("formatLsRow finished wide = %q, want %q", got, want)
+	values, command := lsRowValues(row, now, true)
+	wantValues := []string{"0", "12ms", "5ms", "20ms"}
+	wantCommand := "echo hi"
+	if !reflect.DeepEqual(values, wantValues) || command != wantCommand {
+		t.Errorf("lsRowValues finished wide = %v, %q, want %v, %q", values, command, wantValues, wantCommand)
 	}
 
 	// No usage recorded: SYSTEM/USER fall back to "?".
 	row.meta.Usage = nil
-	got = formatLsRow(row, now, true)
-	want = "AAAAAA\t0\t12ms\t?\t?\techo hi"
-	if got != want {
-		t.Errorf("formatLsRow finished wide (no usage) = %q, want %q", got, want)
+	values, command = lsRowValues(row, now, true)
+	wantValues = []string{"0", "12ms", "?", "?"}
+	if !reflect.DeepEqual(values, wantValues) || command != wantCommand {
+		t.Errorf("lsRowValues finished wide (no usage) = %v, %q, want %v, %q", values, command, wantValues, wantCommand)
 	}
 }
 
@@ -544,10 +553,11 @@ func TestFormatLsRowSignaled(t *testing.T) {
 		id:   "AAAAAA",
 		meta: &Meta{RunInfo: RunInfo{Command: []string{"sleep", "10"}}, ExitCode: -1, Signal: &sig, DurationMs: 5},
 	}
-	got := formatLsRow(row, now, false)
-	want := "AAAAAA\t-15\t5ms\tsleep 10"
-	if got != want {
-		t.Errorf("formatLsRow signaled = %q, want %q", got, want)
+	values, command := lsRowValues(row, now, false)
+	wantValues := []string{"-15", "5ms"}
+	wantCommand := "sleep 10"
+	if !reflect.DeepEqual(values, wantValues) || command != wantCommand {
+		t.Errorf("lsRowValues signaled = %v, %q, want %v, %q", values, command, wantValues, wantCommand)
 	}
 }
 
@@ -559,13 +569,13 @@ func TestFormatLsRowEmbeddedNewline(t *testing.T) {
 		id:   "WQKSRR",
 		meta: &Meta{RunInfo: RunInfo{Command: []string{"echo", "line one\nline two", "col1\tcol2"}}},
 	}
-	got := formatLsRow(row, now, false)
-	if strings.Contains(got, "\n") {
-		t.Fatalf("formatLsRow result contains a raw newline, which would split the tabwriter row: %q", got)
+	_, command := lsRowValues(row, now, false)
+	if strings.Contains(command, "\n") {
+		t.Fatalf("command contains a raw newline, which would split the tabwriter row: %q", command)
 	}
-	want := `WQKSRR` + "\t0\t0s\t" + `echo 'line one\nline two' 'col1\tcol2'`
-	if got != want {
-		t.Errorf("formatLsRow embedded newline/tab = %q, want %q", got, want)
+	want := `echo 'line one\nline two' 'col1\tcol2'`
+	if command != want {
+		t.Errorf("command with embedded newline/tab = %q, want %q", command, want)
 	}
 }
 
