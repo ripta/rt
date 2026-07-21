@@ -2,6 +2,7 @@ package approve
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -276,6 +277,81 @@ func TestLoadInvalidRuleFailsLoad(t *testing.T) {
 
 	if _, err := Load(LoadOptions{GlobalPath: global, ProjectRoot: emptyRoot}); err == nil {
 		t.Fatalf("Load() expected an error for an invalid rule, got nil")
+	}
+}
+
+func TestDiagnoseBothClean(t *testing.T) {
+	t.Parallel()
+
+	global := writeGlobal(t, "version: 1\nallow:\n  - prefix: [git]\n")
+	root := writeProject(t, "version: 1\nallow:\n  - prefix: [make]\n")
+
+	g, p, err := Diagnose(LoadOptions{GlobalPath: global, ProjectRoot: root})
+	if err != nil {
+		t.Fatalf("Diagnose() error: %v", err)
+	}
+	if !g.Present || g.Err != nil {
+		t.Errorf("global = %+v, want present with no error", g)
+	}
+	if !p.Present || p.Err != nil {
+		t.Errorf("project = %+v, want present with no error", p)
+	}
+}
+
+func TestDiagnoseBothMissing(t *testing.T) {
+	t.Parallel()
+
+	missingGlobal := filepath.Join(t.TempDir(), "nope.yaml")
+	emptyRoot := t.TempDir()
+
+	g, p, err := Diagnose(LoadOptions{GlobalPath: missingGlobal, ProjectRoot: emptyRoot})
+	if err != nil {
+		t.Fatalf("Diagnose() error: %v", err)
+	}
+	if g.Present || g.Err != nil {
+		t.Errorf("global = %+v, want absent with no error", g)
+	}
+	if p.Present || p.Err != nil {
+		t.Errorf("project = %+v, want absent with no error", p)
+	}
+}
+
+// TestDiagnoseBothBrokenReportsBoth is the reason Diagnose exists rather than
+// reusing Load: a broken global layer must not prevent the project layer's
+// problems from being reported in the same run.
+func TestDiagnoseBothBrokenReportsBoth(t *testing.T) {
+	t.Parallel()
+
+	global := writeGlobal(t, "version: 1\ndeny:\n  - message: no kind here\n")
+	root := writeProject(t, "version: 1\nallow:\n  - prefix: [make]\n    message: not allowed here\n")
+
+	g, p, err := Diagnose(LoadOptions{GlobalPath: global, ProjectRoot: root})
+	if err != nil {
+		t.Fatalf("Diagnose() error: %v", err)
+	}
+	if g.Err == nil || !errors.Is(g.Err, ErrNoRuleKind) {
+		t.Errorf("global.Err = %v, want it to match ErrNoRuleKind", g.Err)
+	}
+	if p.Err == nil || !errors.Is(p.Err, ErrMessageOnAllow) {
+		t.Errorf("project.Err = %v, want it to match ErrMessageOnAllow", p.Err)
+	}
+}
+
+func TestDiagnoseOnlyProjectBroken(t *testing.T) {
+	t.Parallel()
+
+	global := writeGlobal(t, "version: 1\nallow:\n  - prefix: [git]\n")
+	root := writeProject(t, "version: 1\nallow:\n  - exact: [git]\n    prefix: [git]\n")
+
+	g, p, err := Diagnose(LoadOptions{GlobalPath: global, ProjectRoot: root})
+	if err != nil {
+		t.Fatalf("Diagnose() error: %v", err)
+	}
+	if g.Err != nil {
+		t.Errorf("global.Err = %v, want nil", g.Err)
+	}
+	if p.Err == nil || !errors.Is(p.Err, ErrMultipleRuleKinds) {
+		t.Errorf("project.Err = %v, want it to match ErrMultipleRuleKinds", p.Err)
 	}
 }
 

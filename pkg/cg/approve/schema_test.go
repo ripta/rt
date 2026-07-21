@@ -221,6 +221,70 @@ func TestParseDocument(t *testing.T) {
 	}
 }
 
+// multiErrorTest checks that ParseDocument reports every broken rule in a
+// document, not just the first, by asserting errors.Is against every sentinel
+// in wantErrs against the single returned error.
+type multiErrorTest struct {
+	name     string
+	yaml     string
+	wantErrs []error
+}
+
+var multiErrorTests = []multiErrorTest{
+	{
+		name: "two broken rules in one section",
+		yaml: `version: 1
+deny:
+  - message: no kind here
+  - exact: [git]
+    prefix: [git]
+`,
+		wantErrs: []error{ErrNoRuleKind, ErrMultipleRuleKinds},
+	},
+	{
+		name: "broken rules across sections",
+		yaml: `version: 1
+deny:
+  - permit_unsafe_envs: [PATH]
+    prefix: [rm]
+allow:
+  - prefix: [make]
+    message: not allowed here
+`,
+		wantErrs: []error{ErrPermitNotOnAllow, ErrMessageOnAllow},
+	},
+	{
+		name: "bad mode and a broken rule both reported",
+		yaml: `version: 1
+mode: loose
+allow:
+  - prefix: [make]
+    as_basename: true
+`,
+		wantErrs: []error{ErrUnknownMode, ErrAsBasenameOnTokens},
+	},
+}
+
+func TestParseDocumentReportsEveryError(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range multiErrorTests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, _, err := ParseDocument([]byte(tt.yaml))
+			if err == nil {
+				t.Fatalf("ParseDocument() expected an error, got nil")
+			}
+			for _, want := range tt.wantErrs {
+				if !errors.Is(err, want) {
+					t.Errorf("ParseDocument() error = %v, want it to also match %v", err, want)
+				}
+			}
+		})
+	}
+}
+
 func TestParseDocumentRecordsKind(t *testing.T) {
 	t.Parallel()
 

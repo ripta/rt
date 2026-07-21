@@ -40,32 +40,26 @@ func (g *gate) check(ctx context.Context, tool string, in runInput, resolved *cg
 	}
 
 	subject := approve.Subject{Argv: in.Command, Canonical: resolved.CanonicalArgv(), Resolved: resolved.ResolvedArgv()}
-	res := g.store.Ruleset().Match(subject)
-	switch res.Decision {
+	v := g.store.Ruleset().Evaluate(subject, in.Env)
+	switch v.Decision {
 	case approve.DecisionRun:
-		if res.Rule != nil {
-			if bad := res.Rule.DisallowedEnvs(in.Env); len(bad) > 0 {
-				return "", fmt.Errorf("%s refused: env override sets %s, which the matching allow rule does not permit; list them under permit_unsafe_envs to allow", tool, strings.Join(bad, ", "))
-			}
-		}
 		return "", nil
 	case approve.DecisionRefuse:
-		return "", refusalError(tool, res)
+		if len(v.BadEnvs) > 0 {
+			return "", envRefusalError(tool, v, g.store.Project.Path)
+		}
+		return "", refusalError(tool, v)
 	default:
 		return g.promptOrFailClosed(ctx, tool, in, resolved, el)
 	}
 }
 
 // promptOrFailClosed handles a command that matched neither allow nor deny.
-//
-// A dangerous env override is refused before prompting, because a prompted
-// command has no rule to carry a permit_unsafe_envs exemption. With no
-// elicitor the gate fails closed; otherwise it prompts for approval. resolved
-// carries the canonical executable path the prompt pre-fills as a strict rule.
+// Evaluate already refuses a dangerous env override before returning
+// DecisionPrompt, so reaching here means the env is clean. With no elicitor
+// the gate fails closed; otherwise it prompts for approval. resolved carries
+// the canonical executable path the prompt pre-fills as a strict rule.
 func (g *gate) promptOrFailClosed(ctx context.Context, tool string, in runInput, resolved *cg.Resolution, el elicitor) (string, error) {
-	if bad := (&approve.Rule{}).DisallowedEnvs(in.Env); len(bad) > 0 {
-		return "", fmt.Errorf("%s refused: env override sets %s, which a prompted command cannot permit; add an allow rule with permit_unsafe_envs to %s", tool, strings.Join(bad, ", "), g.store.Project.Path)
-	}
 	if el == nil {
 		return "", g.failClosedError(tool)
 	}
@@ -76,15 +70,28 @@ func (g *gate) promptOrFailClosed(ctx context.Context, tool string, in runInput,
 // refusalError builds the error for a deny or restrict match, naming the rule
 // kind and appending the rule's message when set so the agent sees why the
 // command was blocked.
-func refusalError(tool string, res approve.MatchResult) error {
+func refusalError(tool string, v approve.Verdict) error {
 	kind := "deny"
-	if res.Restricted {
+	if v.Restricted {
 		kind = "restrict"
 	}
-	if res.Rule != nil && res.Rule.Message != "" {
-		return fmt.Errorf("%s refused: command matches a %s rule: %s", tool, kind, res.Rule.Message)
+	if v.Rule != nil && v.Rule.Message != "" {
+		return fmt.Errorf("%s refused: command matches a %s rule: %s", tool, kind, v.Rule.Message)
 	}
 	return fmt.Errorf("%s refused: command matches a %s rule", tool, kind)
+}
+
+// envRefusalError builds the error for a DecisionRefuse produced by the
+// dangerous-env gate rather than a deny or restrict rule. A matched allow rule
+// (Rule non-nil) points at permit_unsafe_envs; an unmatched command (Rule nil)
+// has no rule to carry an exemption, so the message points at adding one to
+// the project file instead.
+func envRefusalError(tool string, v approve.Verdict, projectPath string) error {
+	bad := strings.Join(v.BadEnvs, ", ")
+	if v.Rule != nil {
+		return fmt.Errorf("%s refused: env override sets %s, which the matching allow rule does not permit; list them under permit_unsafe_envs to allow", tool, bad)
+	}
+	return fmt.Errorf("%s refused: env override sets %s, which a prompted command cannot permit; add an allow rule with permit_unsafe_envs to %s", tool, bad, projectPath)
 }
 
 // failClosedError builds the error for a command that matched neither allow

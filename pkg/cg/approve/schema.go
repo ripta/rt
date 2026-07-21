@@ -1,6 +1,7 @@
 package approve
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -53,36 +54,42 @@ func ParseDocument(raw []byte) (*yaml.Node, *Document, error) {
 // every allow/deny entry. It pairs each typed rule with its source node by
 // index so error messages can carry a line number and so the single rule kind
 // can be recorded on the typed rule.
+//
+// Every rule in the document is checked before validateDocument returns, so a
+// file with several broken rules reports all of them in one error rather than
+// just the first; the version check is the exception, since an unknown schema
+// version means the rest of the document cannot be trusted to have decoded
+// against the expected shape at all.
 func validateDocument(node *yaml.Node, doc *Document) error {
 	if doc.Version != 1 {
 		return ErrUnknownVersion
 	}
 
+	var errs []error
+
 	switch doc.Mode {
 	case "", ModeEnforce, ModeAllowAll, ModeDenyAll:
 	default:
-		return fmt.Errorf("%w: %q", ErrUnknownMode, doc.Mode)
+		errs = append(errs, fmt.Errorf("%w: %q", ErrUnknownMode, doc.Mode))
 	}
 
 	root := rootMapping(node)
+	errs = append(errs, validateEntries(findMapValue(root, "deny"), doc.Deny, sectionDeny)...)
+	errs = append(errs, validateEntries(findMapValue(root, "allow"), doc.Allow, sectionAllow)...)
+	errs = append(errs, validateEntries(findMapValue(root, "restrict"), doc.Restrict, sectionRestrict)...)
 
-	if err := validateEntries(findMapValue(root, "deny"), doc.Deny, sectionDeny); err != nil {
-		return err
-	}
-	if err := validateEntries(findMapValue(root, "allow"), doc.Allow, sectionAllow); err != nil {
-		return err
-	}
-	if err := validateEntries(findMapValue(root, "restrict"), doc.Restrict, sectionRestrict); err != nil {
-		return err
-	}
-
-	return nil
+	return errors.Join(errs...)
 }
 
 // validateEntries validates each entry in a deny, allow, or restrict sequence,
 // records its rule kind on the matching typed rule, and compiles glob/regex
 // patterns. seq is the YAML sequence node and may be nil when the key is absent.
-func validateEntries(seq *yaml.Node, rules []Rule, section ruleSection) error {
+// It collects every entry's error rather than stopping at the first, so a
+// caller sees every broken rule in the sequence at once; an entry whose
+// validateRule fails skips compileRule, since the rule kind compileRule relies
+// on was not established.
+func validateEntries(seq *yaml.Node, rules []Rule, section ruleSection) []error {
+	var errs []error
 	for i := range rules {
 		var entry *yaml.Node
 		if seq != nil && i < len(seq.Content) {
@@ -90,14 +97,15 @@ func validateEntries(seq *yaml.Node, rules []Rule, section ruleSection) error {
 		}
 
 		if err := validateRule(entry, &rules[i], section); err != nil {
-			return err
+			errs = append(errs, err)
+			continue
 		}
 		if err := compileRule(&rules[i]); err != nil {
-			return err
+			errs = append(errs, err)
 		}
 	}
 
-	return nil
+	return errs
 }
 
 // validateRule inspects the entry's mapping keys to enforce exactly one rule
