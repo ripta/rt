@@ -3,6 +3,7 @@ package cg
 import (
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -173,6 +174,16 @@ const (
 // state.
 const lsStateAll = "all"
 
+// Values of the `--output`/`-o` flag on `cg ls`. table is the default: id,
+// exit/status, runtime, and command. wide adds SYSTEM and USER cpu-time
+// columns before command. json prints a `{"runs": [...]}` envelope instead of
+// a table.
+const (
+	lsOutputTable = "table"
+	lsOutputWide  = "wide"
+	lsOutputJSON  = "json"
+)
+
 // lsOptions holds flags for the `cg ls` subcommand.
 type lsOptions struct {
 	N        int
@@ -181,6 +192,8 @@ type lsOptions struct {
 	ExitCode string
 	Since    string
 	Before   string
+	Cwd      string
+	Output   string
 }
 
 // NewLsCommand returns the `cg ls` subcommand. It lists recent capture runs in
@@ -197,11 +210,13 @@ func NewLsCommand() *cobra.Command {
 		RunE:          opts.run,
 	}
 	c.Flags().IntVarP(&opts.N, "limit", "n", 20, "maximum number of runs to list; 0 or negative means unlimited")
-	c.Flags().StringVar(&opts.Pool, "pool", "", "pool handling: a pool ID lists that pool's members, `none` lists only standalone runs, `any` lists everything uncollapsed")
+	c.Flags().StringVar(&opts.Pool, "pool", "", "set to a `pool-id` to list that pool's members, none to list only standalone runs, or any to list everything uncollapsed; unset (the default) collapses each pool behind one summary row")
 	c.Flags().StringVar(&opts.State, "state", lsStateAll, "state filter: all|finished|running|failed|abandoned|unknown")
 	c.Flags().StringVar(&opts.ExitCode, "exit-code", "", "filter finished runs by exit code: N (equals), !=N, >=N, >N, <N, or <=N; pool summary rows always pass through")
 	c.Flags().StringVar(&opts.Since, "since", "", "only list runs started at or after TIME: a duration ago (e.g. 4h, 7d), an RFC3339 timestamp, or a YYYY-MM-DD date")
 	c.Flags().StringVar(&opts.Before, "before", "", "only list runs started strictly before TIME, same grammar as --since")
+	c.Flags().StringVar(&opts.Cwd, "cwd", "", "filter to runs whose recorded working directory matches `DIR` (relative paths and symlinks are resolved before comparing)")
+	c.Flags().StringVarP(&opts.Output, "output", "o", lsOutputTable, "output format: table, wide (adds SYSTEM/USER cpu-time columns), or json")
 	return c
 }
 
@@ -216,6 +231,7 @@ type lsRow struct {
 	pool      *PoolManifest
 	poolState string
 	memberOf  string
+	cwd       string
 }
 
 // state reports the row's canonical state label for --state filtering. A
@@ -278,6 +294,23 @@ func (opts *lsOptions) run(cmd *cobra.Command, args []string) error {
 		return &ExitError{Code: 2}
 	}
 
+	switch opts.Output {
+	case lsOutputTable, lsOutputWide, lsOutputJSON:
+	default:
+		fmt.Fprintf(cmd.ErrOrStderr(), "invalid --output %q: want table|wide|json\n", opts.Output)
+		return &ExitError{Code: 2}
+	}
+
+	var cwdFilter *CwdFilter
+	if opts.Cwd != "" {
+		f, err := NewCwdFilter(opts.Cwd)
+		if err != nil {
+			fmt.Fprintf(cmd.ErrOrStderr(), "invalid --cwd: %v\n", err)
+			return &ExitError{Code: 2}
+		}
+		cwdFilter = &f
+	}
+
 	var exitFilter *ExitCodeFilter
 	if opts.ExitCode != "" {
 		f, err := ParseExitCodeFilter(opts.ExitCode)
@@ -337,19 +370,23 @@ func (opts *lsOptions) run(cmd *cobra.Command, args []string) error {
 		if m, err := ReadMeta(dir); err == nil {
 			row.meta = m
 			row.memberOf = m.Pool
+			row.cwd = m.Cwd
 		} else if p, err := ReadPoolManifest(dir); err == nil {
 			row.pool = p
 			row.poolState = PoolState(dir, p)
+			row.cwd = p.Cwd
 			poolDirs[name] = true
 		} else if d, err := ReadStartDebug(dir); err == nil {
 			row.debug = d
 			row.memberOf = d.Pool
+			row.cwd = d.Cwd
 		} else {
 			hasLock := LockFileExists(dir)
 			row.abandoned = RunLockReleased(dir)
 			if s, err := ReadStartInfo(dir); err == nil {
 				row.start = s
 				row.memberOf = s.Pool
+				row.cwd = s.Cwd
 			}
 			row.unknown = !hasLock && row.start == nil
 		}
@@ -416,6 +453,16 @@ func (opts *lsOptions) run(cmd *cobra.Command, args []string) error {
 		rows = kept
 	}
 
+	if cwdFilter != nil {
+		kept = rows[:0]
+		for _, r := range rows {
+			if cwdFilter.Match(r.cwd) {
+				kept = append(kept, r)
+			}
+		}
+		rows = kept
+	}
+
 	sort.Slice(rows, func(i, j int) bool {
 		return rows[i].mtime.After(rows[j].mtime)
 	})
@@ -424,42 +471,63 @@ func (opts *lsOptions) run(cmd *cobra.Command, args []string) error {
 		rows = rows[:opts.N]
 	}
 
-	tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
+	if opts.Output == lsOutputJSON {
+		return writeJSON(cmd.OutOrStdout(), lsJSONOutput{Runs: lsRowsToJSON(rows)})
+	}
+	return writeLsTable(cmd.OutOrStdout(), rows, now, opts.Output == lsOutputWide)
+}
+
+// writeLsTable renders rows as a tab-separated table with a header row. wide
+// inserts SYSTEM and USER cpu-time columns before COMMAND.
+func writeLsTable(w io.Writer, rows []lsRow, now time.Time, wide bool) error {
+	tw := tabwriter.NewWriter(w, 0, 0, 3, ' ', 0)
+	if wide {
+		fmt.Fprintln(tw, "CG ID\tEXIT\tRUNTIME\tSYSTEM\tUSER\tCOMMAND")
+	} else {
+		fmt.Fprintln(tw, "CG ID\tEXIT\tRUNTIME\tCOMMAND")
+	}
 	for _, r := range rows {
-		fmt.Fprintln(tw, formatLsRow(r, now))
+		fmt.Fprintln(tw, formatLsRow(r, now, wide))
 	}
 	return tw.Flush()
 }
 
-// formatLsRow renders one tab-separated ls row: id, status, duration, command.
-// Finished runs read their status and duration from meta.json; failed runs read
-// the command from debug.json; in-flight and abandoned runs read the command and
-// exact elapsed time from start.json. A run with no lock file, pid file, or
-// start.json carries no liveness signal at all, so it is reported as unknown
-// rather than running. Runs without start.json fall back to the run directory's
-// mtime for an approximate elapsed time, prefixed with "~" to mark it as an
-// estimate rather than a measurement; the command stays unknown in that case,
-// since mtime carries no command information. Pool rows show the pool state and
-// a member-count summary in place of a command. The caller aligns the columns
-// with a tabwriter.
-func formatLsRow(r lsRow, now time.Time) string {
+// formatLsRow renders one tab-separated ls row: id, exit/status, runtime,
+// (system, user when wide,) command. Finished runs read their exit code (or,
+// for a signaled run, its negated signal number) and duration from meta.json;
+// failed runs read the command from debug.json; in-flight and abandoned runs
+// read the command and exact elapsed time from start.json. A run with no lock
+// file, pid file, or start.json carries no liveness signal at all, so it is
+// reported as unknown rather than running. Runs without start.json fall back
+// to the run directory's mtime for an approximate elapsed time, prefixed with
+// "~" to mark it as an estimate rather than a measurement; the command stays
+// unknown in that case, since mtime carries no command information. Pool rows
+// show the pool state and a member-count summary in place of a command. The
+// caller aligns the columns with a tabwriter.
+func formatLsRow(r lsRow, now time.Time, wide bool) string {
 	if r.pool != nil {
 		dur := formatDuration(now.Sub(r.pool.StartedAt))
 		if r.pool.FinishedAt != nil {
 			dur = formatDuration(r.pool.FinishedAt.Sub(r.pool.StartedAt))
 		}
-		return fmt.Sprintf("%s\tpool:%s\t%s\t%s", r.id, r.poolState, dur, formatPoolCounts(r.pool.Counts()))
+		cols := lsRowColumns(r.id, "pool:"+r.poolState, dur, nil, wide)
+		cols = append(cols, formatPoolCounts(r.pool.Counts()))
+		return strings.Join(cols, "\t")
 	}
 	if r.debug != nil {
-		return fmt.Sprintf("%s\tstart_failed\t?\t%s", r.id, EscapeArgs(r.debug.Command))
+		cols := lsRowColumns(r.id, "start_failed", "?", nil, wide)
+		cols = append(cols, formatLsCommand(r.debug.Command))
+		return strings.Join(cols, "\t")
 	}
 	if r.meta != nil {
-		head := fmt.Sprintf("exit=%d", r.meta.ExitCode)
+		head := fmt.Sprintf("%d", r.meta.ExitCode)
 		if r.meta.Signal != nil {
-			head = fmt.Sprintf("signal=%d", *r.meta.Signal)
+			head = fmt.Sprintf("%d", -*r.meta.Signal)
 		}
 		dur := formatDuration(time.Duration(r.meta.DurationMs) * time.Millisecond)
-		return fmt.Sprintf("%s\t%s\t%s\t%s", r.id, head, dur, EscapeArgs(r.meta.Command))
+		cols := lsRowColumns(r.id, head, dur, r.meta.Usage, wide)
+		cols = append(cols, formatLsCommand(r.meta.Command))
+		return strings.Join(cols, "\t")
 	}
 
 	status := "running"
@@ -471,13 +539,66 @@ func formatLsRow(r lsRow, now time.Time) string {
 	}
 	if r.start != nil {
 		elapsed := formatDuration(now.Sub(r.start.StartedAt))
-		return fmt.Sprintf("%s\t%s\t%s\t%s", r.id, status, elapsed, EscapeArgs(r.start.Command))
+		cols := lsRowColumns(r.id, status, elapsed, nil, wide)
+		cols = append(cols, formatLsCommand(r.start.Command))
+		return strings.Join(cols, "\t")
 	}
 	if !r.mtime.IsZero() {
 		elapsed := "~" + formatDuration(now.Sub(r.mtime))
-		return fmt.Sprintf("%s\t%s\t%s\t?", r.id, status, elapsed)
+		cols := lsRowColumns(r.id, status, elapsed, nil, wide)
+		cols = append(cols, "?")
+		return strings.Join(cols, "\t")
 	}
-	return fmt.Sprintf("%s\t%s\t?\t?", r.id, status)
+	cols := lsRowColumns(r.id, status, "?", nil, wide)
+	cols = append(cols, "?")
+	return strings.Join(cols, "\t")
+}
+
+// lsRowColumns builds the id/exit-or-status/runtime columns shared by every
+// ls row kind, plus SYSTEM and USER cpu-time columns when wide is true. usage
+// is nil for pool, start-failed, running, abandoned, and unknown rows, which
+// carry no resource accounting; those show "?" in wide mode.
+func lsRowColumns(id, head, runtime string, usage *Usage, wide bool) []string {
+	cols := []string{id, head, runtime}
+	if !wide {
+		return cols
+	}
+	sys, usr := "?", "?"
+	if usage != nil {
+		sys = formatDuration(usage.systemDuration())
+		usr = formatDuration(usage.userDuration())
+	}
+	return append(cols, sys, usr)
+}
+
+// formatLsCommand renders cmd for the table/wide COMMAND column: shell-quoted
+// via EscapeArgs, then with control characters escaped so a raw newline or
+// tab embedded in an argument can't split the row across physical lines or
+// misalign the tabwriter's columns.
+func formatLsCommand(cmd []string) string {
+	return escapeLsControlChars(EscapeArgs(cmd))
+}
+
+// escapeLsControlChars replaces literal backslash, newline, carriage return,
+// and tab bytes in s with their two-character escapes, backslash first so the
+// escapes it introduces aren't themselves re-escaped.
+func escapeLsControlChars(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		switch r {
+		case '\\':
+			b.WriteString(`\\`)
+		case '\n':
+			b.WriteString(`\n`)
+		case '\r':
+			b.WriteString(`\r`)
+		case '\t':
+			b.WriteString(`\t`)
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 // formatPoolCounts renders a pool's member tally, like "6 runs: 4 ok, 1
@@ -507,4 +628,63 @@ func formatPoolCounts(c PoolCounts) string {
 		return fmt.Sprintf("%d %s", c.Total, noun)
 	}
 	return fmt.Sprintf("%d %s: %s", c.Total, noun, strings.Join(parts, ", "))
+}
+
+// lsJSONOutput is the `cg ls -o json` envelope.
+type lsJSONOutput struct {
+	Runs []lsJSONRun `json:"runs"`
+}
+
+// lsJSONRun is one element of the `runs` array. It follows the same shape as
+// `cg meta`: metaFields carries the finished/running fields (Cwd included),
+// Debug carries a start-failed run's diagnostics, and Manifest is set only
+// for a pool summary row.
+type lsJSONRun struct {
+	ID       string        `json:"id"`
+	State    string        `json:"state"`
+	Debug    *StartDebug   `json:"debug,omitempty"`
+	Manifest *PoolManifest `json:"manifest,omitempty"`
+	metaFields
+}
+
+// lsRowsToJSON converts rows to their `cg ls -o json` representation.
+func lsRowsToJSON(rows []lsRow) []lsJSONRun {
+	out := make([]lsJSONRun, len(rows))
+	for i, r := range rows {
+		out[i] = lsRowToJSON(r)
+	}
+	return out
+}
+
+// lsRowToJSON converts one row to its JSON shape, matching the state and
+// field set `cg meta` would report for the same run (or pool) ID.
+func lsRowToJSON(r lsRow) lsJSONRun {
+	switch {
+	case r.pool != nil:
+		return lsJSONRun{ID: r.id, State: r.poolState, Manifest: r.pool, metaFields: metaFields{Cwd: r.pool.Cwd}}
+	case r.debug != nil:
+		return lsJSONRun{
+			ID:         r.id,
+			State:      RunStateFailed,
+			Debug:      r.debug,
+			metaFields: metaFields{Command: r.debug.Command, Cwd: r.debug.Cwd},
+		}
+	case r.meta != nil:
+		return lsJSONRun{ID: r.id, State: RunStateFinished, metaFields: metaFieldsFrom(r.meta)}
+	case r.start != nil:
+		state := RunStateRunning
+		if r.abandoned {
+			state = RunStateAbandoned
+		}
+		return lsJSONRun{ID: r.id, State: state, metaFields: metaFieldsFromStart(r.start)}
+	default:
+		state := RunStateRunning
+		switch {
+		case r.unknown:
+			state = RunStateUnknown
+		case r.abandoned:
+			state = RunStateAbandoned
+		}
+		return lsJSONRun{ID: r.id, State: state}
+	}
 }

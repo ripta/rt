@@ -2,9 +2,11 @@ package cg
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -222,21 +224,26 @@ func TestLsCommand(t *testing.T) {
 	}
 
 	lines := strings.Split(strings.TrimRight(stdout, "\n"), "\n")
-	if len(lines) != 3 {
-		t.Fatalf("expected 3 lines, got %d: %q", len(lines), stdout)
+	if len(lines) != 4 {
+		t.Fatalf("expected header + 3 lines, got %d: %q", len(lines), stdout)
 	}
 	// Columns are space-aligned by a tabwriter; each column's width is set by its
-	// widest cell, so the other rows pad out to match. CCCCCC has no meta.json,
-	// no lock file, and no start.json, so it carries no liveness signal at all
-	// and falls back to an approximate, mtime-derived duration.
-	if lines[0] != "AAAAAA  exit=0   12ms     echo new" {
-		t.Errorf("line 0 = %q", lines[0])
+	// widest cell, so the other rows pad out to match, which is why assertions
+	// below tokenize with strings.Fields rather than compare exact spacing.
+	// CCCCCC has no meta.json, no lock file, and no start.json, so it carries no
+	// liveness signal at all and falls back to an approximate, mtime-derived
+	// duration.
+	if got := strings.Fields(lines[0]); !reflect.DeepEqual(got, []string{"CG", "ID", "EXIT", "RUNTIME", "COMMAND"}) {
+		t.Errorf("header = %q, want CG ID / EXIT / RUNTIME / COMMAND", lines[0])
 	}
-	if lines[1] != "CCCCCC  unknown  ~1h0m0s  ?" {
+	if f := strings.Fields(lines[1]); f[0] != "AAAAAA" || f[1] != "0" || f[2] != "12ms" || strings.Join(f[3:], " ") != "echo new" {
 		t.Errorf("line 1 = %q", lines[1])
 	}
-	if lines[2] != "BBBBBB  exit=2   1.23s    sh -c 'exit 2'" {
+	if f := strings.Fields(lines[2]); f[0] != "CCCCCC" || f[1] != "unknown" || f[2] != "~1h0m0s" || f[3] != "?" {
 		t.Errorf("line 2 = %q", lines[2])
+	}
+	if f := strings.Fields(lines[3]); f[0] != "BBBBBB" || f[1] != "2" || f[2] != "1.23s" || strings.Join(f[3:], " ") != "sh -c 'exit 2'" {
+		t.Errorf("line 3 = %q", lines[3])
 	}
 }
 
@@ -281,8 +288,8 @@ func TestLsCommandCollapsesPools(t *testing.T) {
 		t.Fatalf("unexpected error: %v (stderr=%q)", err, stderr)
 	}
 	lines := strings.Split(strings.TrimRight(stdout, "\n"), "\n")
-	if len(lines) != 2 {
-		t.Fatalf("expected pool row + standalone row, got %d: %q", len(lines), stdout)
+	if len(lines) != 3 {
+		t.Fatalf("expected header + pool row + standalone row, got %d: %q", len(lines), stdout)
 	}
 	joined := strings.Join(lines, "\n")
 	if !strings.Contains(joined, "pool:finished") {
@@ -300,8 +307,8 @@ func TestLsCommandCollapsesPools(t *testing.T) {
 		t.Fatalf("unexpected error: %v (stderr=%q)", err, stderr)
 	}
 	lines = strings.Split(strings.TrimRight(stdout, "\n"), "\n")
-	if len(lines) != 2 {
-		t.Fatalf("expected 2 member rows, got %d: %q", len(lines), stdout)
+	if len(lines) != 3 {
+		t.Fatalf("expected header + 2 member rows, got %d: %q", len(lines), stdout)
 	}
 	if strings.Contains(stdout, "SSSSSS") || strings.Contains(stdout, "pool:") {
 		t.Errorf("member listing leaked non-members: %q", stdout)
@@ -312,8 +319,8 @@ func TestLsCommandCollapsesPools(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	lines = strings.Split(strings.TrimRight(stdout, "\n"), "\n")
-	if len(lines) != 1 || !strings.Contains(lines[0], "SSSSSS") {
-		t.Errorf("--pool none = %q, want just SSSSSS", stdout)
+	if len(lines) != 2 || !strings.Contains(lines[1], "SSSSSS") {
+		t.Errorf("--pool none = %q, want header + just SSSSSS", stdout)
 	}
 
 	stdout, _, err = runCgSplit("ls", "--pool", "any")
@@ -321,8 +328,8 @@ func TestLsCommandCollapsesPools(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	lines = strings.Split(strings.TrimRight(stdout, "\n"), "\n")
-	if len(lines) != 4 {
-		t.Errorf("--pool any listed %d rows, want 4: %q", len(lines), stdout)
+	if len(lines) != 5 {
+		t.Errorf("--pool any listed %d lines, want header + 4 rows: %q", len(lines), stdout)
 	}
 }
 
@@ -388,7 +395,7 @@ func TestFormatLsRowPool(t *testing.T) {
 			},
 		},
 	}
-	got := formatLsRow(row, now)
+	got := formatLsRow(row, now, false)
 	want := "PPPPPP\tpool:finished\t1m30s\t2 runs: 1 ok, 1 skipped"
 	if got != want {
 		t.Errorf("formatLsRow pool = %q, want %q", got, want)
@@ -396,10 +403,34 @@ func TestFormatLsRowPool(t *testing.T) {
 
 	row.pool.FinishedAt = nil
 	row.poolState = PoolStateRunning
-	got = formatLsRow(row, now)
+	got = formatLsRow(row, now, false)
 	want = "PPPPPP\tpool:running\t2m0s\t2 runs: 1 ok, 1 skipped"
 	if got != want {
 		t.Errorf("formatLsRow running pool = %q, want %q", got, want)
+	}
+}
+
+func TestFormatLsRowPoolWide(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now()
+	finished := now.Add(-30 * time.Second)
+	row := lsRow{
+		id:        "PPPPPP",
+		poolState: PoolStateFinished,
+		pool: &PoolManifest{
+			StartedAt:  finished.Add(-90 * time.Second),
+			FinishedAt: &finished,
+			Runs: []PoolRunRecord{
+				{Status: PoolRunFinished, ExitCode: intp(0)},
+				{Status: PoolRunSkipped},
+			},
+		},
+	}
+	got := formatLsRow(row, now, true)
+	want := "PPPPPP\tpool:finished\t1m30s\t?\t?\t2 runs: 1 ok, 1 skipped"
+	if got != want {
+		t.Errorf("formatLsRow wide pool = %q, want %q", got, want)
 	}
 }
 
@@ -411,7 +442,7 @@ func TestFormatLsRowRunning(t *testing.T) {
 		id:    "DDDDDD",
 		start: &StartInfo{RunInfo: RunInfo{Command: []string{"sleep", "30"}, StartedAt: now.Add(-90 * time.Second)}},
 	}
-	got := formatLsRow(row, now)
+	got := formatLsRow(row, now, false)
 	want := "DDDDDD\trunning\t1m30s\tsleep 30"
 	if got != want {
 		t.Errorf("formatLsRow running = %q, want %q", got, want)
@@ -423,7 +454,7 @@ func TestFormatLsRowRunningNoStartInfo(t *testing.T) {
 
 	// A zero mtime carries no timestamp at all, so it stays the unresolved
 	// fallback; real rows always have a directory mtime.
-	got := formatLsRow(lsRow{id: "EEEEEE"}, time.Now())
+	got := formatLsRow(lsRow{id: "EEEEEE"}, time.Now(), false)
 	want := "EEEEEE\trunning\t?\t?"
 	if got != want {
 		t.Errorf("formatLsRow running fallback = %q, want %q", got, want)
@@ -435,7 +466,7 @@ func TestFormatLsRowRunningMtimeFallback(t *testing.T) {
 
 	now := time.Now()
 	row := lsRow{id: "FFFFFF", mtime: now.Add(-90 * time.Second)}
-	got := formatLsRow(row, now)
+	got := formatLsRow(row, now, false)
 	want := "FFFFFF\trunning\t~1m30s\t?"
 	if got != want {
 		t.Errorf("formatLsRow running mtime fallback = %q, want %q", got, want)
@@ -447,7 +478,7 @@ func TestFormatLsRowUnknown(t *testing.T) {
 
 	now := time.Now()
 	row := lsRow{id: "UUUUUU", mtime: now.Add(-5 * time.Minute), unknown: true}
-	got := formatLsRow(row, now)
+	got := formatLsRow(row, now, false)
 	want := "UUUUUU\tunknown\t~5m0s\t?"
 	if got != want {
 		t.Errorf("formatLsRow unknown = %q, want %q", got, want)
@@ -463,17 +494,78 @@ func TestFormatLsRowAbandoned(t *testing.T) {
 		start:     &StartInfo{RunInfo: RunInfo{Command: []string{"sleep", "600"}, StartedAt: now.Add(-90 * time.Second)}},
 		abandoned: true,
 	}
-	got := formatLsRow(row, now)
+	got := formatLsRow(row, now, false)
 	want := "ABANDN\tabandoned\t1m30s\tsleep 600"
 	if got != want {
 		t.Errorf("formatLsRow abandoned = %q, want %q", got, want)
 	}
 
 	row = lsRow{id: "ABANDN", abandoned: true, mtime: now.Add(-90 * time.Second)}
-	got = formatLsRow(row, now)
+	got = formatLsRow(row, now, false)
 	want = "ABANDN\tabandoned\t~1m30s\t?"
 	if got != want {
 		t.Errorf("formatLsRow abandoned mtime fallback = %q, want %q", got, want)
+	}
+}
+
+func TestFormatLsRowFinishedWide(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now()
+	row := lsRow{
+		id: "AAAAAA",
+		meta: &Meta{
+			RunInfo:    RunInfo{Command: []string{"echo", "hi"}},
+			DurationMs: 12,
+			Usage:      &Usage{UserUS: 20000, SystemUS: 5000},
+		},
+	}
+	got := formatLsRow(row, now, true)
+	want := "AAAAAA\t0\t12ms\t5ms\t20ms\techo hi"
+	if got != want {
+		t.Errorf("formatLsRow finished wide = %q, want %q", got, want)
+	}
+
+	// No usage recorded: SYSTEM/USER fall back to "?".
+	row.meta.Usage = nil
+	got = formatLsRow(row, now, true)
+	want = "AAAAAA\t0\t12ms\t?\t?\techo hi"
+	if got != want {
+		t.Errorf("formatLsRow finished wide (no usage) = %q, want %q", got, want)
+	}
+}
+
+func TestFormatLsRowSignaled(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now()
+	sig := 15
+	row := lsRow{
+		id:   "AAAAAA",
+		meta: &Meta{RunInfo: RunInfo{Command: []string{"sleep", "10"}}, ExitCode: -1, Signal: &sig, DurationMs: 5},
+	}
+	got := formatLsRow(row, now, false)
+	want := "AAAAAA\t-15\t5ms\tsleep 10"
+	if got != want {
+		t.Errorf("formatLsRow signaled = %q, want %q", got, want)
+	}
+}
+
+func TestFormatLsRowEmbeddedNewline(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now()
+	row := lsRow{
+		id:   "WQKSRR",
+		meta: &Meta{RunInfo: RunInfo{Command: []string{"echo", "line one\nline two", "col1\tcol2"}}},
+	}
+	got := formatLsRow(row, now, false)
+	if strings.Contains(got, "\n") {
+		t.Fatalf("formatLsRow result contains a raw newline, which would split the tabwriter row: %q", got)
+	}
+	want := `WQKSRR` + "\t0\t0s\t" + `echo 'line one\nline two' 'col1\tcol2'`
+	if got != want {
+		t.Errorf("formatLsRow embedded newline/tab = %q, want %q", got, want)
 	}
 }
 
@@ -514,14 +606,14 @@ func TestLsCommandAbandonedRun(t *testing.T) {
 	}
 
 	lines := strings.Split(strings.TrimRight(stdout, "\n"), "\n")
-	if len(lines) != 2 {
-		t.Fatalf("expected 2 lines, got %d: %q", len(lines), stdout)
+	if len(lines) != 3 {
+		t.Fatalf("expected header + 2 lines, got %d: %q", len(lines), stdout)
 	}
-	if !strings.HasPrefix(lines[0], "ABANDN") || !strings.Contains(lines[0], "abandoned") {
-		t.Errorf("line 0 = %q, want ABANDN abandoned", lines[0])
+	if !strings.HasPrefix(lines[1], "ABANDN") || !strings.Contains(lines[1], "abandoned") {
+		t.Errorf("line 1 = %q, want ABANDN abandoned", lines[1])
 	}
-	if !strings.HasPrefix(lines[1], "DDDDDD") || !strings.Contains(lines[1], "running") {
-		t.Errorf("line 1 = %q, want DDDDDD running", lines[1])
+	if !strings.HasPrefix(lines[2], "DDDDDD") || !strings.Contains(lines[2], "running") {
+		t.Errorf("line 2 = %q, want DDDDDD running", lines[2])
 	}
 }
 
@@ -546,11 +638,11 @@ func TestLsCommandUnknownRun(t *testing.T) {
 	}
 
 	lines := strings.Split(strings.TrimRight(stdout, "\n"), "\n")
-	if len(lines) != 1 {
-		t.Fatalf("expected 1 line, got %d: %q", len(lines), stdout)
+	if len(lines) != 2 {
+		t.Fatalf("expected header + 1 line, got %d: %q", len(lines), stdout)
 	}
-	if !strings.HasPrefix(lines[0], "ZZZZZZ") || !strings.Contains(lines[0], "unknown") || !strings.Contains(lines[0], "~5m0s") {
-		t.Errorf("line 0 = %q, want ZZZZZZ unknown ~5m0s", lines[0])
+	if !strings.HasPrefix(lines[1], "ZZZZZZ") || !strings.Contains(lines[1], "unknown") || !strings.Contains(lines[1], "~5m0s") {
+		t.Errorf("line 1 = %q, want ZZZZZZ unknown ~5m0s", lines[1])
 	}
 }
 
@@ -577,11 +669,11 @@ func TestLsCommandLimit(t *testing.T) {
 		t.Fatalf("unexpected error: %v (stderr=%q)", err, stderr)
 	}
 	lines := strings.Split(strings.TrimRight(stdout, "\n"), "\n")
-	if len(lines) != 1 {
-		t.Fatalf("expected 1 line with -n 1, got %d: %q", len(lines), stdout)
+	if len(lines) != 2 {
+		t.Fatalf("expected header + 1 line with -n 1, got %d: %q", len(lines), stdout)
 	}
-	if !strings.HasPrefix(lines[0], "AAAAAA  ") {
-		t.Errorf("line 0 = %q, want most-recent (AAAAAA) first", lines[0])
+	if !strings.HasPrefix(lines[1], "AAAAAA") {
+		t.Errorf("line 1 = %q, want most-recent (AAAAAA) first", lines[1])
 	}
 }
 
@@ -601,8 +693,8 @@ func TestLsCommandUnlimited(t *testing.T) {
 			t.Fatalf("-n %s: unexpected error: %v (stderr=%q)", n, err, stderr)
 		}
 		lines := strings.Split(strings.TrimRight(stdout, "\n"), "\n")
-		if len(lines) != 2 {
-			t.Fatalf("-n %s: expected 2 lines, got %d: %q", n, len(lines), stdout)
+		if len(lines) != 3 {
+			t.Fatalf("-n %s: expected header + 2 lines, got %d: %q", n, len(lines), stdout)
 		}
 	}
 }
@@ -649,9 +741,14 @@ func TestLsCommandSignaledMeta(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	want := "AAAAAA  signal=15  5ms  sleep 10\n"
-	if stdout != want {
-		t.Errorf("stdout = %q, want %q", stdout, want)
+	lines := strings.Split(strings.TrimRight(stdout, "\n"), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("expected header + 1 line, got %d: %q", len(lines), stdout)
+	}
+	// A signaled run shows its negated signal number in EXIT, not "signal=N":
+	// easier to spot at a glance than an encoded >=128 exit code.
+	if f := strings.Fields(lines[1]); f[0] != "AAAAAA" || f[1] != "-15" || f[2] != "5ms" || strings.Join(f[3:], " ") != "sleep 10" {
+		t.Errorf("signaled row = %q, want id=AAAAAA exit=-15 runtime=5ms command=%q", lines[1], "sleep 10")
 	}
 }
 
@@ -702,8 +799,8 @@ func TestLsCommandStateFilter(t *testing.T) {
 				t.Fatalf("unexpected error: %v", err)
 			}
 			lines := strings.Split(strings.TrimRight(stdout, "\n"), "\n")
-			if len(lines) != 1 || !strings.HasPrefix(lines[0], tt.want) {
-				t.Errorf("--state %s = %q, want just %s", tt.state, stdout, tt.want)
+			if len(lines) != 2 || !strings.HasPrefix(lines[1], tt.want) {
+				t.Errorf("--state %s = %q, want header + just %s", tt.state, stdout, tt.want)
 			}
 		})
 	}
@@ -712,8 +809,8 @@ func TestLsCommandStateFilter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if strings.Count(stdout, "\n") != 5 {
-		t.Errorf("default (all) = %q, want 5 rows", stdout)
+	if strings.Count(stdout, "\n") != 6 {
+		t.Errorf("default (all) = %q, want header + 5 rows", stdout)
 	}
 
 	_, stderr, err := runCgSplit("ls", "--state", "bogus")
@@ -995,7 +1092,240 @@ func TestLsCommandCombinedFilters(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	lines := strings.Split(strings.TrimRight(stdout, "\n"), "\n")
-	if len(lines) != 1 || !strings.HasPrefix(lines[0], "AAAAAA") {
-		t.Errorf("combined filters = %q, want just AAAAAA", stdout)
+	if len(lines) != 2 || !strings.HasPrefix(lines[1], "AAAAAA") {
+		t.Errorf("combined filters = %q, want header + just AAAAAA", stdout)
+	}
+}
+
+func TestLsCommandOutputFlagValidation(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+
+	_, stderr, err := runCgSplit("ls", "-o", "bogus")
+	var exitErr *ExitError
+	if !errors.As(err, &exitErr) || exitErr.Code != 2 {
+		t.Fatalf("expected exit code 2, got %v", err)
+	}
+	if !strings.Contains(stderr, "invalid --output") {
+		t.Errorf("stderr = %q, want invalid --output message", stderr)
+	}
+}
+
+func TestLsCommandWideOutput(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	root := CaptureRoot()
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatalf("mkdir root: %v", err)
+	}
+
+	seedRunDir(t, "AAAAAA", &Meta{
+		RunInfo:    RunInfo{ID: "AAAAAA", Command: []string{"echo", "hi"}},
+		ExitCode:   0,
+		DurationMs: 12,
+		Usage:      &Usage{UserUS: 20000, SystemUS: 5000},
+	})
+	seedRunDir(t, "BBBBBB", nil) // no liveness signal at all: unknown, no usage
+
+	stdout, _, err := runCgSplit("ls", "-o", "wide")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	lines := strings.Split(strings.TrimRight(stdout, "\n"), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("expected header + 2 rows, got %d: %q", len(lines), stdout)
+	}
+
+	wantHeader := []string{"CG", "ID", "EXIT", "RUNTIME", "SYSTEM", "USER", "COMMAND"}
+	if got := strings.Fields(lines[0]); !reflect.DeepEqual(got, wantHeader) {
+		t.Errorf("header = %q, want %v", lines[0], wantHeader)
+	}
+
+	var finished, unknown string
+	for _, l := range lines[1:] {
+		switch {
+		case strings.HasPrefix(l, "AAAAAA"):
+			finished = l
+		case strings.HasPrefix(l, "BBBBBB"):
+			unknown = l
+		}
+	}
+	if f := strings.Fields(finished); f[3] != "5ms" || f[4] != "20ms" {
+		t.Errorf("finished wide row = %q, want system=5ms user=20ms", finished)
+	}
+	if f := strings.Fields(unknown); f[3] != "?" || f[4] != "?" {
+		t.Errorf("unknown wide row = %q, want ?/? placeholders (no usage recorded)", unknown)
+	}
+}
+
+func TestLsCommandJSONOutput(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	root := CaptureRoot()
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatalf("mkdir root: %v", err)
+	}
+
+	seedRunDir(t, "AAAAAA", &Meta{
+		RunInfo:    RunInfo{ID: "AAAAAA", Command: []string{"echo", "hi"}, Cwd: "/work"},
+		ExitCode:   0,
+		DurationMs: 12,
+	})
+
+	stdout, stderr, err := runCgSplit("ls", "-o", "json")
+	if err != nil {
+		t.Fatalf("unexpected error: %v (stderr=%q)", err, stderr)
+	}
+
+	var out lsJSONOutput
+	if err := json.Unmarshal([]byte(stdout), &out); err != nil {
+		t.Fatalf("unmarshalling json: %v\n%s", err, stdout)
+	}
+	if len(out.Runs) != 1 {
+		t.Fatalf("expected 1 run, got %d: %s", len(out.Runs), stdout)
+	}
+	run := out.Runs[0]
+	if run.ID != "AAAAAA" || run.State != RunStateFinished {
+		t.Errorf("run = %+v, want id=AAAAAA state=finished", run)
+	}
+	if run.Cwd != "/work" {
+		t.Errorf("run.Cwd = %q, want /work", run.Cwd)
+	}
+	if run.ExitCode == nil || *run.ExitCode != 0 {
+		t.Errorf("run.ExitCode = %v, want 0", run.ExitCode)
+	}
+}
+
+func TestLsCommandJSONOutputPoolRow(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	root := CaptureRoot()
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatalf("mkdir root: %v", err)
+	}
+
+	finished := time.Now().UTC()
+	seedPoolDir(t, "PPPPPP", &PoolManifest{
+		ID:         "PPPPPP",
+		Commands:   [][]string{{"echo", "hi"}},
+		Cwd:        "/work",
+		StartedAt:  finished.Add(-2 * time.Second),
+		FinishedAt: &finished,
+		Runs: []PoolRunRecord{
+			{Command: 0, RunID: "AAAAAA", Status: PoolRunFinished, ExitCode: intp(0)},
+		},
+	})
+	seedRunDir(t, "AAAAAA", &Meta{RunInfo: RunInfo{ID: "AAAAAA", Command: []string{"echo", "hi"}, Pool: "PPPPPP"}})
+
+	stdout, _, err := runCgSplit("ls", "-o", "json")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var out lsJSONOutput
+	if err := json.Unmarshal([]byte(stdout), &out); err != nil {
+		t.Fatalf("unmarshalling json: %v\n%s", err, stdout)
+	}
+	if len(out.Runs) != 1 {
+		t.Fatalf("expected 1 collapsed pool run, got %d: %s", len(out.Runs), stdout)
+	}
+	run := out.Runs[0]
+	if run.ID != "PPPPPP" || run.State != PoolStateFinished {
+		t.Errorf("run = %+v, want id=PPPPPP state=finished", run)
+	}
+	if run.Manifest == nil {
+		t.Fatal("run.Manifest is nil, want the pool manifest")
+	}
+	if run.Cwd != "/work" {
+		t.Errorf("run.Cwd = %q, want /work", run.Cwd)
+	}
+}
+
+func TestLsCommandCwdFilter(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	root := CaptureRoot()
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatalf("mkdir root: %v", err)
+	}
+
+	workDir := t.TempDir()
+	otherDir := t.TempDir()
+	seedRunDir(t, "AAAAAA", &Meta{RunInfo: RunInfo{ID: "AAAAAA", Command: []string{"echo", "hi"}, Cwd: workDir}})
+	seedRunDir(t, "BBBBBB", &Meta{RunInfo: RunInfo{ID: "BBBBBB", Command: []string{"echo", "hi"}, Cwd: otherDir}})
+
+	stdout, _, err := runCgSplit("ls", "--cwd", workDir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(stdout, "AAAAAA") || strings.Contains(stdout, "BBBBBB") {
+		t.Errorf("--cwd %s = %q, want just AAAAAA", workDir, stdout)
+	}
+}
+
+func TestLsCommandCwdFilterRelativePath(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	root := CaptureRoot()
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatalf("mkdir root: %v", err)
+	}
+
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	seedRunDir(t, "AAAAAA", &Meta{RunInfo: RunInfo{ID: "AAAAAA", Command: []string{"echo", "hi"}, Cwd: wd}})
+
+	stdout, _, err := runCgSplit("ls", "--cwd", ".")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(stdout, "AAAAAA") {
+		t.Errorf("--cwd . = %q, want AAAAAA (relative path resolves against %s)", stdout, wd)
+	}
+}
+
+func TestLsCommandCwdFilterSymlink(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	root := CaptureRoot()
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatalf("mkdir root: %v", err)
+	}
+
+	real := t.TempDir()
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+
+	// The run recorded its cwd as the symlink path, as a shell might report
+	// it; the filter is given the resolved real path.
+	seedRunDir(t, "AAAAAA", &Meta{RunInfo: RunInfo{ID: "AAAAAA", Command: []string{"echo", "hi"}, Cwd: link}})
+
+	stdout, _, err := runCgSplit("ls", "--cwd", real)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(stdout, "AAAAAA") {
+		t.Errorf("--cwd %s (real) = %q, want AAAAAA (recorded cwd was the symlink %s)", real, stdout, link)
+	}
+}
+
+func TestEscapeLsControlChars(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{name: "plain text unchanged", in: "hello world", want: "hello world"},
+		{name: "newline", in: "line one\nline two", want: `line one\nline two`},
+		{name: "tab", in: "col1\tcol2", want: `col1\tcol2`},
+		{name: "carriage return", in: "a\rb", want: `a\rb`},
+		{name: "literal backslash", in: `C:\path`, want: `C:\\path`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := escapeLsControlChars(tt.in); got != tt.want {
+				t.Errorf("escapeLsControlChars(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
 	}
 }

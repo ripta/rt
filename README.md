@@ -147,20 +147,45 @@ I: Finished exitcode=0 in 3ms (out=1 err=1) id=Q3F9K2
 
 `cg ls` lists recent runs, most-recent-first; `cg ls -n N` overrides the
 default cap of 20, and `-n 0` (or any negative value) lists everything.
-`--state`, `--exit-code`, and `--since`/`--before` narrow the listing further;
-all three are optional and compose with each other and with `--pool` (see
-below for the full grammar). Capture never deletes anything; `cg prune` is the
-explicit cleanup hook:
+`--state`, `--exit-code`, `--since`/`--before`, and `--cwd` narrow the listing
+further; all are optional and compose with each other and with `--pool` (see
+below for the full grammar). `--cwd DIR` matches a run's recorded working
+directory, resolving relative paths and symlinks before comparing. A signaled
+run shows its negated signal number in EXIT (`-15` for SIGTERM) rather than an
+encoded exit code. Capture never deletes anything; `cg prune` is the explicit
+cleanup hook:
 
 ```
 ❯ cg ls
-Q3F9K2  exit=0   3ms     sh -c 'echo out; echo err >&2'
-M7P4QX  exit=42  2ms     sh -c 'exit 42'
+CG ID   EXIT   RUNTIME   COMMAND
+Q3F9K2  0      3ms       sh -c 'echo out; echo err >&2'
+M7P4QX  42     2ms       sh -c 'exit 42'
 
 ❯ cg prune                  # keep the 50 most recent by mtime
 ❯ cg prune --keep 10
 ❯ cg prune --older-than 7d
 ❯ cg prune --dry-run
+```
+
+`--output`/`-o` picks the rendering: `table` (default, shown above) is
+ID/exit/runtime/command; `wide` adds SYSTEM and USER cpu-time columns before
+command; `json` prints a `{"runs": [...]}` envelope, one object per run in the
+same shape `cg meta` returns (including `cwd`), with `manifest` set instead of
+the usual finished-run fields on a collapsed pool row:
+
+```
+❯ cg ls -o wide
+CG ID   EXIT   RUNTIME   SYSTEM   USER   COMMAND
+Q3F9K2  0      3ms       2ms      1ms    sh -c 'echo out; echo err >&2'
+M7P4QX  42     2ms       2ms      1ms    sh -c 'exit 42'
+
+❯ cg ls -o json
+{
+  "runs": [
+    {"id": "Q3F9K2", "state": "finished", "command": ["sh", "-c", "echo out; echo err >&2"], "cwd": "/home/rt", ...},
+    {"id": "M7P4QX", "state": "finished", "command": ["sh", "-c", "exit 42"], "cwd": "/home/rt", ...}
+  ]
+}
 ```
 
 `cg run` takes the execution flags. `-v` / `--verbose` prefixes every line with a

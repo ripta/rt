@@ -3,6 +3,7 @@ package cg
 import (
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -148,4 +149,43 @@ func (f TimeRangeFilter) Match(t time.Time) bool {
 		return false
 	}
 	return true
+}
+
+// CwdFilter is a parsed --cwd DIR filter for cg ls. Construct via
+// NewCwdFilter, which resolves dir once so every row comparison is a plain
+// string equality.
+type CwdFilter struct {
+	resolved string
+}
+
+// NewCwdFilter resolves dir to an absolute, symlink-resolved path. Relative
+// paths resolve against the process's own working directory, matching how a
+// user would type --cwd on the command line; symlink resolution means a path
+// like a symlinked $TMPDIR still matches the absolute cwd recorded on disk.
+func NewCwdFilter(dir string) (CwdFilter, error) {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return CwdFilter{}, fmt.Errorf("resolving --cwd %q: %w", dir, err)
+	}
+	return CwdFilter{resolved: resolveCwdSymlinks(abs)}, nil
+}
+
+// Match reports whether cwd, a run's recorded working directory, refers to
+// the same directory as the filter. An empty cwd (nothing recorded for the
+// row) never matches.
+func (f CwdFilter) Match(cwd string) bool {
+	if cwd == "" {
+		return false
+	}
+	return resolveCwdSymlinks(cwd) == f.resolved
+}
+
+// resolveCwdSymlinks resolves path through any symlinks, falling back to path
+// itself when the target no longer exists on disk (for example, a run
+// recorded a cwd that was later removed).
+func resolveCwdSymlinks(path string) string {
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		return resolved
+	}
+	return path
 }

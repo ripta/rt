@@ -17,9 +17,10 @@ exec cg paths ABCDEF
 stdout '/cg/ABCDEF/stdout'
 stdout '/cg/ABCDEF/stderr'
 
-# cg ls renders the single seeded run
+# cg ls renders the single seeded run, with a header row and a bare exit code
 exec cg ls
-stdout '^ABCDEF  exit=0  12ms  echo hi$'
+stdout '^CG ID\s+EXIT\s+RUNTIME\s+COMMAND$'
+stdout '^ABCDEF\s+0\s+12ms\s+echo hi$'
 
 # Unknown ID exits 1 with a single-line stderr message
 ! exec cg out NOSUCH
