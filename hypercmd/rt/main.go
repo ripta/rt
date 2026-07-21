@@ -13,6 +13,7 @@ import (
 	"github.com/ripta/rt/pkg/grpcto"
 	"github.com/ripta/rt/pkg/hashsum"
 	"github.com/ripta/rt/pkg/lipsum"
+	"github.com/ripta/rt/pkg/shast"
 	"github.com/ripta/rt/pkg/streamdiff"
 	"github.com/ripta/rt/pkg/structfiles"
 	"github.com/ripta/rt/pkg/toto"
@@ -41,6 +42,7 @@ func main() {
 
 	root.AddCommand(calc.NewCommand())
 	root.AddCommand(cg.NewCommand())
+	root.AddCommand(shast.NewCommand())
 
 	v := version.NewCommand()
 	root.Root().AddCommand(v)
@@ -55,9 +57,14 @@ func main() {
 	}
 
 	if err := cmd.Execute(); err != nil {
-		var exitErr *cg.ExitError
-		if errors.As(err, &exitErr) {
-			os.Exit(exitErr.Code)
+		var cgExitErr *cg.ExitError
+		if errors.As(err, &cgExitErr) {
+			os.Exit(cgExitErr.Code)
+		}
+
+		var shastExitErr *shast.ExitError
+		if errors.As(err, &shastExitErr) {
+			os.Exit(shastExitErr.Code)
 		}
 
 		fmt.Fprintf(os.Stderr, "Error: %+v\n", err)

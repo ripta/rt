@@ -1,0 +1,85 @@
+{
+  "kind": "file",
+  "statements": [
+    {
+      "kind": "statement",
+      "command": {
+        "kind": "call",
+        "assigns": [],
+        "args": [
+          {
+            "kind": "word",
+            "text": "mkdir",
+            "parts": [
+              {
+                "kind": "literal",
+                "value": "mkdir"
+              }
+            ]
+          },
+          {
+            "kind": "word",
+            "text": "-p",
+            "parts": [
+              {
+                "kind": "literal",
+                "value": "-p"
+              }
+            ]
+          },
+          {
+            "kind": "word",
+            "text": "$(echo \"foo\")",
+            "parts": [
+              {
+                "kind": "command_substitution",
+                "statements": [
+                  {
+                    "kind": "statement",
+                    "command": {
+                      "kind": "call",
+                      "assigns": [],
+                      "args": [
+                        {
+                          "kind": "word",
+                          "text": "echo",
+                          "parts": [
+                            {
+                              "kind": "literal",
+                              "value": "echo"
+                            }
+                          ]
+                        },
+                        {
+                          "kind": "word",
+                          "text": "\"foo\"",
+                          "parts": [
+                            {
+                              "kind": "double_quoted",
+                              "parts": [
+                                {
+                                  "kind": "literal",
+                                  "value": "foo"
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    "comments": [],
+                    "redirects": []
+                  }
+                ],
+                "trailing_comments": []
+              }
+            ]
+          }
+        ]
+      },
+      "comments": [],
+      "redirects": []
+    }
+  ],
+  "trailing_comments": []
+}
