@@ -60,6 +60,8 @@ func PoolState(dir string, m *PoolManifest) string {
 // supervisor as state changes. A manifest without FinishedAt belongs to a pool
 // that is still running, or, when the pool lock is released, one whose
 // supervisor died: the abandoned-pool state. Env overrides never appear here.
+// SessionID names the cg mcp server that spawned the pool; the supervisor
+// passes it down to each member run's own record.
 type PoolManifest struct {
 	ID          string          `json:"id"`
 	Commands    [][]string      `json:"commands"`
@@ -67,6 +69,7 @@ type PoolManifest struct {
 	Parallelism int             `json:"parallelism"`
 	OnError     string          `json:"on_error"`
 	Cwd         string          `json:"cwd,omitempty"`
+	SessionID   string          `json:"session_id,omitempty"`
 	StartedAt   time.Time       `json:"started_at"`
 	FinishedAt  *time.Time      `json:"finished_at,omitempty"`
 	Runs        []PoolRunRecord `json:"runs"`

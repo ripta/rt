@@ -27,6 +27,25 @@ func TestGenerateRunID(t *testing.T) {
 	}
 }
 
+func TestGenerateSessionID(t *testing.T) {
+	t.Parallel()
+
+	for range 100 {
+		id, err := GenerateSessionID()
+		if err != nil {
+			t.Fatalf("GenerateSessionID() error = %v", err)
+		}
+		if len(id) != sessionIDLen {
+			t.Errorf("len(id) = %d, want %d (id=%q)", len(id), sessionIDLen, id)
+		}
+		for _, r := range id {
+			if !strings.ContainsRune(runIDAlphabet, r) {
+				t.Errorf("id %q contains %q, not in Crockford alphabet", id, r)
+			}
+		}
+	}
+}
+
 func TestNewRunDirCreatesUniqueDir(t *testing.T) {
 	t.Parallel()
 

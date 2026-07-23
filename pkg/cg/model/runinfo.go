@@ -16,11 +16,14 @@ import (
 // RunInfo holds the start-time facts common to every capture run. StartInfo,
 // Meta, and StartDebug embed it so the three on-disk records stay in parity.
 // Pool names the pool this run is a member of; empty for standalone runs.
+// SessionID names the cg mcp server process that spawned this run; empty for
+// runs not spawned by a server, including the standalone cg run CLI.
 type RunInfo struct {
 	ID        string    `json:"id"`
 	Command   []string  `json:"command"`
 	Cwd       string    `json:"cwd,omitempty"`
 	Pool      string    `json:"pool,omitempty"`
+	SessionID string    `json:"session_id,omitempty"`
 	StartedAt time.Time `json:"started_at"`
 }
 

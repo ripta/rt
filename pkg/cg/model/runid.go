@@ -20,16 +20,33 @@ const (
 	runIDAttempts = 10
 )
 
+// Session ID length. A session names one cg mcp server process's lifetime, a
+// far lower-frequency event than a run, so it needs much less entropy to stay
+// practically distinguishable; nearby timestamps in listings disambiguate any
+// collision.
+const sessionIDLen = 4
+
 // idSource generates a single run ID. Indirected to keep tests deterministic.
 var idSource = generateRunID
 
 // generateRunID returns a fresh 6-character Crockford base-32 ID.
 func generateRunID() (string, error) {
-	var b [runIDLen]byte
-	if _, err := rand.Read(b[:]); err != nil {
+	return generateID(runIDLen)
+}
+
+// GenerateSessionID returns a fresh short Crockford base-32 ID for a cg mcp
+// server session.
+func GenerateSessionID() (string, error) {
+	return generateID(sessionIDLen)
+}
+
+// generateID returns a fresh n-character Crockford base-32 ID.
+func generateID(n int) (string, error) {
+	b := make([]byte, n)
+	if _, err := rand.Read(b); err != nil {
 		return "", fmt.Errorf("reading randomness: %w", err)
 	}
-	out := make([]byte, runIDLen)
+	out := make([]byte, n)
 	for i, x := range b {
 		out[i] = runIDAlphabet[int(x)&0x1f]
 	}

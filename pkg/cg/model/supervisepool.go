@@ -33,7 +33,8 @@ func (c *PoolCommand) resolution() *Resolution {
 // holds caller-supplied overrides shared by every member run; it rides the pipe,
 // is forwarded over each member supervisor's spec pipe, and never lands in argv
 // or on disk. Zero Repeat and Parallelism normalize to 1; an empty OnError
-// normalizes to continue.
+// normalizes to continue. SessionID names the cg mcp server that spawned the
+// pool; it lands on the manifest and flows down to each member run.
 type PoolSpec struct {
 	Commands    []PoolCommand     `json:"commands"`
 	Repeat      int               `json:"repeat"`
@@ -41,6 +42,7 @@ type PoolSpec struct {
 	OnError     string            `json:"on_error"`
 	Cwd         string            `json:"cwd,omitempty"`
 	Env         map[string]string `json:"env,omitempty"`
+	SessionID   string            `json:"session_id,omitempty"`
 }
 
 // normalize applies spec defaults and rejects malformed input. The MCP layer
@@ -187,6 +189,7 @@ func newPoolManifest(id string, spec *PoolSpec) *PoolManifest {
 		Parallelism: spec.Parallelism,
 		OnError:     spec.OnError,
 		Cwd:         effectiveCwd(spec.Cwd),
+		SessionID:   spec.SessionID,
 		StartedAt:   time.Now().UTC(),
 		Runs:        make([]PoolRunRecord, 0, len(spec.Commands)*spec.Repeat),
 	}
@@ -247,10 +250,11 @@ func schedulePool(dir string, spec *PoolSpec, manifest *PoolManifest, sigCh <-ch
 		cmd := &spec.Commands[rec.Command]
 
 		run, err := RunSupervised(cmd.Argv, SuperviseOptions{
-			Resolved: cmd.resolution(),
-			Cwd:      spec.Cwd,
-			Env:      spec.Env,
-			Pool:     manifest.ID,
+			Resolved:  cmd.resolution(),
+			Cwd:       spec.Cwd,
+			Env:       spec.Env,
+			Pool:      manifest.ID,
+			SessionID: manifest.SessionID,
 		})
 		if err != nil {
 			var sf *StartFailure

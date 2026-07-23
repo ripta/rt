@@ -143,6 +143,35 @@ func TestSupervisePoolContinueRunsAll(t *testing.T) {
 	}
 }
 
+func TestSupervisePoolThreadsSessionID(t *testing.T) {
+	id, dir := newPoolTestDir(t)
+
+	spec := poolSpec(t, []string{"echo", "one"}, []string{"echo", "two"})
+	spec.SessionID = "SESS"
+	if _, err := runPool(t, dir, spec); err != nil {
+		t.Fatalf("supervisePool: %v", err)
+	}
+
+	m := readManifest(t, dir)
+	if m.SessionID != "SESS" {
+		t.Errorf("manifest.SessionID = %q, want %q", m.SessionID, "SESS")
+	}
+
+	// Each member carries both the pool ID and the session it inherited.
+	for i, rec := range m.Runs {
+		meta, err := ReadMeta(filepath.Join(CaptureRoot(), rec.RunID))
+		if err != nil {
+			t.Fatalf("ReadMeta on member %d: %v", i, err)
+		}
+		if meta.Pool != id {
+			t.Errorf("member %d meta.Pool = %q, want %q", i, meta.Pool, id)
+		}
+		if meta.SessionID != "SESS" {
+			t.Errorf("member %d meta.SessionID = %q, want %q", i, meta.SessionID, "SESS")
+		}
+	}
+}
+
 func TestSupervisePoolOrderingWithRepeat(t *testing.T) {
 	_, dir := newPoolTestDir(t)
 

@@ -40,12 +40,14 @@ func (e *StartFailure) Unwrap() error { return e.Err }
 // environ, so MCP-supplied keys override the parent's; they ride the spec
 // pipe and never appear in argv or on disk. Pool names the pool this run is a
 // member of, threaded into the run's on-disk records; empty for standalone
-// runs.
+// runs. SessionID names the cg mcp server that spawned the run, threaded the
+// same way; empty for runs not spawned by a server.
 type SuperviseOptions struct {
-	Resolved *Resolution
-	Cwd      string
-	Env      map[string]string
-	Pool     string
+	Resolved  *Resolution
+	Cwd       string
+	Env       map[string]string
+	Pool      string
+	SessionID string
 }
 
 // RunSupervised starts args[0] with args[1:] under capture, parented by a
@@ -83,7 +85,7 @@ func RunSupervised(args []string, opts SuperviseOptions) (*CaptureRun, error) {
 	// failure: the server writes debug.json and the run dir is preserved for
 	// post-mortem inspection.
 	failStart := func(err error) (*CaptureRun, error) {
-		info := RunInfo{ID: cap.ID, Command: args, Cwd: cwd, Pool: opts.Pool, StartedAt: time.Now().UTC()}
+		info := RunInfo{ID: cap.ID, Command: args, Cwd: cwd, Pool: opts.Pool, SessionID: opts.SessionID, StartedAt: time.Now().UTC()}
 		_ = WriteStartDebug(cap.Dir, buildStartDebug(info, opts.Env, resolved, err))
 		return nil, &StartFailure{RunID: cap.ID, Dir: cap.Dir, Err: err}
 	}
@@ -109,7 +111,7 @@ func RunSupervised(args []string, opts SuperviseOptions) (*CaptureRun, error) {
 		return failStart(fmt.Errorf("starting supervisor: %w", err))
 	}
 
-	spec := SuperviseSpec{Argv: args, Cwd: cwd, Env: opts.Env, Pool: opts.Pool}
+	spec := SuperviseSpec{Argv: args, Cwd: cwd, Env: opts.Env, Pool: opts.Pool, SessionID: opts.SessionID}
 	if resolved != nil {
 		spec.Resolved = resolved.Resolved
 		spec.Canonical = resolved.Canonical

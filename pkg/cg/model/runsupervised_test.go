@@ -197,3 +197,33 @@ func TestRunSupervisedCwd(t *testing.T) {
 		t.Errorf("pwd = %q, want %q", got, want)
 	}
 }
+
+func TestRunSupervisedSessionID(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+
+	run, err := RunSupervised([]string{"sh", "-c", "sleep 0.3; echo done"}, SuperviseOptions{SessionID: "SESS"})
+	if err != nil {
+		t.Fatalf("RunSupervised: %v", err)
+	}
+
+	// The session ID rides the spec pipe to the detached supervisor. While the
+	// child runs, start.json carries it.
+	si, err := ReadStartInfo(run.Dir)
+	if err != nil {
+		t.Fatalf("ReadStartInfo while running: %v", err)
+	}
+	if si.SessionID != "SESS" {
+		t.Errorf("start.SessionID = %q, want %q", si.SessionID, "SESS")
+	}
+
+	waitDone(t, run, 5*time.Second)
+
+	// meta.json carries it once the run finishes.
+	meta, err := ReadMeta(run.Dir)
+	if err != nil {
+		t.Fatalf("ReadMeta: %v", err)
+	}
+	if meta.SessionID != "SESS" {
+		t.Errorf("meta.SessionID = %q, want %q", meta.SessionID, "SESS")
+	}
+}

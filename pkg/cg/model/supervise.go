@@ -20,7 +20,8 @@ import (
 // Canonical carry the executable identity the approval gate matched, so the supervisor
 // execs the same file without a fresh PATH lookup. Env holds caller-supplied overrides;
 // it rides the pipe and never appears in argv or on disk. Pool names the pool this run
-// is a member of, so the run's on-disk records carry it.
+// is a member of, so the run's on-disk records carry it. SessionID names the cg mcp
+// server that spawned the run, carried the same way.
 type SuperviseSpec struct {
 	Argv      []string          `json:"argv"`
 	Resolved  string            `json:"resolved,omitempty"`
@@ -28,6 +29,7 @@ type SuperviseSpec struct {
 	Cwd       string            `json:"cwd,omitempty"`
 	Env       map[string]string `json:"env,omitempty"`
 	Pool      string            `json:"pool,omitempty"`
+	SessionID string            `json:"session_id,omitempty"`
 }
 
 // resolution reconstructs the Resolution the server computed, for ExecPath and
@@ -139,7 +141,7 @@ func superviseRun(dir string, in io.Reader, out io.Writer) error {
 		if cgc != nil {
 			cgc.close()
 		}
-		info := RunInfo{ID: id, Command: spec.Argv, Cwd: cwd, Pool: spec.Pool, StartedAt: start.UTC()}
+		info := RunInfo{ID: id, Command: spec.Argv, Cwd: cwd, Pool: spec.Pool, SessionID: spec.SessionID, StartedAt: start.UTC()}
 		_ = WriteStartDebug(dir, buildStartDebug(info, spec.Env, resolved, err))
 		err = fmt.Errorf("starting child: %w", err)
 		writeAck(out, SuperviseAck{StartError: err.Error()})
@@ -147,7 +149,7 @@ func superviseRun(dir string, in io.Reader, out io.Writer) error {
 	}
 
 	_ = WritePidFile(dir, child.Process.Pid)
-	_ = WriteStartInfo(dir, &StartInfo{RunInfo: RunInfo{ID: id, Command: spec.Argv, Cwd: cwd, Pool: spec.Pool, StartedAt: start.UTC()}})
+	_ = WriteStartInfo(dir, &StartInfo{RunInfo: RunInfo{ID: id, Command: spec.Argv, Cwd: cwd, Pool: spec.Pool, SessionID: spec.SessionID, StartedAt: start.UTC()}})
 
 	writeAck(out, SuperviseAck{Started: true, Pid: child.Process.Pid})
 
@@ -165,7 +167,7 @@ func superviseRun(dir string, in io.Reader, out io.Writer) error {
 	}
 
 	meta := &Meta{
-		RunInfo:     RunInfo{ID: id, Command: spec.Argv, Cwd: cwd, Pool: spec.Pool, StartedAt: start.UTC()},
+		RunInfo:     RunInfo{ID: id, Command: spec.Argv, Cwd: cwd, Pool: spec.Pool, SessionID: spec.SessionID, StartedAt: start.UTC()},
 		FinishedAt:  start.Add(elapsed).UTC(),
 		DurationMs:  elapsed.Milliseconds(),
 		ExitCode:    ExitCodeFromError(waitErr),

@@ -40,7 +40,7 @@ func PoolSupervised(spec *PoolSpec) (*PoolRun, error) {
 	}
 
 	failStart := func(err error) (*PoolRun, error) {
-		info := RunInfo{ID: id, Cwd: effectiveCwd(spec.Cwd), StartedAt: time.Now().UTC()}
+		info := RunInfo{ID: id, Cwd: effectiveCwd(spec.Cwd), SessionID: spec.SessionID, StartedAt: time.Now().UTC()}
 		_ = WriteStartDebug(dir, buildStartDebug(info, spec.Env, nil, err))
 		return nil, &StartFailure{RunID: id, Dir: dir, Err: err}
 	}
