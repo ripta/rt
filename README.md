@@ -147,10 +147,12 @@ I: Finished exitcode=0 in 3ms (out=1 err=1) id=Q3F9K2
 
 `cg ls` lists recent runs, most-recent-first; `cg ls -n N` overrides the
 default cap of 20, and `-n 0` (or any negative value) lists everything.
-`--state`, `--exit-code`, `--since`/`--before`, and `--cwd` narrow the listing
-further; all are optional and compose with each other and with `--pool` (see
-below for the full grammar). `--cwd DIR` matches a run's recorded working
-directory, resolving relative paths and symlinks before comparing. A signaled
+`--state`, `--exit-code`, `--since`/`--before`, `--cwd`, and `--session-id`
+narrow the listing further; all are optional and compose with each other and
+with `--pool` (see below for the full grammar). `--cwd DIR` matches a run's
+recorded working directory, resolving relative paths and symlinks before
+comparing. `--session-id` matches a run's or pool's recorded session (see
+below). A signaled
 run shows its negated signal number in EXIT (`-15` for SIGTERM) rather than an
 encoded exit code. Capture never deletes anything; `cg prune` is the explicit
 cleanup hook:
@@ -173,19 +175,20 @@ run has none), so a wide STATE word like `pool:abandoned` never drags EXIT's
 column wide the way a combined column would.
 
 `--output`/`-o` picks the rendering: `table` (default, shown above) is
-ID/exit/runtime/command; `wide` inserts STATE after RUNTIME and adds SYSTEM
-and USER cpu-time columns before command; `json` prints a `{"runs": [...]}`
-envelope, one object per run in the same shape `cg meta` returns (including
-`cwd`), with `manifest` set instead of the usual finished-run fields on a
-collapsed pool row. STATE is the same running/finished/failed/abandoned/
-unknown vocabulary as `--state`, with a `pool:` prefix on a collapsed pool
-row's own state:
+ID/exit/runtime/command; `wide` inserts a SESSION column after CG ID (a run's
+session ID, or `-` for a standalone run that has none), inserts STATE after
+RUNTIME, and adds SYSTEM and USER cpu-time columns before command; `json` prints
+a `{"runs": [...]}` envelope, one object per run in the same shape `cg meta`
+returns (including `cwd` and `session_id`), with `manifest` set instead of the
+usual finished-run fields on a collapsed pool row. STATE is the same
+running/finished/failed/abandoned/unknown vocabulary as `--state`, with a
+`pool:` prefix on a collapsed pool row's own state:
 
 ```
 ❯ cg ls -o wide
-CG ID    EXIT   RUNTIME   STATE      SYSTEM   USER   COMMAND
-Q3F9K2      0       3ms   finished      2ms    1ms   sh -c 'echo out; echo err >&2'
-M7P4QX     42       2ms   finished      2ms    1ms   sh -c 'exit 42'
+CG ID    SESSION   EXIT   RUNTIME   STATE      SYSTEM   USER   COMMAND
+Q3F9K2   -            0       3ms   finished      2ms    1ms   sh -c 'echo out; echo err >&2'
+M7P4QX   -           42       2ms   finished      2ms    1ms   sh -c 'exit 42'
 
 ❯ cg ls -o json
 {
@@ -260,10 +263,11 @@ Or by hand in the MCP host config:
 }
 ```
 
-The server registers fifteen tools:
+The server registers sixteen tools:
 
 | Tool | Purpose |
 |------|---------|
+| `cg_info` | Report server diagnostics: start time, uptime, cwd, `session_id`, and build info. |
 | `cg_run` | Run a command with capture; returns metadata and head/tail excerpts. |
 | `cg_run_many` | Run a flat pool of commands with a parallelism knob and a fail policy; returns a pool ID and a per-run summary. |
 | `cg_list` | List recent runs, most-recent-first. |
@@ -332,6 +336,15 @@ timestamp, or a bare `YYYY-MM-DD` date interpreted as local-timezone
 midnight. Unlike `--exit-code`, these bounds do apply to pool rows, using the
 pool's own precise `started_at` — the exemption is specific to exit codes,
 which pools genuinely don't have one of.
+
+A `cg mcp` server mints a `session_id` when it starts and stamps it on every
+run and pool it spawns. `cg_info` reports the running server's own session, and
+`cg_meta` reports the session recorded against a run. `--session-id` on `cg ls`
+and `session_id` on `cg_list` filter by it, spanning standalone runs and pool
+rows alike, so an agent can list every run and pool its conversation produced
+with one filter. A standalone `cg run` has no server behind it and carries no
+session. An unmatched session lists nothing rather than erroring. The ID is
+minted fresh per server process, so a `cg mcp` restart begins a new session.
 
 `cg_run_many` runs a flat pool of commands. Each argv in `commands` runs
 `repeat` times, through at most `parallelism` workers. Parallelism defaults to

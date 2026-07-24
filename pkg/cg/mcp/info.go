@@ -58,7 +58,7 @@ type infoOutput struct {
 func registerInfo(s *mcpsdk.Server, v string, startedAt time.Time, sessionID string) {
 	mcpsdk.AddTool(s, &mcpsdk.Tool{
 		Name:        "cg_info",
-		Description: "Return diagnostics about the running cg MCP server: its start time and uptime, version and build info, its working directory (fixed at start; the directory a cg_run inherits when its cwd is empty), and the set values of a curated allowlist of environment variables.",
+		Description: "Return diagnostics about the running cg MCP server: its start time and uptime, version and build info, its working directory (fixed at start; the directory a cg_run inherits when its cwd is empty), its session_id (minted at start and stamped on every run and pool this server spawns, so cg_list/cg_meta can scope to it), and the set values of a curated allowlist of environment variables.",
 	}, func(_ context.Context, _ *mcpsdk.CallToolRequest, _ infoInput) (*mcpsdk.CallToolResult, infoOutput, error) {
 		out, err := collectInfo(v, startedAt, sessionID, time.Now())
 		return nil, out, err

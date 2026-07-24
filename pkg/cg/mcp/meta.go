@@ -49,7 +49,7 @@ type metaOutput struct {
 func registerMeta(s *mcpsdk.Server) {
 	mcpsdk.AddTool(s, &mcpsdk.Tool{
 		Name:        "cg_meta",
-		Description: "Return the run state and meta.json fields for a capture run. Finished runs return state: \"finished\" with all meta fields. In-flight runs return state: \"running\" with command, cwd, and started_at from start.json. Failed-to-start runs return state: \"failed\" with a debug field carrying cwd and the resolution diagnostics. A pool ID returns the pool state with the manifest in a manifest field. Unknown ID is a tool error.",
+		Description: "Return the run state and meta.json fields for a capture run. Finished runs return state: \"finished\" with all meta fields. In-flight runs return state: \"running\" with command, cwd, and started_at from start.json. Failed-to-start runs return state: \"failed\" with a debug field carrying cwd and the resolution diagnostics. A run spawned by a cg MCP server also carries session_id, the server session that produced it. A pool ID returns the pool state with the manifest in a manifest field. Unknown ID is a tool error.",
 	}, handleMeta)
 }
 
