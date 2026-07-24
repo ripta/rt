@@ -762,6 +762,50 @@ func TestHandleListExitCodeFilter(t *testing.T) {
 	}
 }
 
+func TestHandleListSessionIDFilter(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	if err := os.MkdirAll(model.CaptureRoot(), 0o755); err != nil {
+		t.Fatalf("mkdir root: %v", err)
+	}
+
+	seedRunDir(t, "AAAAAA", &model.Meta{RunInfo: model.RunInfo{ID: "AAAAAA", Command: []string{"echo", "one"}, SessionID: "S1"}})
+	seedRunDir(t, "BBBBBB", &model.Meta{RunInfo: model.RunInfo{ID: "BBBBBB", Command: []string{"echo", "two"}, SessionID: "S2"}})
+
+	finished := time.Now().UTC()
+	seedPoolDir(t, "CCCCCC", &model.PoolManifest{
+		ID:         "CCCCCC",
+		SessionID:  "S1",
+		Commands:   [][]string{{"echo", "hi"}},
+		StartedAt:  finished.Add(-time.Minute),
+		FinishedAt: &finished,
+	})
+
+	// The S1 session spans a standalone run and a collapsed pool row.
+	_, out, err := handleList(context.Background(), nil, listInput{SessionID: "S1"})
+	if err != nil {
+		t.Fatalf("handleList: %v", err)
+	}
+	got := make([]string, len(out.Runs))
+	for i, r := range out.Runs {
+		got[i] = r.ID
+		if r.SessionID != "S1" {
+			t.Errorf("row %s session_id = %q, want S1", r.ID, r.SessionID)
+		}
+	}
+	if !sameIDSet(got, []string{"AAAAAA", "CCCCCC"}) {
+		t.Errorf("session S1 = %v, want AAAAAA and CCCCCC", got)
+	}
+
+	// An unmatched session lists nothing, and is not an error.
+	_, empty, err := handleList(context.Background(), nil, listInput{SessionID: "NOPE"})
+	if err != nil {
+		t.Fatalf("handleList unmatched: %v", err)
+	}
+	if len(empty.Runs) != 0 {
+		t.Errorf("unmatched session = %v, want empty", empty.Runs)
+	}
+}
+
 func TestHandleListInvalidExitCode(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 

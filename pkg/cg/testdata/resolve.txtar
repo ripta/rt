@@ -23,10 +23,11 @@ exec cg ls
 stdout '^CG ID\s+EXIT\s+RUNTIME\s+COMMAND$'
 stdout '^ABCDEF\s+0\s+12ms\s+echo hi$'
 
-# cg ls -o wide adds STATE (after RUNTIME) plus SYSTEM/USER cpu-time columns
+# cg ls -o wide adds SESSION (after CG ID) and STATE plus SYSTEM/USER cpu-time
+# columns; a run with no session renders "-"
 exec cg ls -o wide
-stdout '^CG ID\s+EXIT\s+RUNTIME\s+STATE\s+SYSTEM\s+USER\s+COMMAND$'
-stdout '^ABCDEF\s+0\s+12ms\s+finished\s+\S+\s+\S+\s+echo hi$'
+stdout '^CG ID\s+SESSION\s+EXIT\s+RUNTIME\s+STATE\s+SYSTEM\s+USER\s+COMMAND$'
+stdout '^ABCDEF\s+-\s+0\s+12ms\s+finished\s+\S+\s+\S+\s+echo hi$'
 
 # Unknown ID exits 1 with a single-line stderr message
 ! exec cg out NOSUCH

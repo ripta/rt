@@ -186,14 +186,15 @@ const (
 
 // lsOptions holds flags for the `cg ls` subcommand.
 type lsOptions struct {
-	N        int
-	Pool     string
-	State    string
-	ExitCode string
-	Since    string
-	Before   string
-	Cwd      string
-	Output   string
+	N         int
+	Pool      string
+	SessionID string
+	State     string
+	ExitCode  string
+	Since     string
+	Before    string
+	Cwd       string
+	Output    string
 }
 
 // NewLsCommand returns the `cg ls` subcommand. It lists recent capture runs in
@@ -211,6 +212,7 @@ func NewLsCommand() *cobra.Command {
 	}
 	c.Flags().IntVarP(&opts.N, "limit", "n", 20, "maximum number of runs to list; 0 or negative means unlimited")
 	c.Flags().StringVar(&opts.Pool, "pool", "", "set to a `pool-id` to list that pool's members, none to list only standalone runs, or any to list everything uncollapsed; unset (the default) collapses each pool behind one summary row")
+	c.Flags().StringVar(&opts.SessionID, "session-id", "", "filter to runs and pools tagged with this cg mcp `session-id` (the session_id from cg_info); an unmatched session lists nothing")
 	c.Flags().StringVar(&opts.State, "state", lsStateAll, "state filter: all|finished|running|failed|abandoned|unknown")
 	c.Flags().StringVar(&opts.ExitCode, "exit-code", "", "filter finished runs by exit code: N (equals), !=N, >=N, >N, <N, or <=N; pool summary rows always pass through")
 	c.Flags().StringVar(&opts.Since, "since", "", "only list runs started at or after TIME: a duration ago (e.g. 4h, 7d), an RFC3339 timestamp, or a YYYY-MM-DD date")
@@ -232,6 +234,7 @@ type lsRow struct {
 	poolState string
 	memberOf  string
 	cwd       string
+	sessionID string
 }
 
 // state reports the row's canonical state label for --state filtering. A
@@ -370,15 +373,18 @@ func (opts *lsOptions) run(cmd *cobra.Command, args []string) error {
 			row.meta = m
 			row.memberOf = m.Pool
 			row.cwd = m.Cwd
+			row.sessionID = m.SessionID
 		} else if p, err := ReadPoolManifest(dir); err == nil {
 			row.pool = p
 			row.poolState = PoolState(dir, p)
 			row.cwd = p.Cwd
+			row.sessionID = p.SessionID
 			poolDirs[name] = true
 		} else if d, err := ReadStartDebug(dir); err == nil {
 			row.debug = d
 			row.memberOf = d.Pool
 			row.cwd = d.Cwd
+			row.sessionID = d.SessionID
 		} else {
 			hasLock := LockFileExists(dir)
 			row.abandoned = RunLockReleased(dir)
@@ -386,6 +392,7 @@ func (opts *lsOptions) run(cmd *cobra.Command, args []string) error {
 				row.start = s
 				row.memberOf = s.Pool
 				row.cwd = s.Cwd
+				row.sessionID = s.SessionID
 			}
 			row.unknown = !hasLock && row.start == nil
 		}
@@ -462,6 +469,18 @@ func (opts *lsOptions) run(cmd *cobra.Command, args []string) error {
 		rows = kept
 	}
 
+	// A plain equality match on the row's own session, spanning standalone and
+	// pool rows. An unmatched session lists nothing rather than erroring.
+	if opts.SessionID != "" {
+		kept = rows[:0]
+		for _, r := range rows {
+			if r.sessionID == opts.SessionID {
+				kept = append(kept, r)
+			}
+		}
+		rows = kept
+	}
+
 	sort.Slice(rows, func(i, j int) bool {
 		return rows[i].mtime.After(rows[j].mtime)
 	})
@@ -477,17 +496,18 @@ func (opts *lsOptions) run(cmd *cobra.Command, args []string) error {
 }
 
 // writeLsTable renders rows as a tab-separated table with a header row.
-// Column order is CG ID, EXIT, RUNTIME, [STATE, SYSTEM, USER,] COMMAND; STATE
-// and the cpu-time columns only appear under wide. CG ID, STATE, and COMMAND
-// stay tabwriter's natural left-aligned; EXIT, RUNTIME, SYSTEM, and USER are
-// right-justified to a shared width computed across the whole listing (a
-// tabwriter can only align every column the same direction). EXIT holds only
-// a bare exit or negated-signal number, or "?" when a row has none, so a long
-// STATE word like "pool:abandoned" never drags EXIT's column wide the way it
-// did when the two were combined.
+// Column order is CG ID, [SESSION,] EXIT, RUNTIME, [STATE, SYSTEM, USER,]
+// COMMAND; SESSION, STATE, and the cpu-time columns only appear under wide. CG
+// ID, SESSION, STATE, and COMMAND stay tabwriter's natural left-aligned; EXIT,
+// RUNTIME, SYSTEM, and USER are right-justified to a shared width computed
+// across the whole listing (a tabwriter can only align every column the same
+// direction). EXIT holds only a bare exit or negated-signal number, or "?" when
+// a row has none, so a long STATE word like "pool:abandoned" never drags EXIT's
+// column wide the way it did when the two were combined. SESSION holds a run's
+// session ID, or "-" for a standalone run that carries none.
 func writeLsTable(w io.Writer, rows []lsRow, now time.Time, wide bool) error {
 	type row struct {
-		id, state, exit, runtime, system, user, command string
+		id, session, state, exit, runtime, system, user, command string
 	}
 
 	data := make([]row, len(rows))
@@ -495,7 +515,11 @@ func writeLsTable(w io.Writer, rows []lsRow, now time.Time, wide bool) error {
 	systemWidth, userWidth := len("SYSTEM"), len("USER")
 	for i, r := range rows {
 		state, exit, runtime, system, user, command := lsRowValues(r, now)
-		data[i] = row{r.id, state, exit, runtime, system, user, command}
+		session := r.sessionID
+		if session == "" {
+			session = "-"
+		}
+		data[i] = row{r.id, session, state, exit, runtime, system, user, command}
 		exitWidth = max(exitWidth, len(exit))
 		runtimeWidth = max(runtimeWidth, len(runtime))
 		systemWidth = max(systemWidth, len(system))
@@ -508,7 +532,11 @@ func writeLsTable(w io.Writer, rows []lsRow, now time.Time, wide bool) error {
 
 	tw := tabwriter.NewWriter(w, 0, 0, 3, ' ', 0)
 
-	header := []string{"CG ID", pad("EXIT", exitWidth), pad("RUNTIME", runtimeWidth)}
+	header := []string{"CG ID"}
+	if wide {
+		header = append(header, "SESSION")
+	}
+	header = append(header, pad("EXIT", exitWidth), pad("RUNTIME", runtimeWidth))
 	if wide {
 		header = append(header, "STATE", pad("SYSTEM", systemWidth), pad("USER", userWidth))
 	}
@@ -516,7 +544,11 @@ func writeLsTable(w io.Writer, rows []lsRow, now time.Time, wide bool) error {
 	fmt.Fprintln(tw, strings.Join(header, "\t"))
 
 	for _, d := range data {
-		cols := []string{d.id, pad(d.exit, exitWidth), pad(d.runtime, runtimeWidth)}
+		cols := []string{d.id}
+		if wide {
+			cols = append(cols, d.session)
+		}
+		cols = append(cols, pad(d.exit, exitWidth), pad(d.runtime, runtimeWidth))
 		if wide {
 			cols = append(cols, d.state, pad(d.system, systemWidth), pad(d.user, userWidth))
 		}
@@ -674,13 +706,13 @@ func lsRowsToJSON(rows []lsRow) []lsJSONRun {
 func lsRowToJSON(r lsRow) lsJSONRun {
 	switch {
 	case r.pool != nil:
-		return lsJSONRun{ID: r.id, State: r.poolState, Manifest: r.pool, metaFields: metaFields{Cwd: r.pool.Cwd}}
+		return lsJSONRun{ID: r.id, State: r.poolState, Manifest: r.pool, metaFields: metaFields{Cwd: r.pool.Cwd, SessionID: r.pool.SessionID}}
 	case r.debug != nil:
 		return lsJSONRun{
 			ID:         r.id,
 			State:      RunStateFailed,
 			Debug:      r.debug,
-			metaFields: metaFields{Command: r.debug.Command, Cwd: r.debug.Cwd},
+			metaFields: metaFields{Command: r.debug.Command, Cwd: r.debug.Cwd, SessionID: r.debug.SessionID},
 		}
 	case r.meta != nil:
 		return lsJSONRun{ID: r.id, State: RunStateFinished, metaFields: metaFieldsFrom(r.meta)}

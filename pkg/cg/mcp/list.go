@@ -29,12 +29,13 @@ const (
 
 // listInput is the argument shape for `cg_list`.
 type listInput struct {
-	Limit    int    `json:"limit,omitempty" jsonschema:"maximum number of runs to return; default 20, max 1000"`
-	State    string `json:"state,omitempty" jsonschema:"which runs to surface: all|finished|running|failed|abandoned|unknown; default all"`
-	Pool     string `json:"pool,omitempty" jsonschema:"pool handling: empty collapses members behind one row per pool, a pool ID lists that pool's members, \"none\" lists only standalone runs, \"any\" lists everything uncollapsed"`
-	ExitCode string `json:"exit_code,omitempty" jsonschema:"filter finished runs by exit code: N (equals), !=N, >=N, >N, <N, or <=N; runs with no exit code never match and pool summary rows always pass through regardless"`
-	Since    string `json:"since,omitempty" jsonschema:"only include runs started at or after TIME: a relative duration meaning ago (e.g. 4h, 7d), an RFC3339 timestamp, or a bare YYYY-MM-DD date at local midnight"`
-	Before   string `json:"before,omitempty" jsonschema:"only include runs started strictly before TIME, same grammar as since"`
+	Limit     int    `json:"limit,omitempty" jsonschema:"maximum number of runs to return; default 20, max 1000"`
+	State     string `json:"state,omitempty" jsonschema:"which runs to surface: all|finished|running|failed|abandoned|unknown; default all"`
+	Pool      string `json:"pool,omitempty" jsonschema:"pool handling: empty collapses members behind one row per pool, a pool ID lists that pool's members, \"none\" lists only standalone runs, \"any\" lists everything uncollapsed"`
+	SessionID string `json:"session_id,omitempty" jsonschema:"only include runs and pools tagged with this cg mcp session ID (the session_id from cg_info); spans standalone and pool rows, and an unmatched session returns an empty list rather than an error"`
+	ExitCode  string `json:"exit_code,omitempty" jsonschema:"filter finished runs by exit code: N (equals), !=N, >=N, >N, <N, or <=N; runs with no exit code never match and pool summary rows always pass through regardless"`
+	Since     string `json:"since,omitempty" jsonschema:"only include runs started at or after TIME: a relative duration meaning ago (e.g. 4h, 7d), an RFC3339 timestamp, or a bare YYYY-MM-DD date at local midnight"`
+	Before    string `json:"before,omitempty" jsonschema:"only include runs started strictly before TIME, same grammar as since"`
 }
 
 // listOutput is the result shape for `cg_list`.
@@ -58,6 +59,7 @@ type listRun struct {
 	State           string            `json:"state"`
 	Kind            string            `json:"kind,omitempty"`
 	Pool            string            `json:"pool,omitempty"`
+	SessionID       string            `json:"session_id,omitempty"`
 	Counts          *model.PoolCounts `json:"counts,omitempty"`
 	Command         []string          `json:"command,omitempty"`
 	StartedAt       *time.Time        `json:"started_at,omitempty"`
@@ -178,6 +180,7 @@ func handleList(_ context.Context, _ *mcpsdk.CallToolRequest, in listInput) (*mc
 						ID:         name,
 						State:      model.PoolState(dir, m),
 						Kind:       listKindPool,
+						SessionID:  m.SessionID,
 						Counts:     &counts,
 						StartedAt:  &started,
 						FinishedAt: m.FinishedAt,
@@ -194,6 +197,7 @@ func handleList(_ context.Context, _ *mcpsdk.CallToolRequest, in listInput) (*mc
 						ID:         name,
 						State:      stateFailed,
 						Pool:       dbg.Pool,
+						SessionID:  dbg.SessionID,
 						Command:    dbg.Command,
 						StartedAt:  &started,
 						StartError: dbg.StartError,
@@ -227,6 +231,7 @@ func handleList(_ context.Context, _ *mcpsdk.CallToolRequest, in listInput) (*mc
 				r.StartedAt = &started
 				r.Command = si.Command
 				r.Pool = si.Pool
+				r.SessionID = si.SessionID
 				filterStart = si.StartedAt
 			} else {
 				started := mtime
@@ -247,6 +252,7 @@ func handleList(_ context.Context, _ *mcpsdk.CallToolRequest, in listInput) (*mc
 			ID:          meta.ID,
 			State:       stateFinished,
 			Pool:        meta.Pool,
+			SessionID:   meta.SessionID,
 			Command:     meta.Command,
 			StartedAt:   &started,
 			FinishedAt:  &finished,
@@ -317,6 +323,19 @@ func handleList(_ context.Context, _ *mcpsdk.CallToolRequest, in listInput) (*mc
 		kept = rows[:0]
 		for _, r := range rows {
 			if timeFilter.Match(r.filterStart) {
+				kept = append(kept, r)
+			}
+		}
+		rows = kept
+	}
+
+	// The session filter is a plain equality match on the row's own session,
+	// spanning standalone rows and pool rows alike. An unmatched session yields
+	// an empty list, not an error.
+	if in.SessionID != "" {
+		kept = rows[:0]
+		for _, r := range rows {
+			if r.run.SessionID == in.SessionID {
 				kept = append(kept, r)
 			}
 		}

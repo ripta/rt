@@ -1122,12 +1122,12 @@ func TestLsCommandWideOutput(t *testing.T) {
 	}
 
 	seedRunDir(t, "AAAAAA", &Meta{
-		RunInfo:    RunInfo{ID: "AAAAAA", Command: []string{"echo", "hi"}},
+		RunInfo:    RunInfo{ID: "AAAAAA", Command: []string{"echo", "hi"}, SessionID: "SESS"},
 		ExitCode:   0,
 		DurationMs: 12,
 		Usage:      &Usage{UserUS: 20000, SystemUS: 5000},
 	})
-	seedRunDir(t, "BBBBBB", nil) // no liveness signal at all: unknown, no usage
+	seedRunDir(t, "BBBBBB", nil) // no liveness signal at all: unknown, no usage, no session
 
 	stdout, _, err := runCgSplit("ls", "-o", "wide")
 	if err != nil {
@@ -1139,7 +1139,7 @@ func TestLsCommandWideOutput(t *testing.T) {
 		t.Fatalf("expected header + 2 rows, got %d: %q", len(lines), stdout)
 	}
 
-	wantHeader := []string{"CG", "ID", "EXIT", "RUNTIME", "STATE", "SYSTEM", "USER", "COMMAND"}
+	wantHeader := []string{"CG", "ID", "SESSION", "EXIT", "RUNTIME", "STATE", "SYSTEM", "USER", "COMMAND"}
 	if got := strings.Fields(lines[0]); !reflect.DeepEqual(got, wantHeader) {
 		t.Errorf("header = %q, want %v", lines[0], wantHeader)
 	}
@@ -1153,11 +1153,12 @@ func TestLsCommandWideOutput(t *testing.T) {
 			unknown = l
 		}
 	}
-	if f := strings.Fields(finished); f[3] != "finished" || f[4] != "5ms" || f[5] != "20ms" {
-		t.Errorf("finished wide row = %q, want state=finished system=5ms user=20ms", finished)
+	// SESSION sits after CG ID, so state/system/user shift one field right.
+	if f := strings.Fields(finished); f[1] != "SESS" || f[4] != "finished" || f[5] != "5ms" || f[6] != "20ms" {
+		t.Errorf("finished wide row = %q, want session=SESS state=finished system=5ms user=20ms", finished)
 	}
-	if f := strings.Fields(unknown); f[3] != "unknown" || f[4] != "?" || f[5] != "?" {
-		t.Errorf("unknown wide row = %q, want state=unknown ?/? placeholders (no usage recorded)", unknown)
+	if f := strings.Fields(unknown); f[1] != "-" || f[4] != "unknown" || f[5] != "?" || f[6] != "?" {
+		t.Errorf("unknown wide row = %q, want session=- state=unknown ?/? placeholders", unknown)
 	}
 }
 
@@ -1169,7 +1170,7 @@ func TestLsCommandJSONOutput(t *testing.T) {
 	}
 
 	seedRunDir(t, "AAAAAA", &Meta{
-		RunInfo:    RunInfo{ID: "AAAAAA", Command: []string{"echo", "hi"}, Cwd: "/work"},
+		RunInfo:    RunInfo{ID: "AAAAAA", Command: []string{"echo", "hi"}, Cwd: "/work", SessionID: "SESS"},
 		ExitCode:   0,
 		DurationMs: 12,
 	})
@@ -1193,6 +1194,9 @@ func TestLsCommandJSONOutput(t *testing.T) {
 	if run.Cwd != "/work" {
 		t.Errorf("run.Cwd = %q, want /work", run.Cwd)
 	}
+	if run.SessionID != "SESS" {
+		t.Errorf("run.SessionID = %q, want SESS", run.SessionID)
+	}
 	if run.ExitCode == nil || *run.ExitCode != 0 {
 		t.Errorf("run.ExitCode = %v, want 0", run.ExitCode)
 	}
@@ -1208,6 +1212,7 @@ func TestLsCommandJSONOutputPoolRow(t *testing.T) {
 	finished := time.Now().UTC()
 	seedPoolDir(t, "PPPPPP", &PoolManifest{
 		ID:         "PPPPPP",
+		SessionID:  "SESS",
 		Commands:   [][]string{{"echo", "hi"}},
 		Cwd:        "/work",
 		StartedAt:  finished.Add(-2 * time.Second),
@@ -1216,7 +1221,7 @@ func TestLsCommandJSONOutputPoolRow(t *testing.T) {
 			{Command: 0, RunID: "AAAAAA", Status: PoolRunFinished, ExitCode: intp(0)},
 		},
 	})
-	seedRunDir(t, "AAAAAA", &Meta{RunInfo: RunInfo{ID: "AAAAAA", Command: []string{"echo", "hi"}, Pool: "PPPPPP"}})
+	seedRunDir(t, "AAAAAA", &Meta{RunInfo: RunInfo{ID: "AAAAAA", Command: []string{"echo", "hi"}, Pool: "PPPPPP", SessionID: "SESS"}})
 
 	stdout, _, err := runCgSplit("ls", "-o", "json")
 	if err != nil {
@@ -1240,6 +1245,12 @@ func TestLsCommandJSONOutputPoolRow(t *testing.T) {
 	if run.Cwd != "/work" {
 		t.Errorf("run.Cwd = %q, want /work", run.Cwd)
 	}
+	if run.SessionID != "SESS" {
+		t.Errorf("run.SessionID = %q, want SESS", run.SessionID)
+	}
+	if run.Manifest.SessionID != "SESS" {
+		t.Errorf("run.Manifest.SessionID = %q, want SESS", run.Manifest.SessionID)
+	}
 }
 
 func TestLsCommandCwdFilter(t *testing.T) {
@@ -1260,6 +1271,34 @@ func TestLsCommandCwdFilter(t *testing.T) {
 	}
 	if !strings.Contains(stdout, "AAAAAA") || strings.Contains(stdout, "BBBBBB") {
 		t.Errorf("--cwd %s = %q, want just AAAAAA", workDir, stdout)
+	}
+}
+
+func TestLsCommandSessionIDFilter(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	root := CaptureRoot()
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatalf("mkdir root: %v", err)
+	}
+
+	seedRunDir(t, "AAAAAA", &Meta{RunInfo: RunInfo{ID: "AAAAAA", Command: []string{"echo", "hi"}, SessionID: "S1"}})
+	seedRunDir(t, "BBBBBB", &Meta{RunInfo: RunInfo{ID: "BBBBBB", Command: []string{"echo", "hi"}, SessionID: "S2"}})
+
+	stdout, _, err := runCgSplit("ls", "--session-id", "S1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(stdout, "AAAAAA") || strings.Contains(stdout, "BBBBBB") {
+		t.Errorf("--session-id S1 = %q, want just AAAAAA", stdout)
+	}
+
+	// An unmatched session lists nothing, and is not an error.
+	stdout, _, err = runCgSplit("ls", "--session-id", "NOPE")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(stdout, "AAAAAA") || strings.Contains(stdout, "BBBBBB") {
+		t.Errorf("--session-id NOPE = %q, want no rows", stdout)
 	}
 }
 
