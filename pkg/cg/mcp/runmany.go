@@ -89,7 +89,7 @@ type poolRunResult struct {
 	ExcerptOmitted bool   `json:"excerpt_omitted,omitempty"`
 }
 
-func registerRunMany(s *mcpsdk.Server, reg *runRegistry, g *gate) {
+func registerRunMany(s *mcpsdk.Server, reg *runRegistry, g *gate, sessionID string) {
 	mcpsdk.AddTool(s, &mcpsdk.Tool{
 		Name:        "cg_run_many",
 		Description: "Run a flat pool of commands: each command runs repeat times, at most parallelism at once, with on_error deciding what a failure does to the rest. Returns the pool ID and a summary with per-run IDs; failed runs carry tail excerpts. Every run is an ordinary capture run for cg_meta/cg_stdout/cg_grep drill-down, and cg_wait on the pool ID aggregates. Not a workflow engine: no dependencies between runs, no conditionals, no per-run fallback.",
@@ -98,11 +98,11 @@ func registerRunMany(s *mcpsdk.Server, reg *runRegistry, g *gate) {
 		if elicitationAvailable(req) {
 			el = req.Session
 		}
-		return handleRunMany(ctx, reg, g, el, in)
+		return handleRunMany(ctx, reg, g, el, sessionID, in)
 	})
 }
 
-func handleRunMany(ctx context.Context, reg *runRegistry, g *gate, el elicitor, in runManyInput) (*mcpsdk.CallToolResult, runManyOutput, error) {
+func handleRunMany(ctx context.Context, reg *runRegistry, g *gate, el elicitor, sessionID string, in runManyInput) (*mcpsdk.CallToolResult, runManyOutput, error) {
 	repeat, parallelism, err := validateRunMany(in)
 	if err != nil {
 		return nil, runManyOutput{}, err
@@ -154,6 +154,7 @@ func handleRunMany(ctx context.Context, reg *runRegistry, g *gate, el elicitor, 
 		OnError:     in.OnError,
 		Cwd:         in.Cwd,
 		Env:         in.Env,
+		SessionID:   sessionID,
 	}
 	for _, argv := range in.Commands {
 		pc := model.PoolCommand{Argv: argv}

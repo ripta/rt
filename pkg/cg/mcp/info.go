@@ -42,27 +42,32 @@ type infoBuild struct {
 // Cwd is the server's working directory. The server never changes directory
 // over its lifetime, so this is fixed at process start; it is the directory a
 // cg_run inherits when its own cwd argument is empty.
+//
+// SessionID names this server process. It is minted at start and stamped on
+// every run and pool the server spawns, so a listing can be scoped to one
+// server's runs.
 type infoOutput struct {
 	StartedAt time.Time         `json:"started_at"`
 	UptimeMs  int64             `json:"uptime_ms"`
 	Cwd       string            `json:"cwd"`
+	SessionID string            `json:"session_id"`
 	Build     infoBuild         `json:"build"`
 	Env       map[string]string `json:"env"`
 }
 
-func registerInfo(s *mcpsdk.Server, v string, startedAt time.Time) {
+func registerInfo(s *mcpsdk.Server, v string, startedAt time.Time, sessionID string) {
 	mcpsdk.AddTool(s, &mcpsdk.Tool{
 		Name:        "cg_info",
 		Description: "Return diagnostics about the running cg MCP server: its start time and uptime, version and build info, its working directory (fixed at start; the directory a cg_run inherits when its cwd is empty), and the set values of a curated allowlist of environment variables.",
 	}, func(_ context.Context, _ *mcpsdk.CallToolRequest, _ infoInput) (*mcpsdk.CallToolResult, infoOutput, error) {
-		out, err := collectInfo(v, startedAt, time.Now())
+		out, err := collectInfo(v, startedAt, sessionID, time.Now())
 		return nil, out, err
 	})
 }
 
 // collectInfo assembles the cg_info response. The clock is threaded in as now
 // so tests can assert a deterministic uptime.
-func collectInfo(v string, startedAt, now time.Time) (infoOutput, error) {
+func collectInfo(v string, startedAt time.Time, sessionID string, now time.Time) (infoOutput, error) {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return infoOutput{}, fmt.Errorf("resolving working directory: %w", err)
@@ -71,6 +76,7 @@ func collectInfo(v string, startedAt, now time.Time) (infoOutput, error) {
 		StartedAt: startedAt,
 		UptimeMs:  now.Sub(startedAt).Milliseconds(),
 		Cwd:       cwd,
+		SessionID: sessionID,
 		Build:     buildInfo(v),
 		Env:       allowedEnv(),
 	}, nil

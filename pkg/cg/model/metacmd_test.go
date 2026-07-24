@@ -29,6 +29,19 @@ func TestRunMetaFinished(t *testing.T) {
 	}
 }
 
+func TestRunMetaReportsSessionID(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	seedRunDir(t, "AAAAAA", &Meta{RunInfo: RunInfo{ID: "AAAAAA", Command: []string{"echo", "hi"}, SessionID: "SESS"}})
+
+	res, err := RunMeta("AAAAAA")
+	if err != nil {
+		t.Fatalf("RunMeta: %v", err)
+	}
+	if res.SessionID != "SESS" {
+		t.Errorf("session_id = %q, want %q", res.SessionID, "SESS")
+	}
+}
+
 func TestRunMetaRunning(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 	dir := seedRunDir(t, "AAAAAA", nil)

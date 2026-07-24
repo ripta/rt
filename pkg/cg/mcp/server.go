@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/ripta/rt/pkg/cg/approve"
+	"github.com/ripta/rt/pkg/cg/model"
 	"github.com/ripta/rt/pkg/version"
 )
 
@@ -54,18 +55,24 @@ func runServer(cmd *cobra.Command, opts *serverOptions) error {
 	}
 	g := &gate{store: store, blindlyAllow: opts.blindlyAllow}
 
-	s := newServer(v, time.Now(), g)
+	sessionID, err := model.GenerateSessionID()
+	if err != nil {
+		return fmt.Errorf("generating session id: %w", err)
+	}
+
+	s := newServer(v, time.Now(), sessionID, g)
 	return s.Run(cmd.Context(), &mcpsdk.StdioTransport{})
 }
 
 // newServer constructs a fully-registered MCP server. Pulled out so tests can
-// drive it without going through stdio. startedAt is the server's start time,
-// reported by cg_info.
-func newServer(v string, startedAt time.Time, g *gate) *mcpsdk.Server {
+// drive it without going through stdio. startedAt is the server's start time
+// and sessionID names this server process; both are reported by cg_info and
+// fixed for the process's lifetime.
+func newServer(v string, startedAt time.Time, sessionID string, g *gate) *mcpsdk.Server {
 	s := mcpsdk.NewServer(&mcpsdk.Implementation{Name: "cg", Version: v}, nil)
 	reg := newRunRegistry()
-	registerRun(s, reg, g)
-	registerRunMany(s, reg, g)
+	registerRun(s, reg, g, sessionID)
+	registerRunMany(s, reg, g, sessionID)
 	registerList(s)
 	registerMeta(s)
 	registerWait(s, reg)
@@ -76,6 +83,6 @@ func newServer(v string, startedAt time.Time, g *gate) *mcpsdk.Server {
 	registerPrune(s)
 	registerNotes(s)
 	registerElicitTest(s)
-	registerInfo(s, v, startedAt)
+	registerInfo(s, v, startedAt, sessionID)
 	return s
 }

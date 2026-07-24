@@ -67,7 +67,7 @@ func TestGateAllowRuns(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 
 	g := newTestGate(t, "version: 1\nallow:\n  - prefix: [echo]\n", false)
-	_, out, err := handleRun(context.Background(), nil, g, nil, runInput{
+	_, out, err := handleRun(context.Background(), nil, g, nil, "", runInput{
 		Command: []string{"echo", "hi"},
 	})
 	if err != nil {
@@ -82,7 +82,7 @@ func TestGateDenyRefusesWithMessage(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 
 	g := newTestGate(t, "version: 1\ndeny:\n  - prefix: [rm, -rf]\n    message: delete specific paths instead\n", false)
-	_, _, err := handleRun(context.Background(), nil, g, nil, runInput{
+	_, _, err := handleRun(context.Background(), nil, g, nil, "", runInput{
 		Command: []string{"rm", "-rf", "x"},
 	})
 	if err == nil {
@@ -97,7 +97,7 @@ func TestGateRestrictRefusesWithMessage(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 
 	g := newTestGate(t, "version: 1\nrestrict:\n  - prefix: [echo]\n    message: only echo hi is permitted here\n", false)
-	_, _, err := handleRun(context.Background(), nil, g, nil, runInput{
+	_, _, err := handleRun(context.Background(), nil, g, nil, "", runInput{
 		Command: []string{"echo", "bye"},
 	})
 	if err == nil {
@@ -117,7 +117,7 @@ func TestGateRestrictAllowCarvesOut(t *testing.T) {
 	// allow carves echo hi out of the echo restrict scope; echo bye stays refused.
 	g := newTestGate(t, "version: 1\nallow:\n  - prefix: [echo, hi]\nrestrict:\n  - prefix: [echo]\n", false)
 
-	_, out, err := handleRun(context.Background(), nil, g, nil, runInput{
+	_, out, err := handleRun(context.Background(), nil, g, nil, "", runInput{
 		Command: []string{"echo", "hi"},
 	})
 	if err != nil {
@@ -127,7 +127,7 @@ func TestGateRestrictAllowCarvesOut(t *testing.T) {
 		t.Errorf("echo hi ExitCode = %v, want 0", out.ExitCode)
 	}
 
-	_, _, err = handleRun(context.Background(), nil, g, nil, runInput{
+	_, _, err = handleRun(context.Background(), nil, g, nil, "", runInput{
 		Command: []string{"echo", "bye"},
 	})
 	if err == nil {
@@ -142,7 +142,7 @@ func TestGateBuiltinDenyRefuses(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 
 	g := newTestGate(t, "version: 1\n", false)
-	_, _, err := handleRun(context.Background(), nil, g, nil, runInput{
+	_, _, err := handleRun(context.Background(), nil, g, nil, "", runInput{
 		Command: []string{"sh", "-c", "echo hi"},
 	})
 	if err == nil {
@@ -155,7 +155,7 @@ func TestGateBlindlyAllowBypass(t *testing.T) {
 
 	// sh is in the built-in deny set; --blindly-allow runs it anyway.
 	g := newTestGate(t, "version: 1\n", true)
-	_, out, err := handleRun(context.Background(), nil, g, nil, runInput{
+	_, out, err := handleRun(context.Background(), nil, g, nil, "", runInput{
 		Command: []string{"sh", "-c", "echo bypassed"},
 	})
 	if err != nil {
@@ -170,7 +170,7 @@ func TestGateFailsClosedOnUnmatched(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 
 	g := newTestGate(t, "version: 1\n", false)
-	_, _, err := handleRun(context.Background(), nil, g, nil, runInput{
+	_, _, err := handleRun(context.Background(), nil, g, nil, "", runInput{
 		Command: []string{"echo", "hi"},
 	})
 	if err == nil {
@@ -185,7 +185,7 @@ func TestGateEnvGateRefuses(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 
 	g := newTestGate(t, "version: 1\nallow:\n  - prefix: [echo]\n", false)
-	_, _, err := handleRun(context.Background(), nil, g, nil, runInput{
+	_, _, err := handleRun(context.Background(), nil, g, nil, "", runInput{
 		Command: []string{"echo", "hi"},
 		Env:     map[string]string{"LD_PRELOAD": "evil.so"},
 	})
@@ -201,7 +201,7 @@ func TestGateEnvGatePermitted(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 
 	g := newTestGate(t, "version: 1\nallow:\n  - prefix: [echo]\n    permit_unsafe_envs: [PATH]\n", false)
-	_, out, err := handleRun(context.Background(), nil, g, nil, runInput{
+	_, out, err := handleRun(context.Background(), nil, g, nil, "", runInput{
 		Command: []string{"echo", "hi"},
 		Env:     map[string]string{"PATH": os.Getenv("PATH")},
 	})
@@ -218,7 +218,7 @@ func TestGateAllowAllPassesEnv(t *testing.T) {
 
 	// allow-all short-circuits to run and does not apply the env gate.
 	g := newTestGate(t, "version: 1\nmode: allow-all\n", false)
-	_, out, err := handleRun(context.Background(), nil, g, nil, runInput{
+	_, out, err := handleRun(context.Background(), nil, g, nil, "", runInput{
 		Command: []string{"echo", "hi"},
 		Env:     map[string]string{"PATH": os.Getenv("PATH")},
 	})
@@ -247,7 +247,7 @@ func TestGateSymlinkCanonicalAllow(t *testing.T) {
 
 	yaml := "version: 1\nallow:\n  - prefix: ['" + canonicalPath(t, real) + "']\n"
 	g := newTestGate(t, yaml, false)
-	_, out, err := handleRun(context.Background(), nil, g, nil, runInput{
+	_, out, err := handleRun(context.Background(), nil, g, nil, "", runInput{
 		Command: []string{link},
 	})
 	if err != nil {
@@ -275,7 +275,7 @@ func TestGateSymlinkCanonicalDeny(t *testing.T) {
 	denyDir := regexp.QuoteMeta(canonicalPath(t, realDir))
 	yaml := "version: 1\ndeny:\n  - regex: '^" + denyDir + "/'\n    message: no executables from that directory\n"
 	g := newTestGate(t, yaml, false)
-	_, _, err := handleRun(context.Background(), nil, g, nil, runInput{
+	_, _, err := handleRun(context.Background(), nil, g, nil, "", runInput{
 		Command: []string{link},
 	})
 	if err == nil {
@@ -301,7 +301,7 @@ func TestGateEnvPathDoesNotRedirectExec(t *testing.T) {
 	t.Setenv("PATH", serverDir)
 
 	g := newTestGate(t, "version: 1\nallow:\n  - prefix: [tool]\n    permit_unsafe_envs: [PATH]\n", false)
-	_, out, err := handleRun(context.Background(), nil, g, nil, runInput{
+	_, out, err := handleRun(context.Background(), nil, g, nil, "", runInput{
 		Command: []string{"tool"},
 		Env:     map[string]string{"PATH": evilDir},
 	})
@@ -335,7 +335,7 @@ func TestGateMultiplexerShimAllow(t *testing.T) {
 	yaml := "version: 1\nallow:\n  - prefix: ['" + filepath.Join(binDir, "cargo") + "', fmt]\n"
 	g := newTestGate(t, yaml, false)
 
-	_, out, err := handleRun(context.Background(), nil, g, nil, runInput{
+	_, out, err := handleRun(context.Background(), nil, g, nil, "", runInput{
 		Command: []string{"cargo", "fmt"},
 	})
 	if err != nil {
@@ -345,7 +345,7 @@ func TestGateMultiplexerShimAllow(t *testing.T) {
 		t.Errorf("StdoutExcerpt = %q, want the shim target to run", out.StdoutExcerpt)
 	}
 
-	_, _, err = handleRun(context.Background(), nil, g, nil, runInput{
+	_, _, err = handleRun(context.Background(), nil, g, nil, "", runInput{
 		Command: []string{"rustc", "fmt"},
 	})
 	if err == nil {

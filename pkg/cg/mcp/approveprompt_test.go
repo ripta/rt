@@ -128,7 +128,7 @@ func TestPromptAcceptRunsWithoutRemember(t *testing.T) {
 	g := newTestGateAt(t, rootDir, "", false)
 	el := &fakeElicitor{results: []*mcpsdk.ElicitResult{accept(map[string]any{"remember": false})}}
 
-	_, out, err := handleRun(context.Background(), nil, g, el, runInput{Command: []string{"echo", "hi"}})
+	_, out, err := handleRun(context.Background(), nil, g, el, "", runInput{Command: []string{"echo", "hi"}})
 	if err != nil {
 		t.Fatalf("handleRun: %v", err)
 	}
@@ -146,7 +146,7 @@ func TestPromptDeclineRefuses(t *testing.T) {
 	g := newTestGate(t, "version: 1\n", false)
 	el := &fakeElicitor{results: []*mcpsdk.ElicitResult{{Action: "decline"}}}
 
-	_, _, err := handleRun(context.Background(), nil, g, el, runInput{Command: []string{"echo", "hi"}})
+	_, _, err := handleRun(context.Background(), nil, g, el, "", runInput{Command: []string{"echo", "hi"}})
 	if err == nil {
 		t.Fatalf("expected refusal on decline")
 	}
@@ -161,7 +161,7 @@ func TestPromptCancelRefuses(t *testing.T) {
 	g := newTestGate(t, "version: 1\n", false)
 	el := &fakeElicitor{results: []*mcpsdk.ElicitResult{{Action: "cancel"}}}
 
-	_, _, err := handleRun(context.Background(), nil, g, el, runInput{Command: []string{"echo", "hi"}})
+	_, _, err := handleRun(context.Background(), nil, g, el, "", runInput{Command: []string{"echo", "hi"}})
 	if err == nil {
 		t.Fatalf("expected refusal on cancel")
 	}
@@ -176,7 +176,7 @@ func TestPromptAcceptRememberWritesRuleAndGoesLive(t *testing.T) {
 		accept(map[string]any{"remember": true, "rule": "[echo]"}),
 	}}
 
-	_, out, err := handleRun(context.Background(), nil, g, el, runInput{Command: []string{"echo", "hi"}})
+	_, out, err := handleRun(context.Background(), nil, g, el, "", runInput{Command: []string{"echo", "hi"}})
 	if err != nil {
 		t.Fatalf("handleRun: %v", err)
 	}
@@ -194,7 +194,7 @@ func TestPromptAcceptRememberWritesRuleAndGoesLive(t *testing.T) {
 
 	// The rule is live this session: a second echo must not re-prompt.
 	el2 := &fakeElicitor{}
-	_, _, err = handleRun(context.Background(), nil, g, el2, runInput{Command: []string{"echo", "again"}})
+	_, _, err = handleRun(context.Background(), nil, g, el2, "", runInput{Command: []string{"echo", "again"}})
 	if err != nil {
 		t.Fatalf("second run: %v", err)
 	}
@@ -213,7 +213,7 @@ func TestPromptRememberEditedRule(t *testing.T) {
 		accept(map[string]any{"remember": true, "rule": "[echo, hi]"}),
 	}}
 
-	_, _, err := handleRun(context.Background(), nil, g, el, runInput{Command: []string{"echo", "hi"}})
+	_, _, err := handleRun(context.Background(), nil, g, el, "", runInput{Command: []string{"echo", "hi"}})
 	if err != nil {
 		t.Fatalf("handleRun: %v", err)
 	}
@@ -229,7 +229,7 @@ func TestPromptDangerousEnvRefusedBeforePrompt(t *testing.T) {
 	g := newTestGate(t, "version: 1\n", false)
 	el := &fakeElicitor{results: []*mcpsdk.ElicitResult{accept(map[string]any{"remember": false})}}
 
-	_, _, err := handleRun(context.Background(), nil, g, el, runInput{
+	_, _, err := handleRun(context.Background(), nil, g, el, "", runInput{
 		Command: []string{"echo", "hi"},
 		Env:     map[string]string{"LD_PRELOAD": "evil.so"},
 	})
@@ -260,7 +260,7 @@ func TestPromptDivergenceReloadMerge(t *testing.T) {
 		accept(map[string]any{"choice": divergeReloadMerge}),
 	}}
 
-	_, _, err := handleRun(context.Background(), nil, g, el, runInput{Command: []string{"echo", "hi"}})
+	_, _, err := handleRun(context.Background(), nil, g, el, "", runInput{Command: []string{"echo", "hi"}})
 	if err != nil {
 		t.Fatalf("handleRun: %v", err)
 	}
@@ -293,7 +293,7 @@ func TestPromptDivergenceSkip(t *testing.T) {
 		accept(map[string]any{"choice": divergeSkip}),
 	}}
 
-	_, out, err := handleRun(context.Background(), nil, g, el, runInput{Command: []string{"echo", "hi"}})
+	_, out, err := handleRun(context.Background(), nil, g, el, "", runInput{Command: []string{"echo", "hi"}})
 	if err != nil {
 		t.Fatalf("handleRun: %v", err)
 	}
@@ -323,7 +323,7 @@ func TestPromptRememberWriteErrorStillRuns(t *testing.T) {
 	el := &fakeElicitor{results: []*mcpsdk.ElicitResult{
 		accept(map[string]any{"remember": true, "rule": "[echo]"}),
 	}}
-	_, out, err := handleRun(context.Background(), nil, g, el, runInput{Command: []string{"echo", "hi"}})
+	_, out, err := handleRun(context.Background(), nil, g, el, "", runInput{Command: []string{"echo", "hi"}})
 	if err != nil {
 		t.Fatalf("handleRun: %v", err)
 	}

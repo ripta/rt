@@ -45,6 +45,41 @@ func TestHandleMetaSuccess(t *testing.T) {
 	}
 }
 
+func TestHandleMetaReportsSessionID(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+
+	seedRunDir(t, "AAAAAA", &model.Meta{
+		RunInfo: model.RunInfo{ID: "AAAAAA", Command: []string{"echo", "hi"}, SessionID: "SESS"},
+	})
+
+	_, out, err := handleMeta(context.Background(), nil, metaInput{ID: "AAAAAA"})
+	if err != nil {
+		t.Fatalf("handleMeta: %v", err)
+	}
+	if out.SessionID != "SESS" {
+		t.Errorf("SessionID = %q, want %q", out.SessionID, "SESS")
+	}
+}
+
+func TestHandleMetaPoolReportsSessionID(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+
+	m := runningPoolManifest("AAAAAA")
+	m.SessionID = "SESS"
+	seedPoolDir(t, "AAAAAA", m)
+
+	_, out, err := handleMeta(context.Background(), nil, metaInput{ID: "AAAAAA"})
+	if err != nil {
+		t.Fatalf("handleMeta: %v", err)
+	}
+	if out.Manifest == nil {
+		t.Fatalf("Manifest is nil, want the pool manifest")
+	}
+	if out.Manifest.SessionID != "SESS" {
+		t.Errorf("Manifest.SessionID = %q, want %q", out.Manifest.SessionID, "SESS")
+	}
+}
+
 func TestHandleMetaUnknownID(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 

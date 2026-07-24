@@ -70,7 +70,7 @@ func startCancelPool(t *testing.T, reg *runRegistry, job int, commands ...[]stri
 	t.Helper()
 
 	async := false
-	_, started, err := handleRunMany(context.Background(), reg, nil, nil, runManyInput{
+	_, started, err := handleRunMany(context.Background(), reg, nil, nil, "", runManyInput{
 		Commands: commands,
 		Wait:     &async,
 	})

@@ -23,6 +23,7 @@ type metaInput struct {
 type metaFields struct {
 	Command     []string     `json:"command,omitempty"`
 	Cwd         string       `json:"cwd,omitempty"`
+	SessionID   string       `json:"session_id,omitempty"`
 	StartedAt   *time.Time   `json:"started_at,omitempty"`
 	FinishedAt  *time.Time   `json:"finished_at,omitempty"`
 	DurationMs  *int64       `json:"duration_ms,omitempty"`
@@ -116,6 +117,7 @@ func metaFieldsFrom(m *model.Meta) metaFields {
 	f := metaFields{
 		Command:     m.Command,
 		Cwd:         m.Cwd,
+		SessionID:   m.SessionID,
 		StartedAt:   &started,
 		FinishedAt:  &finished,
 		DurationMs:  &dur,
@@ -137,6 +139,7 @@ func metaFieldsFromStart(si *model.StartInfo) metaFields {
 	return metaFields{
 		Command:   si.Command,
 		Cwd:       si.Cwd,
+		SessionID: si.SessionID,
 		StartedAt: &started,
 	}
 }

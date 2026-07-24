@@ -92,7 +92,7 @@ func TestHandleWaitFastPathSupervised(t *testing.T) {
 	reg := newRunRegistry()
 
 	async := false
-	_, started, err := handleRun(context.Background(), reg, nil, nil, runInput{
+	_, started, err := handleRun(context.Background(), reg, nil, nil, "", runInput{
 		Command: []string{"sh", "-c", "sleep 0.2; echo fp"},
 		Wait:    &async,
 	})

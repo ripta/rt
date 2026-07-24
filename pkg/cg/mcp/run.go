@@ -56,7 +56,7 @@ type runOutput struct {
 	RememberWarning string `json:"remember_warning,omitempty"`
 }
 
-func registerRun(s *mcpsdk.Server, reg *runRegistry, g *gate) {
+func registerRun(s *mcpsdk.Server, reg *runRegistry, g *gate, sessionID string) {
 	mcpsdk.AddTool(s, &mcpsdk.Tool{
 		Name:        "cg_run",
 		Description: "Run a command with capture. Returns metadata, exit code, and short head-excerpts of stdout and stderr. The run is recorded on disk under $TMPDIR/cg/<id>/ and can be inspected with the other cg tools.",
@@ -65,11 +65,11 @@ func registerRun(s *mcpsdk.Server, reg *runRegistry, g *gate) {
 		if elicitationAvailable(req) {
 			el = req.Session
 		}
-		return handleRun(ctx, reg, g, el, in)
+		return handleRun(ctx, reg, g, el, sessionID, in)
 	})
 }
 
-func handleRun(ctx context.Context, reg *runRegistry, g *gate, el elicitor, in runInput) (*mcpsdk.CallToolResult, runOutput, error) {
+func handleRun(ctx context.Context, reg *runRegistry, g *gate, el elicitor, sessionID string, in runInput) (*mcpsdk.CallToolResult, runOutput, error) {
 	if len(in.Command) == 0 {
 		return nil, runOutput{}, fmt.Errorf("command must contain at least one element")
 	}
@@ -100,7 +100,7 @@ func handleRun(ctx context.Context, reg *runRegistry, g *gate, el elicitor, in r
 		wait = *in.Wait
 	}
 
-	run, err := model.RunSupervised(in.Command, model.SuperviseOptions{Resolved: resolved, Cwd: in.Cwd, Env: in.Env})
+	run, err := model.RunSupervised(in.Command, model.SuperviseOptions{Resolved: resolved, Cwd: in.Cwd, Env: in.Env, SessionID: sessionID})
 	if err != nil {
 		var sf *model.StartFailure
 		if errors.As(err, &sf) {
