@@ -11,7 +11,7 @@ import (
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/ripta/rt/pkg/cg"
+	"github.com/ripta/rt/pkg/cg/model"
 )
 
 const (
@@ -50,9 +50,13 @@ type runOutput struct {
 	ExcerptFrom   string `json:"excerpt_from,omitempty"`
 	Truncated     bool   `json:"truncated"`
 	StartError    string `json:"start_error,omitempty"`
+	// RememberWarning reports a remembered rule that failed to persist; the
+	// command still ran. It rides here rather than the server's stderr, which an
+	// MCP host would bleed onto the screen.
+	RememberWarning string `json:"remember_warning,omitempty"`
 }
 
-func registerRun(s *mcpsdk.Server, reg *runRegistry, g *gate) {
+func registerRun(s *mcpsdk.Server, reg *runRegistry, g *gate, sessionID string) {
 	mcpsdk.AddTool(s, &mcpsdk.Tool{
 		Name:        "cg_run",
 		Description: "Run a command with capture. Returns metadata, exit code, and short head-excerpts of stdout and stderr. The run is recorded on disk under $TMPDIR/cg/<id>/ and can be inspected with the other cg tools.",
@@ -61,18 +65,19 @@ func registerRun(s *mcpsdk.Server, reg *runRegistry, g *gate) {
 		if elicitationAvailable(req) {
 			el = req.Session
 		}
-		return handleRun(ctx, reg, g, el, in)
+		return handleRun(ctx, reg, g, el, sessionID, in)
 	})
 }
 
-func handleRun(ctx context.Context, reg *runRegistry, g *gate, el elicitor, in runInput) (*mcpsdk.CallToolResult, runOutput, error) {
+func handleRun(ctx context.Context, reg *runRegistry, g *gate, el elicitor, sessionID string, in runInput) (*mcpsdk.CallToolResult, runOutput, error) {
 	if len(in.Command) == 0 {
 		return nil, runOutput{}, fmt.Errorf("command must contain at least one element")
 	}
 
-	resolved, _ := cg.ResolveCommand(in.Command, in.Cwd)
+	resolved, _ := model.ResolveCommand(in.Command, in.Cwd)
 
-	if err := g.check(ctx, in, resolved, el); err != nil {
+	warning, err := g.check(ctx, "cg_run", in, resolved, el)
+	if err != nil {
 		return nil, runOutput{}, err
 	}
 
@@ -95,9 +100,9 @@ func handleRun(ctx context.Context, reg *runRegistry, g *gate, el elicitor, in r
 		wait = *in.Wait
 	}
 
-	run, err := cg.RunCapture(in.Command, resolved, in.Cwd, in.Env)
+	run, err := model.RunSupervised(in.Command, model.SuperviseOptions{Resolved: resolved, Cwd: in.Cwd, Env: in.Env, SessionID: sessionID})
 	if err != nil {
-		var sf *cg.StartFailure
+		var sf *model.StartFailure
 		if errors.As(err, &sf) {
 			return nil, runOutput{ID: sf.RunID, StartError: err.Error()}, nil
 		}
@@ -108,7 +113,9 @@ func handleRun(ctx context.Context, reg *runRegistry, g *gate, el elicitor, in r
 	}
 
 	if !wait {
-		return nil, runOutput{ID: run.ID, Started: true}, nil
+		out := runOutput{ID: run.ID, Started: true}
+		out.RememberWarning = warning
+		return nil, out, nil
 	}
 
 	timeoutMs := in.WaitTimeoutMs
@@ -121,9 +128,13 @@ func handleRun(ctx context.Context, reg *runRegistry, g *gate, el elicitor, in r
 
 	select {
 	case <-run.Done:
-		return nil, finishedOutput(run, excerpt, in.ExcerptFrom), nil
+		out := finishedOutput(run, excerpt, in.ExcerptFrom)
+		out.RememberWarning = warning
+		return nil, out, nil
 	case <-timer.C:
-		return nil, timedOutOutput(run, excerpt, in.ExcerptFrom), nil
+		out := timedOutOutput(run, excerpt, in.ExcerptFrom)
+		out.RememberWarning = warning
+		return nil, out, nil
 	case <-ctx.Done():
 		return nil, runOutput{}, ctx.Err()
 	}
@@ -131,11 +142,11 @@ func handleRun(ctx context.Context, reg *runRegistry, g *gate, el elicitor, in r
 
 // finishedOutput builds the result for a fully completed run, reading
 // meta.json to fill exit/signal/duration/line-count fields.
-func finishedOutput(run *cg.CaptureRun, excerpt int, excerptFrom string) runOutput {
+func finishedOutput(run *model.CaptureRun, excerpt int, excerptFrom string) runOutput {
 	out := runOutput{ID: run.ID}
 
 	failed := false
-	if meta, err := cg.ReadMeta(run.Dir); err == nil {
+	if meta, err := model.ReadMeta(run.Dir); err == nil {
 		ec := meta.ExitCode
 		dur := meta.DurationMs
 		outLines := meta.StdoutLines
@@ -167,7 +178,7 @@ func finishedOutput(run *cg.CaptureRun, excerpt int, excerptFrom string) runOutp
 // timedOutOutput builds the result for a run still in flight when the wait
 // timeout fires. The child is left alone; capture continues on disk. The
 // caller can use cg_meta / cg_stdout to check on it later.
-func timedOutOutput(run *cg.CaptureRun, excerpt int, excerptFrom string) runOutput {
+func timedOutOutput(run *model.CaptureRun, excerpt int, excerptFrom string) runOutput {
 	window := resolveExcerptWindow(excerptFrom, true)
 	stdout, outMore, _ := readWindow(filepath.Join(run.Dir, "stdout"), excerpt, window)
 	stderr, errMore, _ := readWindow(filepath.Join(run.Dir, "stderr"), excerpt, window)

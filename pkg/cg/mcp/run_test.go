@@ -8,13 +8,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ripta/rt/pkg/cg"
+	"github.com/ripta/rt/pkg/cg/model"
 )
 
 func TestHandleRunSyncSuccess(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 
-	_, out, err := handleRun(context.Background(), nil, nil, nil, runInput{
+	_, out, err := handleRun(context.Background(), nil, nil, nil, "", runInput{
 		Command: []string{"echo", "hi"},
 	})
 	if err != nil {
@@ -49,7 +49,7 @@ func TestHandleRunSyncSuccess(t *testing.T) {
 func TestHandleRunNonZeroExit(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 
-	_, out, err := handleRun(context.Background(), nil, nil, nil, runInput{
+	_, out, err := handleRun(context.Background(), nil, nil, nil, "", runInput{
 		Command: []string{"sh", "-c", "exit 7"},
 	})
 	if err != nil {
@@ -64,7 +64,7 @@ func TestHandleRunAsync(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 
 	wait := false
-	_, out, err := handleRun(context.Background(), nil, nil, nil, runInput{
+	_, out, err := handleRun(context.Background(), nil, nil, nil, "", runInput{
 		Command: []string{"echo", "async"},
 		Wait:    &wait,
 	})
@@ -85,7 +85,7 @@ func TestHandleRunAsync(t *testing.T) {
 	// doesn't leave files unattended.
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		if _, err := os.Stat(filepath.Join(cg.CaptureRoot(), out.ID, "meta.json")); err == nil {
+		if _, err := os.Stat(filepath.Join(model.CaptureRoot(), out.ID, "meta.json")); err == nil {
 			return
 		}
 		time.Sleep(10 * time.Millisecond)
@@ -96,7 +96,7 @@ func TestHandleRunAsync(t *testing.T) {
 func TestHandleRunTimeout(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 
-	_, out, err := handleRun(context.Background(), nil, nil, nil, runInput{
+	_, out, err := handleRun(context.Background(), nil, nil, nil, "", runInput{
 		Command:       []string{"sh", "-c", "echo partial; sleep 2"},
 		WaitTimeoutMs: 200,
 	})
@@ -120,7 +120,7 @@ func TestHandleRunTimeout(t *testing.T) {
 func TestHandleRunExcerptTruncated(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 
-	_, out, err := handleRun(context.Background(), nil, nil, nil, runInput{
+	_, out, err := handleRun(context.Background(), nil, nil, nil, "", runInput{
 		Command:      []string{"sh", "-c", "printf 'abcdefghijklmnop'"},
 		ExcerptBytes: 4,
 	})
@@ -138,7 +138,7 @@ func TestHandleRunExcerptTruncated(t *testing.T) {
 func TestHandleRunExcerptClamped(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 
-	_, out, err := handleRun(context.Background(), nil, nil, nil, runInput{
+	_, out, err := handleRun(context.Background(), nil, nil, nil, "", runInput{
 		Command:      []string{"echo", "ok"},
 		ExcerptBytes: 1 << 24, // 16 MB, way over the cap
 	})
@@ -153,7 +153,7 @@ func TestHandleRunExcerptClamped(t *testing.T) {
 func TestHandleRunEmptyCommand(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 
-	_, _, err := handleRun(context.Background(), nil, nil, nil, runInput{})
+	_, _, err := handleRun(context.Background(), nil, nil, nil, "", runInput{})
 	if err == nil {
 		t.Fatalf("expected error for empty command, got nil")
 	}
@@ -162,7 +162,7 @@ func TestHandleRunEmptyCommand(t *testing.T) {
 func TestHandleRunStartError(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 
-	_, out, err := handleRun(context.Background(), nil, nil, nil, runInput{
+	_, out, err := handleRun(context.Background(), nil, nil, nil, "", runInput{
 		Command: []string{"this-binary-does-not-exist-zzzz"},
 	})
 	if err != nil {
@@ -182,7 +182,7 @@ func TestHandleRunContextCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, _, err := handleRun(ctx, nil, nil, nil, runInput{
+	_, _, err := handleRun(ctx, nil, nil, nil, "", runInput{
 		Command:       []string{"sh", "-c", "sleep 2"},
 		WaitTimeoutMs: 5000,
 	})
@@ -194,7 +194,7 @@ func TestHandleRunContextCancelled(t *testing.T) {
 func TestHandleRunTailOnNonZeroExit(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 
-	_, out, err := handleRun(context.Background(), nil, nil, nil, runInput{
+	_, out, err := handleRun(context.Background(), nil, nil, nil, "", runInput{
 		Command:      []string{"sh", "-c", "printf 'HEAD123456TAIL'; exit 5"},
 		ExcerptBytes: 4,
 	})
@@ -215,7 +215,7 @@ func TestHandleRunTailOnNonZeroExit(t *testing.T) {
 func TestHandleRunHeadOverrideOnFailure(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 
-	_, out, err := handleRun(context.Background(), nil, nil, nil, runInput{
+	_, out, err := handleRun(context.Background(), nil, nil, nil, "", runInput{
 		Command:      []string{"sh", "-c", "printf 'HEAD123456TAIL'; exit 5"},
 		ExcerptBytes: 4,
 		ExcerptFrom:  excerptFromHead,
@@ -234,7 +234,7 @@ func TestHandleRunHeadOverrideOnFailure(t *testing.T) {
 func TestHandleRunTailOverrideOnSuccess(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 
-	_, out, err := handleRun(context.Background(), nil, nil, nil, runInput{
+	_, out, err := handleRun(context.Background(), nil, nil, nil, "", runInput{
 		Command:      []string{"sh", "-c", "printf 'HEAD123456TAIL'"},
 		ExcerptBytes: 4,
 		ExcerptFrom:  excerptFromTail,
@@ -253,7 +253,7 @@ func TestHandleRunTailOverrideOnSuccess(t *testing.T) {
 func TestHandleRunExcerptFromAuto(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 
-	_, out, err := handleRun(context.Background(), nil, nil, nil, runInput{
+	_, out, err := handleRun(context.Background(), nil, nil, nil, "", runInput{
 		Command:     []string{"echo", "ok"},
 		ExcerptFrom: excerptFromAuto,
 	})
@@ -268,11 +268,30 @@ func TestHandleRunExcerptFromAuto(t *testing.T) {
 func TestHandleRunInvalidExcerptFrom(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 
-	_, _, err := handleRun(context.Background(), nil, nil, nil, runInput{
+	_, _, err := handleRun(context.Background(), nil, nil, nil, "", runInput{
 		Command:     []string{"echo", "ok"},
 		ExcerptFrom: "middle",
 	})
 	if err == nil {
 		t.Fatalf("expected error for invalid excerpt_from, got nil")
+	}
+}
+
+func TestHandleRunThreadsSessionID(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+
+	_, out, err := handleRun(context.Background(), nil, nil, nil, "SESS", runInput{
+		Command: []string{"echo", "hi"},
+	})
+	if err != nil {
+		t.Fatalf("handleRun: %v", err)
+	}
+
+	meta, err := model.ReadMeta(filepath.Join(model.CaptureRoot(), out.ID))
+	if err != nil {
+		t.Fatalf("ReadMeta: %v", err)
+	}
+	if meta.SessionID != "SESS" {
+		t.Errorf("meta.SessionID = %q, want %q", meta.SessionID, "SESS")
 	}
 }

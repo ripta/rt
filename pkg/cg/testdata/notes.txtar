@@ -1,0 +1,60 @@
+env TMPDIR=$WORK
+
+# Seed two notes directly under the shared store so ordering is deterministic.
+mkdir $WORK/cg/notes
+cp note_a.json $WORK/cg/notes/AAAAAA.json
+cp note_b.json $WORK/cg/notes/BBBBBB.json
+
+# ls renders both notes newest-first: BBBBBB (later) before AAAAAA.
+exec cg note ls
+stdout 'BBBBBB'
+stdout 'AAAAAA'
+stdout 'run=4KQ2ZP'
+stdout '  baseline green'
+
+# A key-existence filter keeps only the tagged note.
+exec cg note ls -k run
+stdout 'AAAAAA'
+! stdout 'BBBBBB'
+
+# grep matches message bodies with a fixed string.
+exec cg note grep --text migration
+stdout 'BBBBBB'
+! stdout 'AAAAAA'
+
+# add allocates a fresh six-character ID and prints it.
+exec cg note add 'hello world'
+stdout '^[0-9A-Z]{6}$'
+
+# The new note is visible to ls and grep against the same store.
+exec cg note ls
+stdout 'hello world'
+exec cg note grep --text hello
+stdout 'hello world'
+
+# rm deletes by ID and prints it; the note is then gone.
+exec cg note rm AAAAAA
+stdout '^AAAAAA$'
+! exists $WORK/cg/notes/AAAAAA.json
+
+# rm of an unknown ID exits 1 with a single-line stderr message.
+! exec cg note rm ZZZZZZ
+stderr '^unknown note id: ZZZZZZ$'
+
+# rm of a malformed ID exits 2 before touching the store.
+! exec cg note rm ../evil
+stderr 'invalid note id'
+
+-- note_a.json --
+{
+  "id": "AAAAAA",
+  "created_at": "2026-07-12T10:00:00Z",
+  "keys": {"run": "4KQ2ZP"},
+  "message": "baseline green"
+}
+-- note_b.json --
+{
+  "id": "BBBBBB",
+  "created_at": "2026-07-12T10:01:00Z",
+  "message": "migration pending"
+}

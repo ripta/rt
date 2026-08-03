@@ -7,7 +7,7 @@ import (
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/ripta/rt/pkg/cg"
+	"github.com/ripta/rt/pkg/cg/model"
 )
 
 // pathsInput is the argument shape for `cg_paths`.
@@ -33,17 +33,17 @@ func registerPaths(s *mcpsdk.Server) {
 }
 
 func handlePaths(_ context.Context, _ *mcpsdk.CallToolRequest, in pathsInput) (*mcpsdk.CallToolResult, pathsOutput, error) {
-	dir, err := cg.LookupRunDir(in.ID)
-	if err != nil && !errors.Is(err, cg.ErrIncompleteRun) && !errors.Is(err, cg.ErrFailedRun) {
+	dir, err := model.LookupRunDir(in.ID)
+	if err != nil && !errors.Is(err, model.ErrIncompleteRun) && !errors.Is(err, model.ErrFailedRun) {
 		return nil, pathsOutput{}, mapLookupError(in.ID, err)
 	}
 	out := pathsOutput{
 		Stdout: filepath.Join(dir, "stdout"),
 		Stderr: filepath.Join(dir, "stderr"),
-		Meta:   filepath.Join(dir, cg.MetaFilename),
+		Meta:   filepath.Join(dir, model.MetaFilename),
 	}
-	if errors.Is(err, cg.ErrFailedRun) {
-		out.Debug = filepath.Join(dir, cg.DebugFilename)
+	if errors.Is(err, model.ErrFailedRun) {
+		out.Debug = filepath.Join(dir, model.DebugFilename)
 	}
 	return nil, out, nil
 }

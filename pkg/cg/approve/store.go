@@ -129,15 +129,64 @@ func Load(opts LoadOptions) (*Store, error) {
 		return nil, err
 	}
 
-	rules, err := buildRuleset(global, project)
+	rules, err := buildRuleset(global, project, projectRoot)
 	if err != nil {
 		return nil, err
 	}
 
-	s := &Store{Global: global, Project: project}
+	s := &Store{Global: global, Project: project, projectRoot: projectRoot}
 	s.rules.Store(rules)
 
 	return s, nil
+}
+
+// LayerDiagnosis is one layer's lint result: whether the file is present, and
+// its parse/validation error, nil when the layer is clean or absent.
+type LayerDiagnosis struct {
+	Path    string
+	Present bool
+	Err     error
+}
+
+// Diagnose validates the global and project layers independently for `cg
+// lint`, so a broken layer does not prevent reporting problems in the other.
+// Unlike Load, it never returns early on a layer error: both layers are
+// always attempted. The outer error return is reserved for the operational
+// failures Load also surfaces before it can even locate the layer files, such
+// as a home directory or working directory lookup failure.
+func Diagnose(opts LoadOptions) (global, project LayerDiagnosis, err error) {
+	globalPath := opts.GlobalPath
+	if globalPath == "" {
+		p, err := DefaultGlobalPath()
+		if err != nil {
+			return LayerDiagnosis{}, LayerDiagnosis{}, err
+		}
+		globalPath = p
+	}
+
+	projectRoot := opts.ProjectRoot
+	if projectRoot == "" {
+		root, err := DefaultProjectRoot()
+		if err != nil {
+			return LayerDiagnosis{}, LayerDiagnosis{}, err
+		}
+		projectRoot = root
+	}
+
+	projectPath := resolveProjectPath(projectRoot, opts.ProjectFiles)
+
+	globalLayer, globalErr := loadLayer(globalPath)
+	projectLayer, projectErr := loadLayer(projectPath)
+
+	// loadLayer returns a zero-value Layer on a read or parse error, path and
+	// Present included, since Load only needs the error and never reads those
+	// fields in that case. Diagnose needs both regardless: the path resolved
+	// above stands in for the possibly-empty one on the returned Layer, and a
+	// non-nil error implies the file was found, since the only path that
+	// reports it absent, os.IsNotExist, returns a nil error.
+	return LayerDiagnosis{Path: globalPath, Present: globalLayer.Present || globalErr != nil, Err: globalErr},
+		LayerDiagnosis{Path: projectPath, Present: projectLayer.Present || projectErr != nil, Err: projectErr},
+		nil
 }
 
 // loadLayer reads and parses one layer file. A missing file yields a layer with
@@ -166,11 +215,13 @@ func loadLayer(path string) (Layer, error) {
 }
 
 // buildRuleset merges the two layers into the frozen ruleset the matcher
-// evaluates. The project mode overrides the global mode; allow and deny entries
-// from both layers are unioned. The built-in default-deny set leads the deny
-// list, so it cannot be re-allowed, and deny is evaluated before allow, which
-// gives deny precedence across layers.
-func buildRuleset(global, project Layer) (*Ruleset, error) {
+// evaluates. The project mode overrides the global mode; deny, allow, and
+// restrict entries from both layers are unioned. The built-in default-deny set
+// leads the deny list, so it cannot be re-allowed, and deny is evaluated before
+// allow, which gives deny precedence across layers. Restrict is evaluated after
+// allow and the slices carry no layer provenance, so any allow from either layer
+// carves out of any restrict from either layer.
+func buildRuleset(global, project Layer, projectRoot string) (*Ruleset, error) {
 	rs := &Ruleset{Mode: ModeEnforce}
 
 	if global.Doc != nil && global.Doc.Mode != "" {
@@ -184,10 +235,22 @@ func buildRuleset(global, project Layer) (*Ruleset, error) {
 	if global.Doc != nil {
 		rs.Deny = append(rs.Deny, global.Doc.Deny...)
 		rs.Allow = append(rs.Allow, global.Doc.Allow...)
+		rs.Restrict = append(rs.Restrict, global.Doc.Restrict...)
 	}
 	if project.Doc != nil {
 		rs.Deny = append(rs.Deny, project.Doc.Deny...)
 		rs.Allow = append(rs.Allow, project.Doc.Allow...)
+		rs.Restrict = append(rs.Restrict, project.Doc.Restrict...)
+	}
+
+	for i := range rs.Deny {
+		compileMatch(&rs.Deny[i], projectRoot)
+	}
+	for i := range rs.Allow {
+		compileMatch(&rs.Allow[i], projectRoot)
+	}
+	for i := range rs.Restrict {
+		compileMatch(&rs.Restrict[i], projectRoot)
 	}
 
 	return rs, nil

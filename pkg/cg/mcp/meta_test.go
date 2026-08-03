@@ -5,20 +5,20 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ripta/rt/pkg/cg"
+	"github.com/ripta/rt/pkg/cg/model"
 )
 
 func TestHandleMetaSuccess(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 
 	sig := 15
-	seedRunDir(t, "AAAAAA", &cg.Meta{
-		ID:          "AAAAAA",
-		Command:     []string{"echo", "hi"},
+	seedRunDir(t, "AAAAAA", &model.Meta{
+		RunInfo:     model.RunInfo{ID: "AAAAAA", Command: []string{"echo", "hi"}},
 		ExitCode:    -1,
 		Signal:      &sig,
 		DurationMs:  12,
 		StdoutLines: 1,
+		Usage:       &model.Usage{Source: model.UsageSourceRusageChildren, UserUS: 8000, SystemUS: 3000},
 	})
 
 	_, out, err := handleMeta(context.Background(), nil, metaInput{ID: "AAAAAA"})
@@ -39,6 +39,44 @@ func TestHandleMetaSuccess(t *testing.T) {
 	}
 	if out.StdoutLines == nil || *out.StdoutLines != 1 {
 		t.Errorf("StdoutLines = %v, want 1", out.StdoutLines)
+	}
+	if out.Usage == nil || out.Usage.Source != model.UsageSourceRusageChildren || out.Usage.UserUS != 8000 {
+		t.Errorf("Usage = %+v, want source=%s user_us=8000", out.Usage, model.UsageSourceRusageChildren)
+	}
+}
+
+func TestHandleMetaReportsSessionID(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+
+	seedRunDir(t, "AAAAAA", &model.Meta{
+		RunInfo: model.RunInfo{ID: "AAAAAA", Command: []string{"echo", "hi"}, SessionID: "SESS"},
+	})
+
+	_, out, err := handleMeta(context.Background(), nil, metaInput{ID: "AAAAAA"})
+	if err != nil {
+		t.Fatalf("handleMeta: %v", err)
+	}
+	if out.SessionID != "SESS" {
+		t.Errorf("SessionID = %q, want %q", out.SessionID, "SESS")
+	}
+}
+
+func TestHandleMetaPoolReportsSessionID(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+
+	m := runningPoolManifest("AAAAAA")
+	m.SessionID = "SESS"
+	seedPoolDir(t, "AAAAAA", m)
+
+	_, out, err := handleMeta(context.Background(), nil, metaInput{ID: "AAAAAA"})
+	if err != nil {
+		t.Fatalf("handleMeta: %v", err)
+	}
+	if out.Manifest == nil {
+		t.Fatalf("Manifest is nil, want the pool manifest")
+	}
+	if out.Manifest.SessionID != "SESS" {
+		t.Errorf("Manifest.SessionID = %q, want %q", out.Manifest.SessionID, "SESS")
 	}
 }
 
@@ -89,5 +127,74 @@ func TestHandleMetaInFlight(t *testing.T) {
 	}
 	if out.StartedAt != nil {
 		t.Errorf("StartedAt = %v, want nil for in-flight", out.StartedAt)
+	}
+	if out.Usage != nil {
+		t.Errorf("Usage = %v, want nil for in-flight", out.Usage)
+	}
+}
+
+func TestHandleMetaPool(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+
+	m := runningPoolManifest("PPPPPP")
+	dir := seedPoolDir(t, "PPPPPP", m)
+	seedLockFile(t, dir)
+
+	_, out, err := handleMeta(context.Background(), nil, metaInput{ID: "PPPPPP"})
+	if err != nil {
+		t.Fatalf("handleMeta: %v", err)
+	}
+	if out.State != "abandoned" {
+		t.Errorf("State = %q, want abandoned for a released lock", out.State)
+	}
+	if out.Manifest == nil || out.Manifest.ID != "PPPPPP" || len(out.Manifest.Runs) != 1 {
+		t.Errorf("Manifest = %+v, want the seeded manifest", out.Manifest)
+	}
+
+	holdRunLock(t, dir)
+	_, out, err = handleMeta(context.Background(), nil, metaInput{ID: "PPPPPP"})
+	if err != nil {
+		t.Fatalf("handleMeta: %v", err)
+	}
+	if out.State != "running" {
+		t.Errorf("State = %q, want running for a held lock", out.State)
+	}
+
+	finishPoolManifest(m)
+	if err := model.WritePoolManifest(dir, m); err != nil {
+		t.Fatalf("WritePoolManifest: %v", err)
+	}
+	_, out, err = handleMeta(context.Background(), nil, metaInput{ID: "PPPPPP"})
+	if err != nil {
+		t.Fatalf("handleMeta: %v", err)
+	}
+	if out.State != "finished" {
+		t.Errorf("State = %q, want finished", out.State)
+	}
+	if out.Manifest == nil || out.Manifest.FinishedAt == nil {
+		t.Errorf("Manifest = %+v, want finished_at set", out.Manifest)
+	}
+}
+
+func TestHandleMetaInFlightWithStartInfo(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+
+	dir := seedRunDir(t, "AAAAAA", nil)
+	if err := model.WriteStartInfo(dir, &model.StartInfo{RunInfo: model.RunInfo{Command: []string{"sleep", "9"}, Cwd: "/work"}}); err != nil {
+		t.Fatalf("WriteStartInfo: %v", err)
+	}
+
+	_, out, err := handleMeta(context.Background(), nil, metaInput{ID: "AAAAAA"})
+	if err != nil {
+		t.Fatalf("handleMeta: %v", err)
+	}
+	if out.State != "running" {
+		t.Errorf("State = %q, want running", out.State)
+	}
+	if out.Cwd != "/work" {
+		t.Errorf("Cwd = %q, want /work from start.json", out.Cwd)
+	}
+	if len(out.Command) != 2 || out.Command[0] != "sleep" {
+		t.Errorf("Command = %v, want start.json command", out.Command)
 	}
 }

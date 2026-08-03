@@ -1,7 +1,6 @@
 package mcp
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"os"
@@ -32,6 +31,69 @@ func TestApprovalSchemaFieldOrder(t *testing.T) {
 	}
 	if idxRule > idxRemember {
 		t.Errorf("rule must serialize before remember:\n%s", wire)
+	}
+}
+
+// renderDivergenceTest drives the tiered divergence rendering: a small change
+// stays a unified diff, a taller one collapses to changed lines, and an even
+// larger one collapses to a count summary.
+type renderDivergenceTest struct {
+	name     string
+	snapshot string
+	current  string
+	maxLines int
+	contains []string
+	absent   []string
+}
+
+var renderDivergenceTests = []renderDivergenceTest{
+	{
+		name:     "small change keeps unified diff",
+		snapshot: "a\nb\nc\n",
+		current:  "a\nb\nc\nd\n",
+		maxLines: maxDiffLines,
+		contains: []string{"--- loaded", "+++ on disk", "+d"},
+	},
+	{
+		name:     "tall change collapses to changed lines",
+		snapshot: "a\nb\nc\nd\ne\nf\ng\nh\ni\nj\nk\nl\n",
+		current:  "a\nX1\nb\nc\nd\ne\nY1\nf\ng\nh\ni\nZ1\nj\nk\nl\n",
+		maxLines: maxDiffLines,
+		contains: []string{"+X1", "+Y1", "+Z1"},
+		absent:   []string{"@@", "loaded", "on disk"},
+	},
+	{
+		name:     "huge change collapses to summary",
+		snapshot: "a\n",
+		current:  "a\nn01\nn02\nn03\nn04\nn05\nn06\nn07\nn08\nn09\nn10\nn11\nn12\n",
+		maxLines: 1,
+		contains: []string{"12 line(s) added", "0 line(s) removed", "too large"},
+		absent:   []string{"@@", "+n01"},
+	},
+}
+
+func TestRenderDivergence(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range renderDivergenceTests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := renderDivergence([]byte(test.snapshot), []byte(test.current))
+			if n := countLines(got); n > test.maxLines {
+				t.Errorf("body has %d lines, want <= %d:\n%s", n, test.maxLines, got)
+			}
+			for _, want := range test.contains {
+				if !strings.Contains(got, want) {
+					t.Errorf("body missing %q:\n%s", want, got)
+				}
+			}
+			for _, bad := range test.absent {
+				if strings.Contains(got, bad) {
+					t.Errorf("body should not contain %q:\n%s", bad, got)
+				}
+			}
+		})
 	}
 }
 
@@ -66,7 +128,7 @@ func TestPromptAcceptRunsWithoutRemember(t *testing.T) {
 	g := newTestGateAt(t, rootDir, "", false)
 	el := &fakeElicitor{results: []*mcpsdk.ElicitResult{accept(map[string]any{"remember": false})}}
 
-	_, out, err := handleRun(context.Background(), nil, g, el, runInput{Command: []string{"echo", "hi"}})
+	_, out, err := handleRun(context.Background(), nil, g, el, "", runInput{Command: []string{"echo", "hi"}})
 	if err != nil {
 		t.Fatalf("handleRun: %v", err)
 	}
@@ -84,7 +146,7 @@ func TestPromptDeclineRefuses(t *testing.T) {
 	g := newTestGate(t, "version: 1\n", false)
 	el := &fakeElicitor{results: []*mcpsdk.ElicitResult{{Action: "decline"}}}
 
-	_, _, err := handleRun(context.Background(), nil, g, el, runInput{Command: []string{"echo", "hi"}})
+	_, _, err := handleRun(context.Background(), nil, g, el, "", runInput{Command: []string{"echo", "hi"}})
 	if err == nil {
 		t.Fatalf("expected refusal on decline")
 	}
@@ -99,7 +161,7 @@ func TestPromptCancelRefuses(t *testing.T) {
 	g := newTestGate(t, "version: 1\n", false)
 	el := &fakeElicitor{results: []*mcpsdk.ElicitResult{{Action: "cancel"}}}
 
-	_, _, err := handleRun(context.Background(), nil, g, el, runInput{Command: []string{"echo", "hi"}})
+	_, _, err := handleRun(context.Background(), nil, g, el, "", runInput{Command: []string{"echo", "hi"}})
 	if err == nil {
 		t.Fatalf("expected refusal on cancel")
 	}
@@ -114,7 +176,7 @@ func TestPromptAcceptRememberWritesRuleAndGoesLive(t *testing.T) {
 		accept(map[string]any{"remember": true, "rule": "[echo]"}),
 	}}
 
-	_, out, err := handleRun(context.Background(), nil, g, el, runInput{Command: []string{"echo", "hi"}})
+	_, out, err := handleRun(context.Background(), nil, g, el, "", runInput{Command: []string{"echo", "hi"}})
 	if err != nil {
 		t.Fatalf("handleRun: %v", err)
 	}
@@ -132,7 +194,7 @@ func TestPromptAcceptRememberWritesRuleAndGoesLive(t *testing.T) {
 
 	// The rule is live this session: a second echo must not re-prompt.
 	el2 := &fakeElicitor{}
-	_, _, err = handleRun(context.Background(), nil, g, el2, runInput{Command: []string{"echo", "again"}})
+	_, _, err = handleRun(context.Background(), nil, g, el2, "", runInput{Command: []string{"echo", "again"}})
 	if err != nil {
 		t.Fatalf("second run: %v", err)
 	}
@@ -151,7 +213,7 @@ func TestPromptRememberEditedRule(t *testing.T) {
 		accept(map[string]any{"remember": true, "rule": "[echo, hi]"}),
 	}}
 
-	_, _, err := handleRun(context.Background(), nil, g, el, runInput{Command: []string{"echo", "hi"}})
+	_, _, err := handleRun(context.Background(), nil, g, el, "", runInput{Command: []string{"echo", "hi"}})
 	if err != nil {
 		t.Fatalf("handleRun: %v", err)
 	}
@@ -167,7 +229,7 @@ func TestPromptDangerousEnvRefusedBeforePrompt(t *testing.T) {
 	g := newTestGate(t, "version: 1\n", false)
 	el := &fakeElicitor{results: []*mcpsdk.ElicitResult{accept(map[string]any{"remember": false})}}
 
-	_, _, err := handleRun(context.Background(), nil, g, el, runInput{
+	_, _, err := handleRun(context.Background(), nil, g, el, "", runInput{
 		Command: []string{"echo", "hi"},
 		Env:     map[string]string{"LD_PRELOAD": "evil.so"},
 	})
@@ -198,7 +260,7 @@ func TestPromptDivergenceReloadMerge(t *testing.T) {
 		accept(map[string]any{"choice": divergeReloadMerge}),
 	}}
 
-	_, _, err := handleRun(context.Background(), nil, g, el, runInput{Command: []string{"echo", "hi"}})
+	_, _, err := handleRun(context.Background(), nil, g, el, "", runInput{Command: []string{"echo", "hi"}})
 	if err != nil {
 		t.Fatalf("handleRun: %v", err)
 	}
@@ -231,7 +293,7 @@ func TestPromptDivergenceSkip(t *testing.T) {
 		accept(map[string]any{"choice": divergeSkip}),
 	}}
 
-	_, out, err := handleRun(context.Background(), nil, g, el, runInput{Command: []string{"echo", "hi"}})
+	_, out, err := handleRun(context.Background(), nil, g, el, "", runInput{Command: []string{"echo", "hi"}})
 	if err != nil {
 		t.Fatalf("handleRun: %v", err)
 	}
@@ -249,16 +311,11 @@ func TestPromptDivergenceSkip(t *testing.T) {
 func TestPromptRememberWriteErrorStillRuns(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 
-	var buf bytes.Buffer
-	old := stderr
-	stderr = &buf
-	defer func() { stderr = old }()
-
 	rootDir := t.TempDir()
 	g := newTestGateAt(t, rootDir, "", false)
 	// Force a persistence failure by making the project path a directory, so the
 	// atomic rename onto it fails. The command must still run, and a diagnostic
-	// must be emitted.
+	// must ride back in the result.
 	if err := os.Mkdir(projectFile(rootDir), 0o755); err != nil {
 		t.Fatalf("seed project path as dir: %v", err)
 	}
@@ -266,14 +323,14 @@ func TestPromptRememberWriteErrorStillRuns(t *testing.T) {
 	el := &fakeElicitor{results: []*mcpsdk.ElicitResult{
 		accept(map[string]any{"remember": true, "rule": "[echo]"}),
 	}}
-	_, out, err := handleRun(context.Background(), nil, g, el, runInput{Command: []string{"echo", "hi"}})
+	_, out, err := handleRun(context.Background(), nil, g, el, "", runInput{Command: []string{"echo", "hi"}})
 	if err != nil {
 		t.Fatalf("handleRun: %v", err)
 	}
 	if out.ExitCode == nil || *out.ExitCode != 0 {
 		t.Errorf("command should run despite write failure; ExitCode = %v", out.ExitCode)
 	}
-	if !strings.Contains(buf.String(), "remember") {
-		t.Errorf("expected a persistence diagnostic on stderr, got %q", buf.String())
+	if !strings.Contains(out.RememberWarning, "remember") {
+		t.Errorf("expected a persistence diagnostic in the result, got %q", out.RememberWarning)
 	}
 }

@@ -1,0 +1,5 @@
+# The old bare-cg execution form no longer runs programs; it errors and points
+# at cg run.
+! exec cg -- echo hello
+stderr 'unknown command'
+stderr 'cg run'

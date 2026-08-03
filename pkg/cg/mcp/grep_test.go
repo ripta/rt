@@ -8,15 +8,15 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ripta/rt/pkg/cg"
+	"github.com/ripta/rt/pkg/cg/model"
 )
 
 // writeStreams seeds $TMPDIR/cg/<id>/ with a finished-looking run and the given
 // stdout and stderr contents.
 func writeStreams(t *testing.T, id, stdout, stderr string) {
 	t.Helper()
-	seedRunDir(t, id, &cg.Meta{ID: id, Command: []string{"echo", "hi"}})
-	root := cg.CaptureRoot()
+	seedRunDir(t, id, &model.Meta{RunInfo: model.RunInfo{ID: id, Command: []string{"echo", "hi"}}})
+	root := model.CaptureRoot()
 	if err := os.WriteFile(filepath.Join(root, id, "stdout"), []byte(stdout), 0o644); err != nil {
 		t.Fatalf("writing stdout: %v", err)
 	}
@@ -225,7 +225,7 @@ func TestHandleGrepUnknownID(t *testing.T) {
 func TestHandleGrepIncompleteRun(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 
-	dir := filepath.Join(cg.CaptureRoot(), "AAAAAA")
+	dir := filepath.Join(model.CaptureRoot(), "AAAAAA")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}

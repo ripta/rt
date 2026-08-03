@@ -102,21 +102,22 @@ explicitly, e.g. `sin(45 * PI / 180)`.
 `cg`
 ----
 
-Run a command and annotate each output line with a stream indicator: `O` for
-stdout, `E` for stderr, `I` for cg's own lifecycle messages. At the end of the
-run, a one-line summary reports the exit code, wall duration, and per-stream
-line counts.
+Run a command with `cg run` and annotate each output line with a stream
+indicator: `O` for stdout, `E` for stderr, `I` for cg's own lifecycle messages.
+At the end of the run, a one-line summary reports the exit code, wall duration,
+and per-stream line counts. Bare `cg` is dispatch-only: it owns the `run`,
+resolution, and `mcp` subcommands and no longer execs programs itself.
 
 ```
 go install github.com/ripta/rt/cmd/cg@latest
 ```
 
 ```
-❯ cg -- echo hello
+❯ cg run -- echo hello
 O: hello
 I: Finished exitcode=0 in 2ms (out=1 err=0)
 
-❯ cg -- sh -c 'echo out; echo err >&2'
+❯ cg run -- sh -c 'echo out; echo err >&2'
 O: out
 E: err
 I: Finished exitcode=0 in 3ms (out=1 err=1)
@@ -131,7 +132,7 @@ and appends a short run ID to the summary line. Resolution subcommands thread
 the ID through follow-up calls:
 
 ```
-❯ cg -c -- sh -c 'echo out; echo err >&2'
+❯ cg run -c -- sh -c 'echo out; echo err >&2'
 I: Finished exitcode=0 in 3ms (out=1 err=1) id=Q3F9K2
 
 ❯ cg out Q3F9K2
@@ -145,13 +146,22 @@ I: Finished exitcode=0 in 3ms (out=1 err=1) id=Q3F9K2
 ```
 
 `cg ls` lists recent runs, most-recent-first; `cg ls -n N` overrides the
-default cap of 20. Capture never deletes anything; `cg prune` is the explicit
+default cap of 20, and `-n 0` (or any negative value) lists everything.
+`--state`, `--exit-code`, `--since`/`--before`, `--cwd`, and `--session-id`
+narrow the listing further; all are optional and compose with each other and
+with `--pool` (see below for the full grammar). `--cwd DIR` matches a run's
+recorded working directory, resolving relative paths and symlinks before
+comparing. `--session-id` matches a run's or pool's recorded session (see
+below). A signaled
+run shows its negated signal number in EXIT (`-15` for SIGTERM) rather than an
+encoded exit code. Capture never deletes anything; `cg prune` is the explicit
 cleanup hook:
 
 ```
 ❯ cg ls
-Q3F9K2  exit=0   3ms     sh -c 'echo out; echo err >&2'
-M7P4QX  exit=42  2ms     sh -c 'exit 42'
+CG ID    EXIT   RUNTIME   COMMAND
+Q3F9K2      0       3ms   sh -c 'echo out; echo err >&2'
+M7P4QX     42       2ms   sh -c 'exit 42'
 
 ❯ cg prune                  # keep the 50 most recent by mtime
 ❯ cg prune --keep 10
@@ -159,15 +169,85 @@ M7P4QX  exit=42  2ms     sh -c 'exit 42'
 ❯ cg prune --dry-run
 ```
 
-`-v` / `--verbose` prefixes every line with a timestamp and adds a started/finished
-preamble; `--format` controls the layout using Go's `time.Format` syntax.
-`--buffered` defers child output until the command finishes, grouping by stream.
-`--log-parse json|logfmt` reformats structured log lines inline.
+EXIT and RUNTIME are right-justified to a shared width across the listing; CG
+ID and COMMAND stay left-aligned. EXIT is always a bare number (or `?` when a
+run has none), so a wide STATE word like `pool:abandoned` never drags EXIT's
+column wide the way a combined column would.
+
+`--output`/`-o` picks the rendering: `table` (default, shown above) is
+ID/exit/runtime/command; `wide` inserts a SESSION column after CG ID (a run's
+session ID, or `-` for a standalone run that has none), inserts STATE after
+RUNTIME, and adds SYSTEM and USER cpu-time columns before command; `json` prints
+a `{"runs": [...]}` envelope, one object per run in the same shape `cg meta`
+returns (including `cwd` and `session_id`), with `manifest` set instead of the
+usual finished-run fields on a collapsed pool row. STATE is the same
+running/finished/failed/abandoned/unknown vocabulary as `--state`, with a
+`pool:` prefix on a collapsed pool row's own state:
+
+```
+❯ cg ls -o wide
+CG ID    SESSION   EXIT   RUNTIME   STATE      SYSTEM   USER   COMMAND
+Q3F9K2   -            0       3ms   finished      2ms    1ms   sh -c 'echo out; echo err >&2'
+M7P4QX   -           42       2ms   finished      2ms    1ms   sh -c 'exit 42'
+
+❯ cg ls -o json
+{
+  "runs": [
+    {"id": "Q3F9K2", "state": "finished", "command": ["sh", "-c", "echo out; echo err >&2"], "cwd": "/home/rt", ...},
+    {"id": "M7P4QX", "state": "finished", "command": ["sh", "-c", "exit 42"], "cwd": "/home/rt", ...}
+  ]
+}
+```
+
+`cg run` takes the execution flags. `-v` / `--verbose` prefixes every line with a
+timestamp and adds a started/finished preamble; `--format` controls the layout
+using Go's `time.Format` syntax. `--buffered` defers child output until the
+command finishes, grouping by stream. `--log-parse json|logfmt` reformats
+structured log lines inline. cg flags must precede the command; everything after
+the first positional or `--` is passed through to the child untouched.
+
+`cg note` records free-form memos that outlive a single run. A note carries an
+ID, a required message, an optional set of `key=value` tags, and a creation
+timestamp. Notes persist under `$TMPDIR/cg/notes/` and are shared with the
+`cg_note_*` MCP tools. A note written from the shell is visible to an agent, and
+a note written by an agent is visible here.
+
+`cg note add` takes the message as an argument or on stdin. Repeat `-k` to
+attach tags. `cg note ls` lists notes newest-first; `-n` overrides the default
+cap of 20, and `-k key` or `-k key=value` filters by tag. `cg note grep`
+searches message bodies with `--text` (a fixed string) or `--pattern` (an RE2
+regex). `cg note rm` deletes notes by ID.
+
+```
+❯ cg note add 'baseline suite green at HEAD' -k run=Q3F9K2 -k branch=cg5
+D2BHTQ
+
+❯ cg note add 'migration still running; hold re-runs'
+68NBND
+
+❯ cg note ls
+68NBND  2026-07-13T02:18:15Z
+  migration still running; hold re-runs
+
+D2BHTQ  2026-07-13T02:18:15Z  branch=cg5 run=Q3F9K2
+  baseline suite green at HEAD
+
+❯ cg note ls -k run=Q3F9K2
+D2BHTQ  2026-07-13T02:18:15Z  branch=cg5 run=Q3F9K2
+  baseline suite green at HEAD
+
+❯ cg note grep --text baseline
+D2BHTQ  2026-07-13T02:18:15Z  branch=cg5 run=Q3F9K2
+  baseline suite green at HEAD
+
+❯ cg note rm D2BHTQ
+D2BHTQ
+```
 
 `cg mcp` starts a stdio MCP server that exposes the capture-run model as native
 tools, using the same on-disk storage the shell subcommands use — a run started
-with `cg -c` is visible to `cg_list`, and a run started by `cg_run` is visible
-to `cg ls`. Register with Claude Code:
+with `cg run -c` is visible to `cg_list`, and a run started by `cg_run` is
+visible to `cg ls`. Register with Claude Code:
 
 ```
 claude mcp add cg cg mcp
@@ -183,11 +263,13 @@ Or by hand in the MCP host config:
 }
 ```
 
-The server registers ten tools:
+The server registers sixteen tools:
 
 | Tool | Purpose |
 |------|---------|
+| `cg_info` | Report server diagnostics: start time, uptime, cwd, `session_id`, and build info. |
 | `cg_run` | Run a command with capture; returns metadata and head/tail excerpts. |
+| `cg_run_many` | Run a flat pool of commands with a parallelism knob and a fail policy; returns a pool ID and a per-run summary. |
 | `cg_list` | List recent runs, most-recent-first. |
 | `cg_meta` | Return run state and metadata. |
 | `cg_wait` | Block until a run finishes or a timeout elapses. |
@@ -197,9 +279,117 @@ The server registers ten tools:
 | `cg_stderr` | Fetch captured stderr with byte limits and head/tail windowing. |
 | `cg_grep` | Search captured output and return matching lines. |
 | `cg_prune` | Evict runs by count or age. |
+| `cg_note_add` | Record a free-form note with an optional set of `key=value` tags. |
+| `cg_note_list` | List notes newest-first, with an optional key filter and limit. |
+| `cg_note_delete` | Delete a note by ID. |
+| `cg_note_grep` | Search note bodies and return whole matching notes. |
+
+The notes store is shared the same way capture runs are. A note written with
+`cg note add` is visible to `cg_note_list`, and a note written by `cg_note_add`
+is visible to `cg note ls`.
 
 A non-zero child exit code is data, not an MCP error: `cg_run` returns
 successfully with `exit_code: N` and the caller decides how to react.
+
+Runs survive `cg mcp` restarts. Each `cg_run` hands the child to a small
+detached supervisor process whose lifetime matches the run's. Restarting the
+server does not kill or lose in-flight runs; a fresh server picks them up from
+the run directory. One caveat: `cg_wait` keeps an in-process fast path only for
+runs the current server started. After a restart, waits on pre-existing runs
+fall back to filesystem polling. Same result, slightly coarser latency.
+
+If a supervisor dies before recording the run's exit — a SIGKILL, say — the
+run never gets its `meta.json`. Such a run lists as `abandoned` in `cg ls` and
+in `cg_list`, which also accepts `state: abandoned` as a filter. `cg prune`
+treats abandoned runs as evictable alongside finished ones. A run whose
+supervisor still holds the run lock is live and is never pruned.
+
+A run directory with no lock file, no pid file, and no `start.json` at all
+carries no liveness signal whatsoever, which happens when a supervisor dies
+before it can even acquire the lock. Such a run lists as `unknown` rather than
+`running` in `cg ls` and in `cg_list`, which also accepts `state: unknown` as a
+filter. When `start.json` is missing, both `cg ls` and `cg_list` fall back to
+the run directory's mtime for an approximate elapsed time: `cg ls` marks it
+with a `~` prefix, and `cg_list` sets `started_at_approx: true` alongside the
+mtime-derived `started_at`.
+
+`cg ls --state` and `cg_list`'s `state` input both take the same enum:
+`all|finished|running|failed|abandoned|unknown`. `cg ls` defaults to `all`,
+listing every state, and `cg_list` does too. **This is a change from
+`cg_list`'s earlier default of `finished`** — a caller that didn't pass
+`state` explicitly now sees running, failed, abandoned, and unknown rows it
+didn't before; pass `state: "finished"` to keep the old behavior.
+
+`--exit-code` on `cg ls` and `exit_code` on `cg_list` filter finished runs by
+exit code: a bare `N` means equals, or prefix with `!=`, `>=`, `>`, `<`, or
+`<=` for the other five comparisons. Runs with no exit code (running,
+abandoned, unknown, start-failed) never match. A collapsed pool summary row
+has no single exit code to compare — it always passes through untouched,
+regardless of the filter; expand with `--pool any` (or a pool ID) to filter
+individual member rows instead.
+
+`--since`/`--before` on `cg ls` and `since`/`before` on `cg_list` filter by
+start time. `since` is inclusive ("at or after"); `before` is exclusive
+("strictly before"). TIME accepts a relative duration meaning ago (`4h`,
+`7d`, the same grammar `cg prune --older-than` uses), a full RFC3339
+timestamp, or a bare `YYYY-MM-DD` date interpreted as local-timezone
+midnight. Unlike `--exit-code`, these bounds do apply to pool rows, using the
+pool's own precise `started_at` — the exemption is specific to exit codes,
+which pools genuinely don't have one of.
+
+A `cg mcp` server mints a `session_id` when it starts and stamps it on every
+run and pool it spawns. `cg_info` reports the running server's own session, and
+`cg_meta` reports the session recorded against a run. `--session-id` on `cg ls`
+and `session_id` on `cg_list` filter by it, spanning standalone runs and pool
+rows alike, so an agent can list every run and pool its conversation produced
+with one filter. A standalone `cg run` has no server behind it and carries no
+session. An unmatched session lists nothing rather than erroring. The ID is
+minted fresh per server process, so a `cg mcp` restart begins a new session.
+
+`cg_run_many` runs a flat pool of commands. Each argv in `commands` runs
+`repeat` times, through at most `parallelism` workers. Parallelism defaults to
+1, which executes runs in listed order with repeats consecutive. `on_error`
+decides what a failure does to the rest of the pool: `continue` (default) runs
+everything, `stop` schedules nothing new, and `kill` additionally cancels
+in-flight runs. `cwd` and `env` are shared across the pool. `wait` and
+`wait_timeout_ms` work as in `cg_run`; a timeout returns the partial summary
+while the pool keeps running.
+
+`cg_run_many` is not a workflow engine. There are no dependencies between runs,
+no conditionals, and no per-run fallback; the calling agent is the control-flow
+engine. There is also no `cg run-many` shell counterpart, since the shell
+already has `xargs -P` and `make -j`.
+
+The result is a summary: counts, the commands array echoed once, and one flat
+record per run referencing its command by index. Failed runs carry tail
+excerpts of both streams, sized by `excerpt_bytes` with `0` disabling them,
+under a 16 KB pool-wide budget; failures past the budget carry
+`excerpt_omitted: true` instead. Successful runs carry no excerpts. Skipped and
+pending runs are visible in the summary; a pending run has no run ID yet.
+
+A pool is one more ID in the run namespace: a directory under the capture root
+holding `pool.json` and no stream files. Members are ordinary sibling run
+directories, so `cg_meta`, `cg_stdout`, `cg_stderr`, and `cg_grep` work on any
+member run ID from the summary. Scheduling lives in a small detached pool
+supervisor, following the same pattern as single runs. A server restart
+therefore loses nothing: in-flight runs finish, pending jobs still get
+scheduled, and a fresh server's `cg_wait` on the pool ID aggregates via
+polling. A SIGKILLed pool supervisor leaves an abandoned pool, listed and
+evictable like an abandoned run.
+
+The other tools understand pools. `cg_wait` on a pool ID blocks until the pool
+finishes and returns the same summary as the sync call. `cg_list` and `cg ls`
+collapse members behind one row per pool with state and counts; the `pool`
+filter expands them: a pool ID lists that pool's members, `none` lists only
+standalone runs, and `any` lists everything uncollapsed. `cg_meta` on a pool ID
+returns the pool state and the manifest. `cg_prune` evicts a pool and its
+members as one unit, and never a member from under a live pool. `cg_cancel`
+accepts pool IDs: the default SIGTERM stops scheduling and lets in-flight runs
+finish, while SIGINT additionally cancels them.
+
+Every distinct command in a pool passes the approval gate below before anything
+spawns. A denial fails the whole call with nothing started, and `repeat` does
+not multiply prompts.
 
 `cg_run` checks each command against an approval matcher before running it. The
 default mode prompts for unmatched commands when the client supports elicitation,
@@ -215,16 +405,41 @@ deny:
     message: do not run executables from temporary directories
 allow:
   - prefix: [go, test]
-    as_basename: true
+  - prefix: [./scripts/build.sh]
   - regex: '^/opt/foo/bin/[^ ]+(\s|$)'
 ```
 
-In enforce mode the matcher checks deny rules, then allow rules, then prompts;
-deny always wins. Each rule matches by `exact` argv, `prefix` tokens, `glob`,
-or `regex`. `argv[0]` is resolved to an absolute path before matching, so
-path-based rules work however the command was spelled. `as_basename: true`
-matches the program's basename instead, regardless of install path; shells and
-inline-code interpreters are denied by default and cannot be re-allowed.
+In enforce mode the matcher checks deny rules, then allow rules, then restrict
+rules, then prompts; deny always wins. Each rule matches by `exact` argv, `prefix`
+tokens, `glob`, or `regex`. `argv[0]` is resolved to an absolute path before
+matching. For `exact` and `prefix` rules the first token's shape decides how it
+matches: a bare program name (`go`) matches the invoked basename however the
+command was spelled, an absolute path pins the exact executable, and a relative
+path (`./scripts/build.sh`) resolves against the project root. `glob` and `regex`
+rules match the canonical absolute join by default and accept `as_basename: true`
+to match the basename join instead; the shape inference covers `exact` and
+`prefix`, so `as_basename` is rejected there. Shells and inline-code interpreters
+are denied by default and cannot be re-allowed.
+
+A `restrict` section adds a fourth tier below `allow`: a command that matches a
+`restrict` rule but no `allow` rule is refused rather than prompted, so a policy
+can enumerate the safe subset of a tool and fail the rest closed within that
+scope. The tiers run `deny` > `allow` > `restrict` > `prompt`, so an `allow`
+carves a command out of a `restrict` scope while an explicit `deny` still beats
+everything. `restrict` rules take the same four kinds as `allow` and `deny` and
+accept an optional `message`.
+
+```yaml
+allow:
+  - prefix: [git, show]
+  - prefix: [git, log]
+restrict:
+  - prefix: [git]
+    message: only read-only git is permitted here
+```
+
+Here `git show` and `git log` run, every other `git` subcommand is refused with
+the message, and a command outside the `git` scope still prompts.
 
 
 `enc`

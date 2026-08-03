@@ -2,6 +2,7 @@ package approve
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -204,8 +205,8 @@ func TestLoadProjectModeOverridesGlobal(t *testing.T) {
 func TestLoadUnionsLayers(t *testing.T) {
 	t.Parallel()
 
-	global := writeGlobal(t, "version: 1\ndeny:\n  - prefix: [git, push, --force]\nallow:\n  - prefix: [go, test]\n")
-	root := writeProject(t, "version: 1\ndeny:\n  - prefix: [terraform, destroy]\nallow:\n  - prefix: [make]\n")
+	global := writeGlobal(t, "version: 1\ndeny:\n  - prefix: [git, push, --force]\nallow:\n  - prefix: [go, test]\nrestrict:\n  - prefix: [git]\n")
+	root := writeProject(t, "version: 1\ndeny:\n  - prefix: [terraform, destroy]\nallow:\n  - prefix: [make]\nrestrict:\n  - prefix: [terraform]\n")
 
 	s, err := Load(LoadOptions{GlobalPath: global, ProjectRoot: root})
 	if err != nil {
@@ -219,6 +220,32 @@ func TestLoadUnionsLayers(t *testing.T) {
 	}
 	if len(rs.Allow) != 2 {
 		t.Errorf("allow count = %d, want 2", len(rs.Allow))
+	}
+	if len(rs.Restrict) != 2 {
+		t.Errorf("restrict count = %d, want 2", len(rs.Restrict))
+	}
+}
+
+// TestLoadRestrictCrossLayer covers the settled cross-layer precedence: a project
+// allow carves out of a global restrict because allow (tier 3) beats restrict
+// (tier 4) regardless of which layer each rule came from.
+func TestLoadRestrictCrossLayer(t *testing.T) {
+	t.Parallel()
+
+	global := writeGlobal(t, "version: 1\nrestrict:\n  - prefix: [git]\n")
+	root := writeProject(t, "version: 1\nallow:\n  - prefix: [git, show]\n")
+
+	s, err := Load(LoadOptions{GlobalPath: global, ProjectRoot: root})
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+
+	rs := s.Ruleset()
+	if got := rs.Match(identitySubject([]string{"git", "show", "HEAD"})); got.Decision != DecisionRun {
+		t.Errorf("git show decision = %v, want run (project allow carves out of global restrict)", got.Decision)
+	}
+	if got := rs.Match(identitySubject([]string{"git", "push"})); got.Decision != DecisionRefuse || !got.Restricted {
+		t.Errorf("git push = {%v, restricted=%v}, want refuse via restrict", got.Decision, got.Restricted)
 	}
 }
 
@@ -250,6 +277,81 @@ func TestLoadInvalidRuleFailsLoad(t *testing.T) {
 
 	if _, err := Load(LoadOptions{GlobalPath: global, ProjectRoot: emptyRoot}); err == nil {
 		t.Fatalf("Load() expected an error for an invalid rule, got nil")
+	}
+}
+
+func TestDiagnoseBothClean(t *testing.T) {
+	t.Parallel()
+
+	global := writeGlobal(t, "version: 1\nallow:\n  - prefix: [git]\n")
+	root := writeProject(t, "version: 1\nallow:\n  - prefix: [make]\n")
+
+	g, p, err := Diagnose(LoadOptions{GlobalPath: global, ProjectRoot: root})
+	if err != nil {
+		t.Fatalf("Diagnose() error: %v", err)
+	}
+	if !g.Present || g.Err != nil {
+		t.Errorf("global = %+v, want present with no error", g)
+	}
+	if !p.Present || p.Err != nil {
+		t.Errorf("project = %+v, want present with no error", p)
+	}
+}
+
+func TestDiagnoseBothMissing(t *testing.T) {
+	t.Parallel()
+
+	missingGlobal := filepath.Join(t.TempDir(), "nope.yaml")
+	emptyRoot := t.TempDir()
+
+	g, p, err := Diagnose(LoadOptions{GlobalPath: missingGlobal, ProjectRoot: emptyRoot})
+	if err != nil {
+		t.Fatalf("Diagnose() error: %v", err)
+	}
+	if g.Present || g.Err != nil {
+		t.Errorf("global = %+v, want absent with no error", g)
+	}
+	if p.Present || p.Err != nil {
+		t.Errorf("project = %+v, want absent with no error", p)
+	}
+}
+
+// TestDiagnoseBothBrokenReportsBoth is the reason Diagnose exists rather than
+// reusing Load: a broken global layer must not prevent the project layer's
+// problems from being reported in the same run.
+func TestDiagnoseBothBrokenReportsBoth(t *testing.T) {
+	t.Parallel()
+
+	global := writeGlobal(t, "version: 1\ndeny:\n  - message: no kind here\n")
+	root := writeProject(t, "version: 1\nallow:\n  - prefix: [make]\n    message: not allowed here\n")
+
+	g, p, err := Diagnose(LoadOptions{GlobalPath: global, ProjectRoot: root})
+	if err != nil {
+		t.Fatalf("Diagnose() error: %v", err)
+	}
+	if g.Err == nil || !errors.Is(g.Err, ErrNoRuleKind) {
+		t.Errorf("global.Err = %v, want it to match ErrNoRuleKind", g.Err)
+	}
+	if p.Err == nil || !errors.Is(p.Err, ErrMessageOnAllow) {
+		t.Errorf("project.Err = %v, want it to match ErrMessageOnAllow", p.Err)
+	}
+}
+
+func TestDiagnoseOnlyProjectBroken(t *testing.T) {
+	t.Parallel()
+
+	global := writeGlobal(t, "version: 1\nallow:\n  - prefix: [git]\n")
+	root := writeProject(t, "version: 1\nallow:\n  - exact: [git]\n    prefix: [git]\n")
+
+	g, p, err := Diagnose(LoadOptions{GlobalPath: global, ProjectRoot: root})
+	if err != nil {
+		t.Fatalf("Diagnose() error: %v", err)
+	}
+	if g.Err != nil {
+		t.Errorf("global.Err = %v, want nil", g.Err)
+	}
+	if p.Err == nil || !errors.Is(p.Err, ErrMultipleRuleKinds) {
+		t.Errorf("project.Err = %v, want it to match ErrMultipleRuleKinds", p.Err)
 	}
 }
 

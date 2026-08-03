@@ -1,6 +1,7 @@
 package approve
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -9,13 +10,24 @@ import (
 )
 
 // ruleKindKeys are the four mutually exclusive rule-kind keys. Exactly one must
-// appear in each allow/deny entry.
+// appear in each allow/deny/restrict entry.
 var ruleKindKeys = map[string]RuleKind{
 	"exact":  KindExact,
 	"prefix": KindPrefix,
 	"glob":   KindGlob,
 	"regex":  KindRegex,
 }
+
+// ruleSection identifies which top-level sequence a rule belongs to. It drives
+// the field constraints: message is valid on deny and restrict, permit_unsafe_envs
+// only on allow.
+type ruleSection int
+
+const (
+	sectionDeny ruleSection = iota
+	sectionAllow
+	sectionRestrict
+)
 
 // ParseDocument decodes one approve.yaml layer's bytes into both a yaml.Node
 // (retained for later round-trip writes) and a validated, compiled Document.
@@ -42,62 +54,72 @@ func ParseDocument(raw []byte) (*yaml.Node, *Document, error) {
 // every allow/deny entry. It pairs each typed rule with its source node by
 // index so error messages can carry a line number and so the single rule kind
 // can be recorded on the typed rule.
+//
+// Every rule in the document is checked before validateDocument returns, so a
+// file with several broken rules reports all of them in one error rather than
+// just the first; the version check is the exception, since an unknown schema
+// version means the rest of the document cannot be trusted to have decoded
+// against the expected shape at all.
 func validateDocument(node *yaml.Node, doc *Document) error {
 	if doc.Version != 1 {
 		return ErrUnknownVersion
 	}
 
+	var errs []error
+
 	switch doc.Mode {
 	case "", ModeEnforce, ModeAllowAll, ModeDenyAll:
 	default:
-		return fmt.Errorf("%w: %q", ErrUnknownMode, doc.Mode)
+		errs = append(errs, fmt.Errorf("%w: %q", ErrUnknownMode, doc.Mode))
 	}
 
 	root := rootMapping(node)
+	errs = append(errs, validateEntries(findMapValue(root, "deny"), doc.Deny, sectionDeny)...)
+	errs = append(errs, validateEntries(findMapValue(root, "allow"), doc.Allow, sectionAllow)...)
+	errs = append(errs, validateEntries(findMapValue(root, "restrict"), doc.Restrict, sectionRestrict)...)
 
-	if err := validateEntries(findMapValue(root, "deny"), doc.Deny, true); err != nil {
-		return err
-	}
-	if err := validateEntries(findMapValue(root, "allow"), doc.Allow, false); err != nil {
-		return err
-	}
-
-	return nil
+	return errors.Join(errs...)
 }
 
-// validateEntries validates each entry in a deny or allow sequence, records its
-// rule kind on the matching typed rule, and compiles glob/regex patterns. seq
-// is the YAML sequence node and may be nil when the key is absent.
-func validateEntries(seq *yaml.Node, rules []Rule, isDeny bool) error {
+// validateEntries validates each entry in a deny, allow, or restrict sequence,
+// records its rule kind on the matching typed rule, and compiles glob/regex
+// patterns. seq is the YAML sequence node and may be nil when the key is absent.
+// It collects every entry's error rather than stopping at the first, so a
+// caller sees every broken rule in the sequence at once; an entry whose
+// validateRule fails skips compileRule, since the rule kind compileRule relies
+// on was not established.
+func validateEntries(seq *yaml.Node, rules []Rule, section ruleSection) []error {
+	var errs []error
 	for i := range rules {
 		var entry *yaml.Node
 		if seq != nil && i < len(seq.Content) {
 			entry = seq.Content[i]
 		}
 
-		if err := validateRule(entry, &rules[i], isDeny); err != nil {
-			return err
+		if err := validateRule(entry, &rules[i], section); err != nil {
+			errs = append(errs, err)
+			continue
 		}
 		if err := compileRule(&rules[i]); err != nil {
-			return err
+			errs = append(errs, err)
 		}
 	}
 
-	return nil
+	return errs
 }
 
 // validateRule inspects the entry's mapping keys to enforce exactly one rule
-// kind and the deny-only / allow-only field constraints, then records the kind
-// on the typed rule. Inspecting the node keys distinguishes a present-but-empty
-// value from an absent key, which the typed decode alone cannot.
-func validateRule(entry *yaml.Node, rule *Rule, isDeny bool) error {
+// kind and the per-section field constraints, then records the kind on the typed
+// rule. Inspecting the node keys distinguishes a present-but-empty value from an
+// absent key, which the typed decode alone cannot.
+func validateRule(entry *yaml.Node, rule *Rule, section ruleSection) error {
 	line := 0
 	if entry != nil {
 		line = entry.Line
 	}
 
 	var kinds []RuleKind
-	var hasMessage, hasPermit bool
+	var hasMessage, hasPermit, hasAsBasename bool
 	if entry != nil && entry.Kind == yaml.MappingNode {
 		for k := 0; k+1 < len(entry.Content); k += 2 {
 			key := entry.Content[k].Value
@@ -110,6 +132,8 @@ func validateRule(entry *yaml.Node, rule *Rule, isDeny bool) error {
 				hasMessage = true
 			case "permit_unsafe_envs":
 				hasPermit = true
+			case "as_basename":
+				hasAsBasename = true
 			}
 		}
 	}
@@ -121,11 +145,14 @@ func validateRule(entry *yaml.Node, rule *Rule, isDeny bool) error {
 		return fmt.Errorf("line %d: %w", line, ErrMultipleRuleKinds)
 	}
 
-	if hasMessage && !isDeny {
+	if hasMessage && section == sectionAllow {
 		return fmt.Errorf("line %d: %w", line, ErrMessageOnAllow)
 	}
-	if hasPermit && isDeny {
-		return fmt.Errorf("line %d: %w", line, ErrPermitOnDeny)
+	if hasPermit && section != sectionAllow {
+		return fmt.Errorf("line %d: %w", line, ErrPermitNotOnAllow)
+	}
+	if hasAsBasename && (kinds[0] == KindExact || kinds[0] == KindPrefix) {
+		return fmt.Errorf("line %d: %w", line, ErrAsBasenameOnTokens)
 	}
 
 	rule.kind = kinds[0]

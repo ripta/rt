@@ -1,3 +1,4 @@
-! exec cg
-stderr 'Usage:'
-stderr 'cg \[flags\] -- COMMAND'
+exec cg
+stdout 'Usage:'
+stdout 'Available Commands:'
+stdout 'run'

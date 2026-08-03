@@ -4,8 +4,7 @@ generate-proto:
 imports:
 	goimports -w -l -local github.com/ripta/rt .
 
-install:
-	go install -v ./cmd/...
+install: hyper
 
 install-protoc:
 	go install -v google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.11

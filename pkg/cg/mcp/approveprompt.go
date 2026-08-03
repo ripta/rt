@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"os"
 	"strings"
 
 	jsonschema "github.com/google/jsonschema-go/jsonschema"
@@ -13,13 +11,9 @@ import (
 	"github.com/pmezard/go-difflib/difflib"
 	"gopkg.in/yaml.v3"
 
-	"github.com/ripta/rt/pkg/cg"
 	"github.com/ripta/rt/pkg/cg/approve"
+	"github.com/ripta/rt/pkg/cg/model"
 )
-
-// stderr is where best-effort persistence diagnostics go. It is a package
-// variable so tests can capture the messages.
-var stderr io.Writer = os.Stderr
 
 const (
 	actionAccept = "accept"
@@ -28,20 +22,31 @@ const (
 	divergeOverwrite   = "overwrite"
 	divergeSkip        = "skip"
 
+	// maxDiffLines bounds how tall the divergence body may grow. The elicitation
+	// dialog does not scroll, so a taller body pushes the approval buttons off
+	// screen; past this many lines the body collapses to changed lines, then to a
+	// count summary.
+	maxDiffLines = 10
 	maxDiffBytes = 4000
 )
 
 // prompt asks the user to approve an unmatched command. Accept runs the command
 // and, when remember is checked, persists the edited prefix rule to the project
 // file and swaps it into the live matcher. Decline and cancel refuse this once.
-func (g *gate) prompt(ctx context.Context, in runInput, el elicitor) error {
-	suggestion := approve.SuggestPrefix(in.Command)
+// The suggestion pre-fills the executable path resolved for the run, chosen by
+// RulePath so a shim keeps its invoked name, and a remembered rule is strict by
+// default; the user can edit it down to a name.
+//
+// A non-empty first return is a best-effort persistence diagnostic the caller
+// surfaces in the tool result; the command was still approved and runs.
+func (g *gate) prompt(ctx context.Context, tool string, in runInput, resolved *model.Resolution, el elicitor) (string, error) {
+	suggestion := approve.SuggestPrefix(in.Command, resolved.RulePath())
 	res, err := el.Elicit(ctx, &mcpsdk.ElicitParams{
 		Message:         approvalMessage(in),
 		RequestedSchema: approvalSchema(suggestion, g.store.Project.Path),
 	})
 	if err != nil {
-		return fmt.Errorf("cg_run refused: approval prompt failed: %w", err)
+		return "", fmt.Errorf("%s refused: approval prompt failed: %w", tool, err)
 	}
 	// A declined or cancelled prompt refuses the command this once and persists
 	// nothing. Elicitation only returns form content on accept, so the remember
@@ -51,46 +56,48 @@ func (g *gate) prompt(ctx context.Context, in runInput, el elicitor) error {
 	// already carries Accept and Decline buttons, and duplicating that choice
 	// inside the form is clunky.
 	if res.Action != actionAccept {
-		return fmt.Errorf("cg_run refused: command was declined at the approval prompt")
+		return "", fmt.Errorf("%s refused: command was declined at the approval prompt", tool)
 	}
 
 	if remember(res.Content) {
 		tokens, err := parseRuleField(res.Content, suggestion)
 		if err != nil {
-			return fmt.Errorf("cg_run refused: %w", err)
+			return "", fmt.Errorf("%s refused: %w", tool, err)
 		}
-		g.persistRemember(ctx, tokens, el)
+		return g.persistRemember(ctx, tokens, el), nil
 	}
 
-	return nil
+	return "", nil
 }
 
 // persistRemember writes the remembered rule, resolving on-disk divergence
 // through a second prompt. Persistence is best-effort: the command was approved,
-// so a write failure or a skipped divergence still lets the run proceed; the
-// problem is reported to the server's stderr.
-func (g *gate) persistRemember(ctx context.Context, tokens []string, el elicitor) {
+// so a write failure or a skipped divergence still lets the run proceed. It
+// returns a diagnostic the caller surfaces in the tool result, or empty on
+// success, rather than writing to the server's stderr, which an MCP host would
+// bleed onto the screen.
+func (g *gate) persistRemember(ctx context.Context, tokens []string, el elicitor) string {
 	changed, current, err := g.store.CheckProjectDivergence()
 	if err != nil {
-		fmt.Fprintf(stderr, "cg_run: skipping remember: %v\n", err)
-		return
+		return fmt.Sprintf("skipping remember: %v", err)
 	}
 
 	strategy := approve.WriteDirect
 	if changed {
 		strategy, err = g.resolveDivergence(ctx, current, el)
 		if err != nil {
-			fmt.Fprintf(stderr, "cg_run: skipping remember: %v\n", err)
-			return
+			return fmt.Sprintf("skipping remember: %v", err)
 		}
 		if strategy < 0 {
-			return
+			return ""
 		}
 	}
 
 	if err := g.store.AppendProjectAllowPrefix(tokens, strategy); err != nil {
-		fmt.Fprintf(stderr, "cg_run: remember write failed: %v\n", err)
+		return fmt.Sprintf("remember write failed: %v", err)
 	}
+
+	return ""
 }
 
 // resolveDivergence prompts the user to reconcile an on-disk change to the
@@ -130,7 +137,7 @@ func approvalMessage(in runInput) string {
 		cwd = "(server cwd)"
 	}
 
-	return fmt.Sprintf("Allow this command?\n\n  %s\n\nworking directory: %s", cg.EscapeArgs(in.Command), cwd)
+	return fmt.Sprintf("Allow this command?\n\n  %s\n\nworking directory: %s", model.EscapeArgs(in.Command), cwd)
 }
 
 // approvalSchema builds the elicitation form: an editable rule field pre-filled
@@ -164,25 +171,87 @@ func approvalSchema(suggestion []string, path string) *jsonschema.Schema {
 	}
 }
 
-// divergenceMessage renders the second prompt's body with a unified diff of the
-// project file as loaded versus its current on-disk content. path is the project
-// rules file the diff describes.
+// divergenceMessage renders the second prompt's body describing how the project
+// file as loaded differs from its current on-disk content. path is the project
+// rules file the change describes.
 func divergenceMessage(snapshot, current []byte, path string) string {
+	return fmt.Sprintf("%s changed on disk since it was loaded. How should the remembered rule be saved?\n\n%s", path, renderDivergence(snapshot, current))
+}
+
+// renderDivergence renders a compact view of the change between the loaded
+// snapshot and the current on-disk content. A small change shows as a unified
+// diff with one line of context; a taller change collapses to just the added and
+// removed lines; a change whose changed lines still overflow collapses to a count
+// summary. This keeps the body short enough that the approval buttons stay on
+// screen, since the elicitation dialog does not scroll.
+func renderDivergence(snapshot, current []byte) string {
 	diff, err := difflib.GetUnifiedDiffString(difflib.UnifiedDiff{
 		A:        difflib.SplitLines(string(snapshot)),
 		B:        difflib.SplitLines(string(current)),
 		FromFile: "loaded",
 		ToFile:   "on disk",
-		Context:  3,
+		Context:  1,
 	})
 	if err != nil {
-		diff = "(could not render diff)"
-	}
-	if len(diff) > maxDiffBytes {
-		diff = diff[:maxDiffBytes] + "\n... (diff truncated)"
+		return "(could not render diff)"
 	}
 
-	return fmt.Sprintf("%s changed on disk since it was loaded. How should the remembered rule be saved?\n\n%s", path, diff)
+	diff = strings.TrimRight(diff, "\n")
+	if countLines(diff) <= maxDiffLines {
+		return clampBytes(diff)
+	}
+
+	changed := changedLines(diff)
+	if len(changed) <= maxDiffLines {
+		return clampBytes(strings.Join(changed, "\n"))
+	}
+
+	added, removed := 0, 0
+	for _, line := range changed {
+		if strings.HasPrefix(line, "+") {
+			added++
+		} else {
+			removed++
+		}
+	}
+
+	return fmt.Sprintf("%d line(s) added, %d line(s) removed (change too large to show)", added, removed)
+}
+
+// changedLines extracts only the added and removed lines from a unified diff,
+// dropping the file headers, hunk headers, and context lines. The returned lines
+// keep their leading + or - marker.
+func changedLines(diff string) []string {
+	var out []string
+	for _, line := range strings.Split(diff, "\n") {
+		if strings.HasPrefix(line, "+++") || strings.HasPrefix(line, "---") {
+			continue
+		}
+		if strings.HasPrefix(line, "+") || strings.HasPrefix(line, "-") {
+			out = append(out, line)
+		}
+	}
+
+	return out
+}
+
+// countLines reports the number of newline-separated lines in s.
+func countLines(s string) int {
+	if s == "" {
+		return 0
+	}
+
+	return strings.Count(s, "\n") + 1
+}
+
+// clampBytes guards against pathologically long lines by capping the body at
+// maxDiffBytes, since the line-count bounds alone do not limit line width.
+func clampBytes(s string) string {
+	if len(s) > maxDiffBytes {
+		return s[:maxDiffBytes] + "\n... (truncated)"
+	}
+
+	return s
 }
 
 // divergenceSchema builds the titled-enum form for reconciling an on-disk

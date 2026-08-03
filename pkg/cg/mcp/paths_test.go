@@ -6,12 +6,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ripta/rt/pkg/cg"
+	"github.com/ripta/rt/pkg/cg/model"
 )
 
 func TestHandlePathsSuccess(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
-	dir := seedRunDir(t, "AAAAAA", &cg.Meta{ID: "AAAAAA", Command: []string{"echo", "hi"}})
+	dir := seedRunDir(t, "AAAAAA", &model.Meta{RunInfo: model.RunInfo{ID: "AAAAAA", Command: []string{"echo", "hi"}}})
 
 	_, out, err := handlePaths(context.Background(), nil, pathsInput{ID: "AAAAAA"})
 	if err != nil {

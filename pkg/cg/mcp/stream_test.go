@@ -7,15 +7,15 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ripta/rt/pkg/cg"
+	"github.com/ripta/rt/pkg/cg/model"
 )
 
 // writeStream overwrites $TMPDIR/cg/<id>/<name> with content. The run dir is
 // seeded first so the file exists and the run looks well-formed.
 func writeStream(t *testing.T, id, name, content string) string {
 	t.Helper()
-	seedRunDir(t, id, &cg.Meta{ID: id, Command: []string{"echo", "hi"}})
-	path := filepath.Join(cg.CaptureRoot(), id, name)
+	seedRunDir(t, id, &model.Meta{RunInfo: model.RunInfo{ID: id, Command: []string{"echo", "hi"}}})
+	path := filepath.Join(model.CaptureRoot(), id, name)
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatalf("writing %s: %v", path, err)
 	}
@@ -171,7 +171,7 @@ func TestHandleStreamStderrFile(t *testing.T) {
 func TestHandleStreamIncompleteRun(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 
-	dir := filepath.Join(cg.CaptureRoot(), "AAAAAA")
+	dir := filepath.Join(model.CaptureRoot(), "AAAAAA")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}

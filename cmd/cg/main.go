@@ -6,14 +6,12 @@ import (
 	"os"
 
 	"github.com/ripta/rt/pkg/cg"
-	"github.com/ripta/rt/pkg/cg/mcp"
 	"github.com/ripta/rt/pkg/version"
 )
 
 func main() {
 	cmd := cg.NewCommand()
 	cmd.AddCommand(version.NewCommand())
-	cmd.AddCommand(mcp.NewCommand())
 
 	err := cmd.Execute()
 	if err == nil {
