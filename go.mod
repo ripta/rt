@@ -12,7 +12,7 @@ require (
 	github.com/gosuri/uilive v0.0.4
 	github.com/hashicorp/hcl/v2 v2.24.0
 	github.com/liggitt/tabwriter v0.0.0-20181228230101-89fcab3d43de
-	github.com/modelcontextprotocol/go-sdk v1.6.1
+	github.com/modelcontextprotocol/go-sdk v1.7.0
 	github.com/mr-tron/base58 v1.3.0
 	github.com/pmezard/go-difflib v1.0.0
 	github.com/r3labs/diff/v3 v3.0.2
