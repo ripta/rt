@@ -7,7 +7,7 @@ require (
 	github.com/containerd/console v1.0.5
 	github.com/elk-language/go-prompt v1.4.0
 	github.com/go-logfmt/logfmt v0.6.1
-	github.com/google/cel-go v0.30.0
+	github.com/google/cel-go v0.31.0
 	github.com/google/jsonschema-go v0.4.3
 	github.com/gosuri/uilive v0.0.4
 	github.com/hashicorp/hcl/v2 v2.24.0
@@ -19,7 +19,7 @@ require (
 	github.com/ripta/hypercmd v0.8.0
 	github.com/ripta/reals v0.0.0-20260614185130-b214700ec783
 	github.com/ripta/unihan v0.0.0-20250404091138-c307c698a880
-	github.com/rogpeppe/go-internal v1.15.0
+	github.com/rogpeppe/go-internal v1.16.0
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10
 	github.com/stretchr/testify v1.11.1
