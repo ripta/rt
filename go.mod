@@ -1,6 +1,6 @@
 module github.com/ripta/rt
 
-go 1.26.0
+go 1.27.0
 
 require (
 	github.com/BurntSushi/toml v1.6.0
@@ -18,7 +18,7 @@ require (
 	github.com/r3labs/diff/v3 v3.0.2
 	github.com/ripta/hypercmd v0.8.0
 	github.com/ripta/reals v0.0.0-20260614185130-b214700ec783
-	github.com/ripta/unihan v0.0.0-20250404091138-c307c698a880
+	github.com/ripta/unihan v0.0.0-20260912233852-6ba344e46465
 	github.com/rogpeppe/go-internal v1.16.0
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10
