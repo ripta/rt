@@ -10,15 +10,15 @@ require (
 	github.com/google/cel-go v0.30.0
 	github.com/google/jsonschema-go v0.4.3
 	github.com/gosuri/uilive v0.0.4
-	github.com/hashicorp/hcl/v2 v2.24.0
+	github.com/hashicorp/hcl/v2 v2.25.0
 	github.com/liggitt/tabwriter v0.0.0-20181228230101-89fcab3d43de
-	github.com/modelcontextprotocol/go-sdk v1.7.0
+	github.com/modelcontextprotocol/go-sdk v1.8.0
 	github.com/mr-tron/base58 v1.3.0
 	github.com/pmezard/go-difflib v1.0.0
 	github.com/r3labs/diff/v3 v3.0.2
 	github.com/ripta/hypercmd v0.8.0
 	github.com/ripta/reals v0.0.0-20260614185130-b214700ec783
-	github.com/ripta/unihan v0.0.0-20260912233852-6ba344e46465
+	github.com/ripta/unihan v0.2.0
 	github.com/rogpeppe/go-internal v1.16.0
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10
@@ -26,14 +26,14 @@ require (
 	github.com/thediveo/enumflag/v2 v2.2.1
 	github.com/vmihailenco/msgpack/v5 v5.4.1
 	github.com/zclconf/go-cty v1.19.0
-	golang.org/x/crypto v0.55.0
-	golang.org/x/term v0.45.0
-	golang.org/x/text v0.41.0
-	golang.org/x/time v0.15.0
+	golang.org/x/crypto v0.57.0
+	golang.org/x/term v0.46.0
+	golang.org/x/text v0.42.0
+	golang.org/x/time v0.16.0
 	google.golang.org/protobuf v1.36.12
 	gopkg.in/yaml.v3 v3.0.1
 	lukechampine.com/blake3 v1.4.1
-	mvdan.cc/sh/v3 v3.14.0
+	mvdan.cc/sh/v3 v3.14.1
 	olympos.io/encoding/edn v0.0.0-20201019073823-d3554ca0b0a3
 )
 
@@ -60,11 +60,11 @@ require (
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	golang.org/x/exp v0.0.0-20260611194520-c48552f49976 // indirect
-	golang.org/x/mod v0.38.0 // indirect
+	golang.org/x/mod v0.41.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
-	golang.org/x/sync v0.22.0 // indirect
-	golang.org/x/sys v0.47.0 // indirect
-	golang.org/x/tools v0.48.0 // indirect
+	golang.org/x/sync v0.23.0 // indirect
+	golang.org/x/sys v0.48.0 // indirect
+	golang.org/x/tools v0.49.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260610212136-7ab31c22f7ad // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260610212136-7ab31c22f7ad // indirect
 )
