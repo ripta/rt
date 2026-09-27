@@ -89,6 +89,29 @@ func serverInfoSessionID(t *testing.T, sessionID string) string {
 	return out.SessionID
 }
 
+func TestServerSendsInstructionsOnInitialize(t *testing.T) {
+	ctx := context.Background()
+	server := newServer("test", time.Now(), "SESS", &gate{blindlyAllow: true})
+
+	serverTransport, clientTransport := mcpsdk.NewInMemoryTransports()
+	ss, err := server.Connect(ctx, serverTransport, nil)
+	if err != nil {
+		t.Fatalf("server.Connect: %v", err)
+	}
+	t.Cleanup(func() { _ = ss.Close() })
+
+	client := mcpsdk.NewClient(&mcpsdk.Implementation{Name: "test-client", Version: "0"}, nil)
+	cs, err := client.Connect(ctx, clientTransport, nil)
+	if err != nil {
+		t.Fatalf("client.Connect: %v", err)
+	}
+	t.Cleanup(func() { _ = cs.Close() })
+
+	if got := cs.InitializeResult().Instructions; got != serverInstructions {
+		t.Errorf("Instructions = %q, want serverInstructions", got)
+	}
+}
+
 func TestAllowedEnvReportsOnlySetAllowlistedVars(t *testing.T) {
 	t.Setenv("USER", "tester")
 	t.Setenv("SECRET_TOKEN", "do-not-leak")

@@ -64,12 +64,21 @@ func runServer(cmd *cobra.Command, opts *serverOptions) error {
 	return s.Run(cmd.Context(), &mcpsdk.StdioTransport{})
 }
 
+// serverInstructions steers clients away from polling long runs. Claude Code moves an MCP call that
+// outlives its auto-background threshold into a background task and notifies the model when it
+// completes, so one blocking call costs a single turn where a cg_wait loop costs one per timeout.
+const serverInstructions = `For a long-running command, call cg_run or cg_run_many synchronously and set wait_timeout_ms above the expected duration. The default is 60000, which is shorter than most builds and test suites.
+
+If the client moves the call to the background, keep working or end the turn. Do not poll with cg_wait. The client delivers the result when the run finishes.
+
+Use wait=false only to run other work alongside the command. Use cg_wait to resume a run whose original call was lost, such as after a client restart. Runs are recorded on disk, so the ID stays valid.`
+
 // newServer constructs a fully-registered MCP server. Pulled out so tests can
 // drive it without going through stdio. startedAt is the server's start time
 // and sessionID names this server process; both are reported by cg_info and
 // fixed for the process's lifetime.
 func newServer(v string, startedAt time.Time, sessionID string, g *gate) *mcpsdk.Server {
-	s := mcpsdk.NewServer(&mcpsdk.Implementation{Name: "cg", Version: v}, nil)
+	s := mcpsdk.NewServer(&mcpsdk.Implementation{Name: "cg", Version: v}, &mcpsdk.ServerOptions{Instructions: serverInstructions})
 	reg := newRunRegistry()
 	registerRun(s, reg, g, sessionID)
 	registerRunMany(s, reg, g, sessionID)
