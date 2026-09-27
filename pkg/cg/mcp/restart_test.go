@@ -270,7 +270,7 @@ func TestRestartToleranceWaitAndList(t *testing.T) {
 	}
 }
 
-func TestRestartToleranceCancel(t *testing.T) {
+func TestRestartCancelRefused(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 
 	server, id, dir := startServerRun(t, "sh", "-c", "echo ready; sleep 30")
@@ -278,32 +278,22 @@ func TestRestartToleranceCancel(t *testing.T) {
 	waitStdoutContains(t, dir, "ready", 5*time.Second)
 	killServer(t, server)
 
-	// The canceling process never parented the child: the child's parent is
-	// the supervisor, and the process that spawned the supervisor is dead.
+	// A fresh registry stands in for the restarted server. It never received
+	// the supervisor's ack, so the only pid on hand is the one on disk, and
+	// that is not trusted.
 	reg := newRunRegistry()
 
-	_, cout, err := handleCancel(context.Background(), reg, cancelInput{ID: id, Signal: "SIGTERM"})
-	if err != nil {
-		t.Fatalf("handleCancel: %v", err)
-	}
-	if !cout.Signaled {
-		t.Fatalf("Signaled = false, want true")
+	_, _, err := handleCancel(context.Background(), reg, cancelInput{ID: id, Signal: "SIGTERM"})
+	if err == nil || !strings.Contains(err.Error(), "not started by this server") {
+		t.Fatalf("handleCancel err = %v, want not started by this server", err)
 	}
 
-	_, wout, err := handleWait(context.Background(), reg, waitInput{ID: id, TimeoutMs: 10000})
+	_, wout, err := handleWait(context.Background(), reg, waitInput{ID: id, TimeoutMs: 200})
 	if err != nil {
 		t.Fatalf("handleWait: %v", err)
 	}
-	if !wout.Finished {
-		t.Fatalf("Finished = false, want true after cancel")
-	}
-
-	m, err := model.ReadMeta(dir)
-	if err != nil {
-		t.Fatalf("ReadMeta: %v", err)
-	}
-	if m.Signal == nil || *m.Signal != int(syscall.SIGTERM) {
-		t.Errorf("meta Signal = %v, want %d", m.Signal, int(syscall.SIGTERM))
+	if wout.Finished {
+		t.Fatalf("Finished = true, want the run still in flight after a refused cancel")
 	}
 }
 

@@ -19,7 +19,7 @@ const PidFilename = "pid"
 // enough that a single write suffices; no temp-and-rename is needed.
 func WritePidFile(dir string, pid int) error {
 	path := filepath.Join(dir, PidFilename)
-	if err := os.WriteFile(path, []byte(strconv.Itoa(pid)+"\n"), 0o644); err != nil {
+	if err := writeRunFile(path, []byte(strconv.Itoa(pid)+"\n")); err != nil {
 		return fmt.Errorf("writing pid file: %w", err)
 	}
 	return nil
@@ -28,7 +28,7 @@ func WritePidFile(dir string, pid int) error {
 // ReadPidFile reads and parses the pid recorded in dir/pid. A missing file
 // surfaces as fs.ErrNotExist unwrapped, so callers can branch on it.
 func ReadPidFile(dir string) (int, error) {
-	data, err := os.ReadFile(filepath.Join(dir, PidFilename))
+	data, err := readRunFile(filepath.Join(dir, PidFilename))
 	if err != nil {
 		return 0, err
 	}

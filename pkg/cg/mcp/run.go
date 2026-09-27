@@ -109,7 +109,7 @@ func handleRun(ctx context.Context, reg *runRegistry, g *gate, el elicitor, sess
 		return nil, runOutput{}, fmt.Errorf("starting capture: %w", err)
 	}
 	if reg != nil {
-		reg.Add(run.ID, run.Done)
+		reg.Add(run.ID, run.Done, run.Pid, false)
 	}
 
 	if !wait {
@@ -216,7 +216,7 @@ func readWindow(path string, limit int, window string) (string, bool, error) {
 // readExcerpt reads up to limit bytes from the head of path. hasMore reports
 // whether the file holds more data than was returned.
 func readExcerpt(path string, limit int) (content string, hasMore bool, err error) {
-	f, err := os.Open(path)
+	f, err := model.OpenRunFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return "", false, nil
@@ -243,7 +243,7 @@ func readExcerpt(path string, limit int) (content string, hasMore bool, err erro
 // readTailExcerpt reads up to limit bytes from the tail of path. hasMore
 // reports whether the file is larger than the returned window.
 func readTailExcerpt(path string, limit int) (content string, hasMore bool, err error) {
-	f, err := os.Open(path)
+	f, err := model.OpenRunFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return "", false, nil

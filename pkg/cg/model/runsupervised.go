@@ -14,10 +14,13 @@ import (
 
 // CaptureRun is an in-flight or completed capture. The on-disk layout matches
 // the shell --capture path: $TMPDIR/cg/<ID>/{stdout,stderr,meta.json}. Done
-// closes when the child exits and meta.json has been written.
+// closes when the child exits and meta.json has been written. Pid is the
+// child's pid, which is also its process-group ID, as reported over the
+// supervisor's status pipe rather than read back from disk.
 type CaptureRun struct {
 	ID   string
 	Dir  string
+	Pid  int
 	Done <-chan struct{}
 }
 
@@ -140,7 +143,7 @@ func RunSupervised(args []string, opts SuperviseOptions) (*CaptureRun, error) {
 		_ = sup.Wait()
 	}()
 
-	return &CaptureRun{ID: cap.ID, Dir: cap.Dir, Done: done}, nil
+	return &CaptureRun{ID: cap.ID, Dir: cap.Dir, Pid: ack.Pid, Done: done}, nil
 }
 
 // sendSpec writes the spawn spec to the supervisor's stdin, closes it, and

@@ -101,7 +101,7 @@ type pruneCandidate struct {
 // any run. A live pool, or a still-live member under a dead one, is skipped.
 func PruneRuns(opts PruneOptions) ([]string, error) {
 	root := CaptureRoot()
-	entries, err := os.ReadDir(root)
+	entries, err := ReadCaptureRoot()
 	if errors.Is(err, fs.ErrNotExist) {
 		return []string{}, nil
 	}

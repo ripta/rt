@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -32,6 +33,19 @@ func TestCollectInfoUptimeAndBuild(t *testing.T) {
 	}
 	if out.Cwd == "" {
 		t.Errorf("Cwd is empty")
+	}
+}
+
+func TestCollectInfoCaptureRoot(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("TMPDIR", tmp)
+
+	out, err := collectInfo("v1.2.3", time.Now(), "SESS", time.Now())
+	if err != nil {
+		t.Fatalf("collectInfo: %v", err)
+	}
+	if want := filepath.Join(tmp, "cg"); out.CaptureRoot != want {
+		t.Errorf("CaptureRoot = %q, want %q", out.CaptureRoot, want)
 	}
 }
 
@@ -87,6 +101,29 @@ func serverInfoSessionID(t *testing.T, sessionID string) string {
 		t.Fatalf("unmarshaling info: %v", err)
 	}
 	return out.SessionID
+}
+
+func TestServerSendsInstructionsOnInitialize(t *testing.T) {
+	ctx := context.Background()
+	server := newServer("test", time.Now(), "SESS", &gate{blindlyAllow: true})
+
+	serverTransport, clientTransport := mcpsdk.NewInMemoryTransports()
+	ss, err := server.Connect(ctx, serverTransport, nil)
+	if err != nil {
+		t.Fatalf("server.Connect: %v", err)
+	}
+	t.Cleanup(func() { _ = ss.Close() })
+
+	client := mcpsdk.NewClient(&mcpsdk.Implementation{Name: "test-client", Version: "0"}, nil)
+	cs, err := client.Connect(ctx, clientTransport, nil)
+	if err != nil {
+		t.Fatalf("client.Connect: %v", err)
+	}
+	t.Cleanup(func() { _ = cs.Close() })
+
+	if got := cs.InitializeResult().Instructions; got != serverInstructions {
+		t.Errorf("Instructions = %q, want serverInstructions", got)
+	}
 }
 
 func TestAllowedEnvReportsOnlySetAllowlistedVars(t *testing.T) {

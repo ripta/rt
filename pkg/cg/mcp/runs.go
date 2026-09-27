@@ -11,37 +11,48 @@ const (
 	stateUnknown   = "unknown"
 )
 
-// runRegistry tracks the Done channels of capture runs that this MCP server
-// process started. cg_wait (and later cg_cancel) consult it for a fast path
-// out of filesystem polling; runs started by the shell capture path or by an
-// earlier server process are not in the registry and fall back to polling.
+// runRegistry tracks the capture runs and pools that this MCP server process
+// started. cg_wait consults it for a fast path out of filesystem polling; runs
+// started by the shell capture path or by an earlier server process are not in
+// the registry and fall back to polling.
 //
-// Entries are added by handleRun once the child is started and removed by a
-// janitor goroutine when the Done channel closes, so the map size tracks the
-// in-flight set.
+// cg_cancel signals only pids held here. The pid comes from the supervisor's
+// status pipe, so no file under the capture root can redirect a signal.
+//
+// Entries are added by handleRun and handleRunMany once the supervisor acks,
+// and removed by a janitor goroutine when the Done channel closes, so the map
+// size tracks the in-flight set.
 type runRegistry struct {
-	mu   sync.Mutex
-	done map[string]<-chan struct{}
+	mu      sync.Mutex
+	entries map[string]registryEntry
+}
+
+// registryEntry is one in-flight run or pool. For a run, pid is the child's
+// process-group ID; for a pool, it is the supervisor's pid.
+type registryEntry struct {
+	done <-chan struct{}
+	pid  int
+	pool bool
 }
 
 func newRunRegistry() *runRegistry {
-	return &runRegistry{done: make(map[string]<-chan struct{})}
+	return &runRegistry{entries: make(map[string]registryEntry)}
 }
 
-// Add registers done under id and spawns a goroutine that removes the entry
-// once done closes. Calling Add with an id that already exists overwrites the
-// previous channel; the previous janitor still cleans up its own entry, so the
-// new entry survives.
-func (r *runRegistry) Add(id string, done <-chan struct{}) {
+// Add registers a run or pool under id and spawns a goroutine that removes the
+// entry once done closes. Calling Add with an id that already exists
+// overwrites the previous entry; the previous janitor still cleans up only its
+// own entry, so the new entry survives.
+func (r *runRegistry) Add(id string, done <-chan struct{}, pid int, pool bool) {
 	r.mu.Lock()
-	r.done[id] = done
+	r.entries[id] = registryEntry{done: done, pid: pid, pool: pool}
 	r.mu.Unlock()
 
 	go func() {
 		<-done
 		r.mu.Lock()
-		if cur, ok := r.done[id]; ok && cur == done {
-			delete(r.done, id)
+		if cur, ok := r.entries[id]; ok && cur.done == done {
+			delete(r.entries, id)
 		}
 		r.mu.Unlock()
 	}()
@@ -49,8 +60,13 @@ func (r *runRegistry) Add(id string, done <-chan struct{}) {
 
 // Done returns the Done channel for id, or (nil, false) if id is not tracked.
 func (r *runRegistry) Done(id string) (<-chan struct{}, bool) {
+	e, ok := r.lookup(id)
+	return e.done, ok
+}
+
+func (r *runRegistry) lookup(id string) (registryEntry, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	done, ok := r.done[id]
-	return done, ok
+	e, ok := r.entries[id]
+	return e, ok
 }

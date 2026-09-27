@@ -22,6 +22,30 @@ func writeStream(t *testing.T, id, name, content string) string {
 	return path
 }
 
+func TestHandleStreamRefusesSymlink(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	path := writeStream(t, "AAAAAA", "stdout", "")
+
+	secret := filepath.Join(t.TempDir(), "secret")
+	if err := os.WriteFile(secret, []byte("do not leak"), 0o600); err != nil {
+		t.Fatalf("writing secret: %v", err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatalf("removing stdout: %v", err)
+	}
+	if err := os.Symlink(secret, path); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+
+	_, out, err := handleStream("stdout", streamInput{ID: "AAAAAA"})
+	if err == nil {
+		t.Fatalf("handleStream = %+v, want an error for a symlinked stdout", out)
+	}
+	if strings.Contains(out.Content, "do not leak") {
+		t.Errorf("symlink target leaked: %q", out.Content)
+	}
+}
+
 func TestHandleStreamHeadShortFile(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 	writeStream(t, "AAAAAA", "stdout", "hi\n")

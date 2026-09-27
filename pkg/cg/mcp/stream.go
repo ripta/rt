@@ -100,7 +100,7 @@ func handleStream(fileName string, in streamInput) (*mcpsdk.CallToolResult, stre
 	}
 
 	path := filepath.Join(dir, fileName)
-	f, err := os.Open(path)
+	f, err := model.OpenRunFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, streamOutput{}, fmt.Errorf("unknown run id: %s", in.ID)

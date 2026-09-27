@@ -91,8 +91,12 @@ func validateNoteKeys(keys map[string]string) error {
 // newRunDir uses os.Mkdir, then renames a temp file over the reservation to get
 // WriteMeta's atomic-write guarantee.
 func writeNote(n *Note) error {
+	if err := ensureOwnedDir(CaptureRoot()); err != nil {
+		return fmt.Errorf("creating capture root: %w", err)
+	}
+
 	root := NotesRoot()
-	if err := os.MkdirAll(root, 0o755); err != nil {
+	if err := ensureOwnedDir(root); err != nil {
 		return fmt.Errorf("creating notes root: %w", err)
 	}
 
@@ -212,11 +216,22 @@ func noteMatchesFilter(n Note, opts ListNoteOptions) bool {
 // readNotes loads every parseable note under NotesRoot. A missing root is not
 // an error.
 func readNotes() ([]Note, error) {
-	root := NotesRoot()
-	entries, err := os.ReadDir(root)
-	if errors.Is(err, fs.ErrNotExist) {
-		return []Note{}, nil
+	if err := checkOwnedDir(CaptureRoot()); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return []Note{}, nil
+		}
+		return nil, fmt.Errorf("checking capture root: %w", err)
 	}
+
+	root := NotesRoot()
+	if err := checkOwnedDir(root); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return []Note{}, nil
+		}
+		return nil, fmt.Errorf("checking notes root: %w", err)
+	}
+
+	entries, err := os.ReadDir(root)
 	if err != nil {
 		return nil, fmt.Errorf("reading notes root: %w", err)
 	}
@@ -226,7 +241,7 @@ func readNotes() ([]Note, error) {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), noteFileSuffix) {
 			continue
 		}
-		data, err := os.ReadFile(filepath.Join(root, e.Name()))
+		data, err := readRunFile(filepath.Join(root, e.Name()))
 		if err != nil {
 			continue
 		}

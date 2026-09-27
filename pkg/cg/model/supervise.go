@@ -108,13 +108,13 @@ func superviseRun(dir string, in io.Reader, out io.Writer) error {
 
 	// The server pre-created the capture files, so open without O_CREATE: a
 	// mis-pointed run dir fails loudly instead of minting stray files.
-	stdout, err := os.OpenFile(filepath.Join(dir, "stdout"), os.O_WRONLY|os.O_APPEND, 0o644)
+	stdout, err := os.OpenFile(filepath.Join(dir, "stdout"), os.O_WRONLY|os.O_APPEND|syscall.O_NOFOLLOW, 0o644)
 	if err != nil {
 		err = fmt.Errorf("opening stdout capture file: %w", err)
 		writeAck(out, SuperviseAck{StartError: err.Error()})
 		return err
 	}
-	stderr, err := os.OpenFile(filepath.Join(dir, "stderr"), os.O_WRONLY|os.O_APPEND, 0o644)
+	stderr, err := os.OpenFile(filepath.Join(dir, "stderr"), os.O_WRONLY|os.O_APPEND|syscall.O_NOFOLLOW, 0o644)
 	if err != nil {
 		stdout.Close()
 		err = fmt.Errorf("opening stderr capture file: %w", err)
@@ -203,7 +203,7 @@ func writeAck(out io.Writer, ack SuperviseAck) {
 // countLines counts '\n' bytes in the file at path, the same definition the in-process
 // streaming counter used, so post-hoc counts match historical ones.
 func countLines(path string) (int64, error) {
-	f, err := os.Open(path)
+	f, err := OpenRunFile(path)
 	if err != nil {
 		return 0, err
 	}

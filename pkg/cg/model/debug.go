@@ -3,7 +3,6 @@ package model
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 )
 
@@ -27,7 +26,7 @@ func WriteStartDebug(dir string, d *StartDebug) error {
 	if err != nil {
 		return fmt.Errorf("marshalling debug: %w", err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, DebugFilename), data, 0o644); err != nil {
+	if err := writeRunFile(filepath.Join(dir, DebugFilename), data); err != nil {
 		return fmt.Errorf("writing debug.json: %w", err)
 	}
 	return nil
@@ -35,7 +34,7 @@ func WriteStartDebug(dir string, d *StartDebug) error {
 
 // ReadStartDebug loads debug.json from dir.
 func ReadStartDebug(dir string) (*StartDebug, error) {
-	data, err := os.ReadFile(filepath.Join(dir, DebugFilename))
+	data, err := readRunFile(filepath.Join(dir, DebugFilename))
 	if err != nil {
 		return nil, err
 	}

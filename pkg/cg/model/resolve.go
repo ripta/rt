@@ -55,7 +55,15 @@ func LookupRunDir(id string) (string, error) {
 		return dir, ErrUnknownRunID
 	}
 
-	info, err := os.Stat(dir)
+	if err := checkOwnedDir(CaptureRoot()); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return dir, ErrUnknownRunID
+		}
+		return dir, fmt.Errorf("checking capture root: %w", err)
+	}
+
+	// Lstat so a symlink planted under the root never resolves as a run.
+	info, err := os.Lstat(dir)
 	if errors.Is(err, fs.ErrNotExist) || (err == nil && !info.IsDir()) {
 		return dir, ErrUnknownRunID
 	}
@@ -63,11 +71,11 @@ func LookupRunDir(id string) (string, error) {
 		return dir, fmt.Errorf("stat run dir: %w", err)
 	}
 
-	if _, err := os.Stat(filepath.Join(dir, MetaFilename)); err != nil {
+	if _, err := os.Lstat(filepath.Join(dir, MetaFilename)); err != nil {
 		if !errors.Is(err, fs.ErrNotExist) {
 			return dir, fmt.Errorf("stat meta.json: %w", err)
 		}
-		if _, err := os.Stat(filepath.Join(dir, DebugFilename)); err == nil {
+		if _, err := os.Lstat(filepath.Join(dir, DebugFilename)); err == nil {
 			return dir, ErrFailedRun
 		}
 		return dir, ErrIncompleteRun
@@ -348,7 +356,7 @@ func (opts *lsOptions) run(cmd *cobra.Command, args []string) error {
 	}
 
 	root := CaptureRoot()
-	entries, err := os.ReadDir(root)
+	entries, err := ReadCaptureRoot()
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil
 	}

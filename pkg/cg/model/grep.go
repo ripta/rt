@@ -167,7 +167,7 @@ func buildGrepMatcher(opts GrepOptions) (func([]byte) bool, error) {
 // the cap. A missing file yields no matches and no error, since the run dir was
 // already validated by the caller.
 func grepStream(path, stream string, matcher func([]byte) bool, maxMatches int, acc *[]GrepMatch) (bool, error) {
-	f, err := os.Open(path)
+	f, err := OpenRunFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return false, nil

@@ -23,7 +23,7 @@ var errRunLockHeld = errors.New("run lock held by another supervisor")
 // lock so concurrent probes do not conflict with each other; it still conflicts with
 // the supervisor's exclusive lock.
 func RunLockReleased(dir string) bool {
-	f, err := os.Open(filepath.Join(dir, LockFilename))
+	f, err := OpenRunFile(filepath.Join(dir, LockFilename))
 	if err != nil {
 		return false
 	}
@@ -46,7 +46,7 @@ func LockFileExists(dir string) bool {
 // held; closing it releases the lock. A held lock means another supervisor owns the
 // run directory, which is fatal rather than something to wait out.
 func acquireRunLock(dir string) (*os.File, error) {
-	f, err := os.OpenFile(filepath.Join(dir, LockFilename), os.O_CREATE|os.O_RDWR, 0o644)
+	f, err := os.OpenFile(filepath.Join(dir, LockFilename), os.O_CREATE|os.O_RDWR|syscall.O_NOFOLLOW, 0o644)
 	if err != nil {
 		return nil, fmt.Errorf("opening run lock: %w", err)
 	}
