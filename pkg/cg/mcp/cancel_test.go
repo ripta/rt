@@ -22,16 +22,14 @@ func startCancelRun(t *testing.T, reg *runRegistry, args ...string) *model.Captu
 	if err != nil {
 		t.Fatalf("RunSupervised: %v", err)
 	}
-	reg.Add(run.ID, run.Done)
+	reg.Add(run.ID, run.Done, run.Pid, false)
 	t.Cleanup(func() {
 		select {
 		case <-run.Done:
 			return
 		default:
 		}
-		if pid, perr := model.ReadPidFile(run.Dir); perr == nil {
-			_ = syscall.Kill(-pid, syscall.SIGKILL)
-		}
+		_ = syscall.Kill(-run.Pid, syscall.SIGKILL)
 	})
 	return run
 }
@@ -386,12 +384,11 @@ func TestHandleCancelProcessGone(t *testing.T) {
 	gonePid := c.Process.Pid
 	_ = c.Wait()
 
-	dir := seedRunDir(t, "AAAAAA", nil)
-	if err := model.WritePidFile(dir, gonePid); err != nil {
-		t.Fatalf("WritePidFile: %v", err)
-	}
+	seedRunDir(t, "AAAAAA", nil)
+	reg := newRunRegistry()
+	reg.Add("AAAAAA", make(chan struct{}), gonePid, false)
 
-	_, out, err := handleCancel(context.Background(), newRunRegistry(), cancelInput{ID: "AAAAAA"})
+	_, out, err := handleCancel(context.Background(), reg, cancelInput{ID: "AAAAAA"})
 	if err != nil {
 		t.Fatalf("handleCancel: %v", err)
 	}
@@ -403,16 +400,49 @@ func TestHandleCancelProcessGone(t *testing.T) {
 	}
 }
 
-func TestHandleCancelNoPidFile(t *testing.T) {
+func TestHandleCancelNotStartedHere(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 
 	seedRunDir(t, "AAAAAA", nil)
 
 	_, _, err := handleCancel(context.Background(), newRunRegistry(), cancelInput{ID: "AAAAAA"})
 	if err == nil {
-		t.Fatalf("expected error for in-flight run with no pid file")
+		t.Fatalf("expected error for an in-flight run this server did not start")
 	}
-	if !strings.Contains(err.Error(), "no pid recorded") {
-		t.Errorf("error = %q, want no pid recorded message", err.Error())
+	if !strings.Contains(err.Error(), "not started by this server") {
+		t.Errorf("error = %q, want not started by this server", err.Error())
+	}
+}
+
+func TestHandleCancelIgnoresForgedPidFile(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+
+	victim := exec.Command("sleep", "30")
+	victim.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := victim.Start(); err != nil {
+		t.Fatalf("starting victim: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = victim.Process.Kill()
+		_ = victim.Wait()
+	})
+
+	dir := seedRunDir(t, "AAAAAA", nil)
+	if err := model.WritePidFile(dir, victim.Process.Pid); err != nil {
+		t.Fatalf("WritePidFile: %v", err)
+	}
+	poolDir := seedPoolDir(t, "PPPPPP", runningPoolManifest("PPPPPP"))
+	if err := model.WritePidFile(poolDir, victim.Process.Pid); err != nil {
+		t.Fatalf("WritePidFile: %v", err)
+	}
+
+	for _, id := range []string{"AAAAAA", "PPPPPP"} {
+		if _, _, err := handleCancel(context.Background(), newRunRegistry(), cancelInput{ID: id, Signal: "SIGKILL"}); err == nil {
+			t.Errorf("%s: expected refusal for a pid file this server did not write", id)
+		}
+	}
+
+	if err := syscall.Kill(victim.Process.Pid, 0); err != nil {
+		t.Errorf("victim was signalled: %v", err)
 	}
 }

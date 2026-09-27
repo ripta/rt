@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"os"
 	"path/filepath"
 	"time"
 )
@@ -175,7 +174,7 @@ func WritePoolManifest(dir string, m *PoolManifest) error {
 
 // ReadPoolManifest loads pool.json from dir.
 func ReadPoolManifest(dir string) (*PoolManifest, error) {
-	data, err := os.ReadFile(filepath.Join(dir, PoolManifestFilename))
+	data, err := readRunFile(filepath.Join(dir, PoolManifestFilename))
 	if err != nil {
 		return nil, err
 	}
@@ -190,7 +189,7 @@ func ReadPoolManifest(dir string) (*PoolManifest, error) {
 // run ID scheme. Unlike NewCapture it creates no stream files; the pool
 // supervisor populates the directory with pool.json, lock, and pid.
 func NewPoolDir() (id, dir string, err error) {
-	if err := os.MkdirAll(CaptureRoot(), 0o755); err != nil {
+	if err := ensureOwnedDir(CaptureRoot()); err != nil {
 		return "", "", fmt.Errorf("creating capture root: %w", err)
 	}
 	return newRunDir(CaptureRoot())

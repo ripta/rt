@@ -26,7 +26,7 @@ func WriteStartInfo(dir string, s *StartInfo) error {
 	if err != nil {
 		return fmt.Errorf("marshalling start info: %w", err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, StartFilename), data, 0o644); err != nil {
+	if err := writeRunFile(filepath.Join(dir, StartFilename), data); err != nil {
 		return fmt.Errorf("writing start.json: %w", err)
 	}
 	return nil
@@ -34,7 +34,7 @@ func WriteStartInfo(dir string, s *StartInfo) error {
 
 // ReadStartInfo loads start.json from dir.
 func ReadStartInfo(dir string) (*StartInfo, error) {
-	data, err := os.ReadFile(filepath.Join(dir, StartFilename))
+	data, err := readRunFile(filepath.Join(dir, StartFilename))
 	if err != nil {
 		return nil, err
 	}

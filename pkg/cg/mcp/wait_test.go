@@ -54,7 +54,7 @@ func TestHandleWaitFastPath(t *testing.T) {
 
 	reg := newRunRegistry()
 	done := make(chan struct{})
-	reg.Add("AAAAAA", done)
+	reg.Add("AAAAAA", done, 0, false)
 
 	// Close Done after a short delay and write meta.json as the real run would.
 	go func() {
@@ -223,7 +223,7 @@ func TestHandleWaitPoolFastPath(t *testing.T) {
 
 	reg := newRunRegistry()
 	done := make(chan struct{})
-	reg.Add("AAAAAA", done)
+	reg.Add("AAAAAA", done, 0, false)
 
 	// Finish the manifest and close Done as the pool supervisor's exit would.
 	go func() {

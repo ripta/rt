@@ -28,7 +28,7 @@ type Capture struct {
 // NewCapture allocates a fresh run ID, creates $TMPDIR/cg/<ID>/, and opens
 // stdout and stderr inside it.
 func NewCapture() (*Capture, error) {
-	if err := os.MkdirAll(CaptureRoot(), 0o755); err != nil {
+	if err := ensureOwnedDir(CaptureRoot()); err != nil {
 		return nil, fmt.Errorf("creating capture root: %w", err)
 	}
 
@@ -37,11 +37,11 @@ func NewCapture() (*Capture, error) {
 		return nil, err
 	}
 
-	stdout, err := os.Create(filepath.Join(dir, "stdout"))
+	stdout, err := createRunFile(filepath.Join(dir, "stdout"))
 	if err != nil {
 		return nil, fmt.Errorf("creating stdout capture file: %w", err)
 	}
-	stderr, err := os.Create(filepath.Join(dir, "stderr"))
+	stderr, err := createRunFile(filepath.Join(dir, "stderr"))
 	if err != nil {
 		stdout.Close()
 		return nil, fmt.Errorf("creating stderr capture file: %w", err)

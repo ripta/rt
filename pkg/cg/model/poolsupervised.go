@@ -13,10 +13,11 @@ import (
 // PoolRun is an in-flight or completed pool of capture runs. Dir holds
 // pool.json and the pool lock; member runs are ordinary sibling run
 // directories. Done closes when the pool supervisor exits, which happens only
-// after the final manifest has been written.
+// after the final manifest has been written. Pid is the pool supervisor's pid.
 type PoolRun struct {
 	ID   string
 	Dir  string
+	Pid  int
 	Done <-chan struct{}
 }
 
@@ -90,5 +91,5 @@ func PoolSupervised(spec *PoolSpec) (*PoolRun, error) {
 		_ = sup.Wait()
 	}()
 
-	return &PoolRun{ID: id, Dir: dir, Done: done}, nil
+	return &PoolRun{ID: id, Dir: dir, Pid: ack.Pid, Done: done}, nil
 }

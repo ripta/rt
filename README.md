@@ -294,9 +294,15 @@ successfully with `exit_code: N` and the caller decides how to react.
 Runs survive `cg mcp` restarts. Each `cg_run` hands the child to a small
 detached supervisor process whose lifetime matches the run's. Restarting the
 server does not kill or lose in-flight runs; a fresh server picks them up from
-the run directory. One caveat: `cg_wait` keeps an in-process fast path only for
-runs the current server started. After a restart, waits on pre-existing runs
-fall back to filesystem polling. Same result, slightly coarser latency.
+the run directory. Two caveats. First, `cg_wait` keeps an in-process fast path
+only for runs the current server started. After a restart, waits on pre-existing
+runs fall back to filesystem polling. Same result, slightly coarser latency.
+
+Second, `cg_cancel` signals only runs and pools the current server started. It
+takes the pid from the supervisor's status pipe, never from a file under the
+capture root, because anything running as the same user can write there. After
+a restart, cancelling a pre-existing in-flight run is an error; use `cg cancel`
+from a shell instead.
 
 If a supervisor dies before recording the run's exit — a SIGKILL, say — the
 run never gets its `meta.json`. Such a run lists as `abandoned` in `cg ls` and

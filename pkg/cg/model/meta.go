@@ -65,7 +65,7 @@ func writeFileAtomic(dir, filename string, v any) error {
 
 // ReadMeta loads meta.json from dir.
 func ReadMeta(dir string) (*Meta, error) {
-	data, err := os.ReadFile(filepath.Join(dir, MetaFilename))
+	data, err := readRunFile(filepath.Join(dir, MetaFilename))
 	if err != nil {
 		return nil, err
 	}

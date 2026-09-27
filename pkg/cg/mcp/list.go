@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"os"
 	"path/filepath"
 	"sort"
 	"time"
@@ -138,7 +137,7 @@ func handleList(_ context.Context, _ *mcpsdk.CallToolRequest, in listInput) (*mc
 	}
 
 	root := model.CaptureRoot()
-	entries, err := os.ReadDir(root)
+	entries, err := model.ReadCaptureRoot()
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, listOutput{Runs: []listRun{}}, nil
 	}

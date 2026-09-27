@@ -174,7 +174,7 @@ func handleRunMany(ctx context.Context, reg *runRegistry, g *gate, el elicitor, 
 		return nil, runManyOutput{}, fmt.Errorf("starting pool: %w", err)
 	}
 	if reg != nil {
-		reg.Add(pool.ID, pool.Done)
+		reg.Add(pool.ID, pool.Done, pool.Pid, true)
 	}
 
 	if !wait {
