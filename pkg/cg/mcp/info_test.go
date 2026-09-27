@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -32,6 +33,19 @@ func TestCollectInfoUptimeAndBuild(t *testing.T) {
 	}
 	if out.Cwd == "" {
 		t.Errorf("Cwd is empty")
+	}
+}
+
+func TestCollectInfoCaptureRoot(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("TMPDIR", tmp)
+
+	out, err := collectInfo("v1.2.3", time.Now(), "SESS", time.Now())
+	if err != nil {
+		t.Fatalf("collectInfo: %v", err)
+	}
+	if want := filepath.Join(tmp, "cg"); out.CaptureRoot != want {
+		t.Errorf("CaptureRoot = %q, want %q", out.CaptureRoot, want)
 	}
 }
 

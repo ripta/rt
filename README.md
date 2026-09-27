@@ -267,7 +267,7 @@ The server registers sixteen tools:
 
 | Tool | Purpose |
 |------|---------|
-| `cg_info` | Report server diagnostics: start time, uptime, cwd, `session_id`, and build info. |
+| `cg_info` | Report server diagnostics: start time, uptime, cwd, `session_id`, `capture_root`, and build info. |
 | `cg_run` | Run a command with capture; returns metadata and head/tail excerpts. |
 | `cg_run_many` | Run a flat pool of commands with a parallelism knob and a fail policy; returns a pool ID and a per-run summary. |
 | `cg_list` | List recent runs, most-recent-first. |
@@ -283,6 +283,14 @@ The server registers sixteen tools:
 | `cg_note_list` | List notes newest-first, with an optional key filter and limit. |
 | `cg_note_delete` | Delete a note by ID. |
 | `cg_note_grep` | Search note bodies and return whole matching notes. |
+
+Sharing depends on both sides resolving the same `TMPDIR`. A sandboxed shell,
+such as Claude Code's Bash tool, usually gets its own `TMPDIR` while the MCP
+server keeps the user's. `cg_info` reports the server's `capture_root`. Setting
+`TMPDIR` to its parent lets the CLI read the server's runs, so an agent can
+script `cg meta`, `cg grep`, and `cg wait` over many runs and keep their output
+out of its context. The sandbox usually blocks writes there, so start runs with
+`cg_run` or `cg_run_many`.
 
 The notes store is shared the same way capture runs are. A note written with
 `cg note add` is visible to `cg_note_list`, and a note written by `cg_note_add`

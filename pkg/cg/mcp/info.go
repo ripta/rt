@@ -8,6 +8,7 @@ import (
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/ripta/rt/pkg/cg/model"
 	"github.com/ripta/rt/pkg/version"
 )
 
@@ -46,19 +47,23 @@ type infoBuild struct {
 // SessionID names this server process. It is minted at start and stamped on
 // every run and pool the server spawns, so a listing can be scoped to one
 // server's runs.
+//
+// CaptureRoot is where this server records runs. A sandboxed shell may resolve
+// a different TMPDIR, so the CLI needs this to find the server's runs.
 type infoOutput struct {
-	StartedAt time.Time         `json:"started_at"`
-	UptimeMs  int64             `json:"uptime_ms"`
-	Cwd       string            `json:"cwd"`
-	SessionID string            `json:"session_id"`
-	Build     infoBuild         `json:"build"`
-	Env       map[string]string `json:"env"`
+	StartedAt   time.Time         `json:"started_at"`
+	UptimeMs    int64             `json:"uptime_ms"`
+	Cwd         string            `json:"cwd"`
+	SessionID   string            `json:"session_id"`
+	CaptureRoot string            `json:"capture_root"`
+	Build       infoBuild         `json:"build"`
+	Env         map[string]string `json:"env"`
 }
 
 func registerInfo(s *mcpsdk.Server, v string, startedAt time.Time, sessionID string) {
 	mcpsdk.AddTool(s, &mcpsdk.Tool{
 		Name:        "cg_info",
-		Description: "Return diagnostics about the running cg MCP server: its start time and uptime, version and build info, its working directory (fixed at start; the directory a cg_run inherits when its cwd is empty), its session_id (minted at start and stamped on every run and pool this server spawns, so cg_list/cg_meta can scope to it), and the set values of a curated allowlist of environment variables.",
+		Description: "Return diagnostics about the running cg MCP server: its start time and uptime, version and build info, its working directory (fixed at start; the directory a cg_run inherits when its cwd is empty), its session_id (minted at start and stamped on every run and pool this server spawns, so cg_list/cg_meta can scope to it), its capture_root (where runs are recorded; the cg CLI reads runs from here when TMPDIR is set to its parent), and the set values of a curated allowlist of environment variables.",
 	}, func(_ context.Context, _ *mcpsdk.CallToolRequest, _ infoInput) (*mcpsdk.CallToolResult, infoOutput, error) {
 		out, err := collectInfo(v, startedAt, sessionID, time.Now())
 		return nil, out, err
@@ -73,12 +78,13 @@ func collectInfo(v string, startedAt time.Time, sessionID string, now time.Time)
 		return infoOutput{}, fmt.Errorf("resolving working directory: %w", err)
 	}
 	return infoOutput{
-		StartedAt: startedAt,
-		UptimeMs:  now.Sub(startedAt).Milliseconds(),
-		Cwd:       cwd,
-		SessionID: sessionID,
-		Build:     buildInfo(v),
-		Env:       allowedEnv(),
+		StartedAt:   startedAt,
+		UptimeMs:    now.Sub(startedAt).Milliseconds(),
+		Cwd:         cwd,
+		SessionID:   sessionID,
+		CaptureRoot: model.CaptureRoot(),
+		Build:       buildInfo(v),
+		Env:         allowedEnv(),
 	}, nil
 }
 
