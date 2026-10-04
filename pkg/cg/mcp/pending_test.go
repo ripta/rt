@@ -302,6 +302,7 @@ func richEntry() pendingEntry {
 		{
 			Resolution: &model.Resolution{Argv: []string{"git", "status"}, Resolved: "/usr/bin/git", Canonical: "/usr/bin/git"},
 			Suggestion: []string{"/usr/bin/git", "status"},
+			Prompted:   true,
 		},
 		{
 			Resolution: &model.Resolution{Argv: []string{"go", "test", "./..."}, Resolved: "/usr/bin/go"},
@@ -309,6 +310,7 @@ func richEntry() pendingEntry {
 		},
 	}
 	e.DivergenceSnapshot = []byte("rules: []\n")
+	e.Diverged = true
 
 	return e
 }
@@ -365,6 +367,10 @@ func TestPendingRoundTrip(t *testing.T) {
 
 	if !bytes.Equal(got.DivergenceSnapshot, want.DivergenceSnapshot) {
 		t.Errorf("DivergenceSnapshot = %q, want %q", got.DivergenceSnapshot, want.DivergenceSnapshot)
+	}
+
+	if got.Diverged != want.Diverged {
+		t.Errorf("Diverged = %v, want %v", got.Diverged, want.Diverged)
 	}
 
 	if !reflect.DeepEqual(got.Argvs, want.Argvs) || got.Cwd != want.Cwd || !maps.Equal(got.Env, want.Env) {

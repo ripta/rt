@@ -131,7 +131,7 @@ func TestHandleRunAutoTimeout(t *testing.T) {
 			}
 			appendStatsTestRuns(t, h, runs)
 
-			_, out, err := handleRun(context.Background(), nil, nil, nil, nil, "", runInput{
+			_, out, err := handleRun(context.Background(), nil, nil, nil, "", runInput{
 				Command:         test.Argv,
 				Cwd:             dir,
 				WaitTimeoutMs:   test.Explicit,
@@ -154,7 +154,7 @@ func TestHandleRunWithoutAutoKeepsDefault(t *testing.T) {
 		{ID: "AAAAA1", Argv: []string{"echo", "plain"}, Cwd: dir, DurationMs: 500000},
 	})
 
-	_, out, err := handleRun(context.Background(), nil, nil, nil, nil, "", runInput{
+	_, out, err := handleRun(context.Background(), nil, nil, nil, "", runInput{
 		Command: []string{"echo", "plain"},
 		Cwd:     dir,
 	})
@@ -174,7 +174,7 @@ func TestHandleRunTimeoutCarriesHistory(t *testing.T) {
 		{ID: "AAAAA2", Argv: []string{"sleep", "1"}, Cwd: dir, Day: 1, DurationMs: 3000},
 	})
 
-	_, out, err := handleRun(context.Background(), nil, nil, nil, nil, "", runInput{
+	_, out, err := handleRun(context.Background(), nil, nil, nil, "", runInput{
 		Command:       []string{"sleep", "1"},
 		Cwd:           dir,
 		WaitTimeoutMs: 150,
@@ -201,7 +201,7 @@ func TestHandleRunTimeoutCarriesHistory(t *testing.T) {
 func TestHandleRunTimeoutWithoutHistoryOmitsIt(t *testing.T) {
 	newStatsTestHistory(t)
 
-	_, out, err := handleRun(context.Background(), nil, nil, nil, nil, "", runInput{
+	_, out, err := handleRun(context.Background(), nil, nil, nil, "", runInput{
 		Command:       []string{"sleep", "1"},
 		Cwd:           canonicalTempDir(t),
 		WaitTimeoutMs: 150,
@@ -298,7 +298,7 @@ func TestRunManyAutoTimeout(t *testing.T) {
 			dir := canonicalTempDir(t)
 			seedPoolAutoHistory(t, h, dir, test)
 
-			_, out, err := handleRunMany(context.Background(), nil, nil, nil, nil, "", runManyInput{
+			_, out, err := handleRunMany(context.Background(), nil, nil, nil, "", runManyInput{
 				Commands:        poolTestCommands,
 				Repeat:          3,
 				Parallelism:     2,
@@ -326,7 +326,7 @@ func TestRunManyAutoTimeoutUsesClampedParallelism(t *testing.T) {
 	// The pool has 2 runs, so a requested parallelism of 8 is recorded as 2.
 	appendPoolTestRecord(t, h, dir, poolTestCommands, 1, 2, 100000)
 
-	_, out, err := handleRunMany(context.Background(), nil, nil, nil, nil, "", runManyInput{
+	_, out, err := handleRunMany(context.Background(), nil, nil, nil, "", runManyInput{
 		Commands:        poolTestCommands,
 		Parallelism:     8,
 		Cwd:             dir,
@@ -347,7 +347,7 @@ func TestRunManyTimeoutCarriesHistory(t *testing.T) {
 	sleepCommands := [][]string{{"sleep", "1"}}
 	appendPoolTestRecord(t, h, dir, sleepCommands, 1, 1, 7000)
 
-	_, out, err := handleRunMany(context.Background(), nil, nil, nil, nil, "", runManyInput{
+	_, out, err := handleRunMany(context.Background(), nil, nil, nil, "", runManyInput{
 		Commands:      sleepCommands,
 		Cwd:           dir,
 		WaitTimeoutMs: 150,
@@ -376,7 +376,7 @@ func TestRunManyTimeoutEstimateCarriesOnlyMax(t *testing.T) {
 		{ID: "MEMBR1", Argv: []string{"sleep", "1"}, Cwd: dir, DurationMs: 4000, Parallelism: 1},
 	})
 
-	_, out, err := handleRunMany(context.Background(), nil, nil, nil, nil, "", runManyInput{
+	_, out, err := handleRunMany(context.Background(), nil, nil, nil, "", runManyInput{
 		Commands:      [][]string{{"sleep", "1"}},
 		Repeat:        2,
 		Cwd:           dir,
@@ -400,7 +400,7 @@ func TestRunManyTimeoutEstimateCarriesOnlyMax(t *testing.T) {
 func TestRunManyTimeoutWithoutHistoryOmitsIt(t *testing.T) {
 	newStatsTestHistory(t)
 
-	_, out, err := handleRunMany(context.Background(), nil, nil, nil, nil, "", runManyInput{
+	_, out, err := handleRunMany(context.Background(), nil, nil, nil, "", runManyInput{
 		Commands:      [][]string{{"sleep", "1"}},
 		Cwd:           canonicalTempDir(t),
 		WaitTimeoutMs: 150,
@@ -421,7 +421,7 @@ func TestRunManyTimeoutWithoutHistoryOmitsIt(t *testing.T) {
 func TestRunManyFinishedCarriesNoTimedOutFields(t *testing.T) {
 	newStatsTestHistory(t)
 
-	_, out, err := handleRunMany(context.Background(), nil, nil, nil, nil, "", runManyInput{
+	_, out, err := handleRunMany(context.Background(), nil, nil, nil, "", runManyInput{
 		Commands: [][]string{{"echo", "done"}},
 		Cwd:      canonicalTempDir(t),
 	})

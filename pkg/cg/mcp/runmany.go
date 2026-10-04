@@ -101,15 +101,14 @@ func registerRunMany(s *mcpsdk.Server, reg *runRegistry, g *gate, sessionID stri
 		Name:        "cg_run_many",
 		Description: "Run a flat pool of commands: each command runs repeat times, at most parallelism at once, with on_error deciding what a failure does to the rest. Returns the pool ID and a summary with per-run IDs; failed runs carry tail excerpts. Every run is an ordinary capture run for cg_meta/cg_stdout/cg_grep drill-down, and cg_wait on the pool ID aggregates. Not a workflow engine: no dependencies between runs, no conditionals, no per-run fallback. Set wait_timeout_auto to size the wait from earlier pools. The response reports wait_timeout_ms_used. A timed_out response also carries elapsed_ms and, when earlier runs exist, history.",
 	}, func(ctx context.Context, req *mcpsdk.CallToolRequest, in runManyInput) (*mcpsdk.CallToolResult, runManyOutput, error) {
-		var el elicitor
-		if elicitationAvailable(req) {
-			el = req.Session
-		}
-		return handleRunMany(ctx, req, reg, g, el, sessionID, in)
+		return handleRunMany(ctx, reg, g, req, sessionID, in)
 	})
 }
 
-func handleRunMany(ctx context.Context, req *mcpsdk.CallToolRequest, reg *runRegistry, g *gate, el elicitor, sessionID string, in runManyInput) (*mcpsdk.CallToolResult, runManyOutput, error) {
+// handleRunMany gates and runs a pool. Every distinct command passes the gate before the first
+// spawn, and the unapproved ones share one input-required round. req is nil for callers that skip
+// the protocol, which cannot prompt.
+func handleRunMany(ctx context.Context, reg *runRegistry, g *gate, req *mcpsdk.CallToolRequest, sessionID string, in runManyInput) (*mcpsdk.CallToolResult, runManyOutput, error) {
 	repeat, parallelism, err := validateRunMany(in)
 	if err != nil {
 		return nil, runManyOutput{}, err
@@ -135,24 +134,28 @@ func handleRunMany(ctx context.Context, req *mcpsdk.CallToolRequest, reg *runReg
 	// fails the whole call with nothing started. Identical argvs are checked
 	// once, so repeat does not multiply prompts.
 	resolutions := make(map[string]*model.Resolution, len(in.Commands))
-	var warnings []string
+	var distinct [][]string
+	var resolved []*model.Resolution
 	for _, argv := range in.Commands {
 		key := model.ArgvKey(argv)
 		if _, ok := resolutions[key]; ok {
 			continue
 		}
 
-		resolved, _ := model.ResolveCommand(argv, in.Cwd)
-		warning, err := g.check(ctx, "cg_run_many", runInput{Command: argv, Cwd: in.Cwd, Env: in.Env}, resolved, el)
-		if err != nil {
-			return nil, runManyOutput{}, err
-		}
-		if warning != "" {
-			warnings = append(warnings, warning)
-		}
-		resolutions[key] = resolved
+		r, _ := model.ResolveCommand(argv, in.Cwd)
+		resolutions[key] = r
+		distinct = append(distinct, argv)
+		resolved = append(resolved, r)
 	}
-	warning := strings.Join(warnings, "; ")
+
+	outcome, err := g.check(newApprovalCall(req, "cg_run_many", distinct, resolved, in.Cwd, in.Env))
+	if err != nil {
+		return nil, runManyOutput{}, err
+	}
+	if outcome.Pending != nil {
+		return outcome.Pending, runManyOutput{}, nil
+	}
+	warning := outcome.Warning
 
 	spec := &model.PoolSpec{
 		Commands:    make([]model.PoolCommand, 0, len(in.Commands)),

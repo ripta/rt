@@ -56,7 +56,7 @@ func TestRunHistoryFoundThroughSymlinkedCwd(t *testing.T) {
 	dir, link, canonical := linkedCwd(t)
 	argv := []string{"echo", "e2e"}
 
-	_, out, err := handleRun(context.Background(), nil, nil, nil, nil, "", runInput{Command: argv, Cwd: link})
+	_, out, err := handleRun(context.Background(), nil, nil, nil, "", runInput{Command: argv, Cwd: link})
 	if err != nil {
 		t.Fatalf("handleRun: %v", err)
 	}
@@ -84,7 +84,7 @@ func TestRunHistoryFoundThroughSymlinkedCwd(t *testing.T) {
 		t.Errorf("exact = %+v, want one sample", exact)
 	}
 
-	_, out, err = handleRun(context.Background(), nil, nil, nil, nil, "", runInput{
+	_, out, err = handleRun(context.Background(), nil, nil, nil, "", runInput{
 		Command:         argv,
 		Cwd:             link,
 		WaitTimeoutAuto: true,
@@ -116,7 +116,7 @@ func TestRunManyHistoryMatchesManifestShape(t *testing.T) {
 		t.Fatalf("parallelism = %d, want it clamped to the 4 runs", parallelism)
 	}
 
-	_, out, err := handleRunMany(context.Background(), nil, nil, nil, nil, "", in)
+	_, out, err := handleRunMany(context.Background(), nil, nil, nil, "", in)
 	if err != nil {
 		t.Fatalf("handleRunMany: %v", err)
 	}
@@ -176,7 +176,7 @@ func TestRunManyTimeoutEstimateIgnoresOwnMembers(t *testing.T) {
 		{ID: "MEMBR2", Argv: slow, Cwd: dir, Day: 0, DurationMs: 20, Parallelism: 2},
 	})
 
-	_, out, err := handleRunMany(context.Background(), nil, nil, nil, nil, "", runManyInput{
+	_, out, err := handleRunMany(context.Background(), nil, nil, nil, "", runManyInput{
 		Commands:      [][]string{fast, slow},
 		Parallelism:   2,
 		Cwd:           dir,

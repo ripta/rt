@@ -252,8 +252,17 @@ func TestElicitProbeWithoutCapability(t *testing.T) {
 func connectElicitProbe(t *testing.T, protocolVersion string, handler func(context.Context, *mcpsdk.ElicitRequest) (*mcpsdk.ElicitResult, error)) *mcpsdk.ClientSession {
 	t.Helper()
 
+	return connectGate(t, &gate{blindlyAllow: true}, protocolVersion, handler)
+}
+
+// connectGate connects an SDK client to a fresh server guarded by g, over an in-memory transport.
+// protocolVersion is what the client proposes, or the SDK's latest when empty. A nil handler
+// leaves the client without the elicitation capability.
+func connectGate(t *testing.T, g *gate, protocolVersion string, handler func(context.Context, *mcpsdk.ElicitRequest) (*mcpsdk.ElicitResult, error)) *mcpsdk.ClientSession {
+	t.Helper()
+
 	ctx := context.Background()
-	server := newServer("test", time.Now(), "SESS", &gate{blindlyAllow: true})
+	server := newServer("test", time.Now(), "SESS", g)
 
 	serverTransport, clientTransport := mcpsdk.NewInMemoryTransports()
 	ss, err := server.Connect(ctx, serverTransport, nil)

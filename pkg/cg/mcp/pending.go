@@ -35,6 +35,11 @@ var ErrPendingApproval = fmt.Errorf("approval is no longer pending; call the too
 type pendingCommand struct {
 	Resolution *model.Resolution
 	Suggestion []string
+
+	// Prompted reports whether the first round asked the user about this command. The retry
+	// refuses a command that now needs a prompt but was not asked about, because there is no
+	// answer to read for it.
+	Prompted bool
 }
 
 // pendingEntry records a call that is waiting on the user. Tool, Argvs, Cwd, and Env are what the
@@ -48,9 +53,18 @@ type pendingEntry struct {
 	// Commands runs parallel to Argvs.
 	Commands []pendingCommand
 
-	// DivergenceSnapshot is the project rules file content the user saw when asked to resolve a
-	// divergence. It is nil when the file had not diverged.
+	// DivergenceSnapshot is the project rules file content on disk when the first round was
+	// built, and nil when the file was absent. The retry compares it with the file as it is
+	// then, so a change in between skips the remember whether or not the user was shown a diff.
 	DivergenceSnapshot []byte
+
+	// Diverged reports whether that content differed from what cg loaded, so the first round
+	// carried the trailing divergence form.
+	Diverged bool
+
+	// Unreadable reports that the file could not be read when the first round was built, so
+	// DivergenceSnapshot says nothing. The retry skips the remember.
+	Unreadable bool
 
 	expires time.Time
 }
@@ -168,6 +182,7 @@ func cloneCommands(cmds []pendingCommand) []pendingCommand {
 
 	out := make([]pendingCommand, len(cmds))
 	for i, c := range cmds {
+		out[i].Prompted = c.Prompted
 		out[i].Suggestion = slices.Clone(c.Suggestion)
 
 		if c.Resolution != nil {
