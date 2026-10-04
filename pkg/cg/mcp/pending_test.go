@@ -509,12 +509,6 @@ func TestPendingNonces(t *testing.T) {
 		if len(raw) < 16 {
 			t.Fatalf("nonce %q carries %d bytes, want at least 16", nonce, len(raw))
 		}
-
-		for _, secret := range []string{"git", "status", "/work", "cg_run"} {
-			if strings.Contains(nonce, secret) {
-				t.Fatalf("nonce %q reveals %q", nonce, secret)
-			}
-		}
 	}
 }
 

@@ -27,14 +27,22 @@ const (
 	maxDiffBytes = 4000
 )
 
-// approvalMessage renders the human-facing prompt body: the command as it will
-// run and the working directory it runs in.
-func approvalMessage(argv []string, cwd string) string {
+// approvalMessage renders the human-facing prompt body: the command as it will run and the working
+// directory it runs in.
+//
+// A call with several approval forms leads each one with its position, so every form stands
+// alone. A lone form carries none.
+func approvalMessage(argv []string, cwd string, pos, total int) string {
 	if cwd == "" {
 		cwd = "(server cwd)"
 	}
 
-	return fmt.Sprintf("Allow this command?\n\n  %s\n\nworking directory: %s", model.EscapeArgs(argv), cwd)
+	var lead string
+	if total > 1 {
+		lead = fmt.Sprintf("Approval %d of %d\n\n", pos, total)
+	}
+
+	return fmt.Sprintf("%sAllow this command?\n\n  %s\n\nworking directory: %s", lead, model.EscapeArgs(argv), cwd)
 }
 
 // approvalSchema builds the elicitation form: an editable rule field pre-filled

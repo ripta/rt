@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"slices"
 	"strconv"
@@ -45,13 +46,13 @@ func (g *gate) request(call approvalCall, needs []int) (gateOutcome, error) {
 	}
 
 	forms := make(mcpsdk.InputRequestMap, len(needs)+1)
-	for _, i := range needs {
+	for pos, i := range needs {
 		suggestion := approve.SuggestPrefix(call.Argvs[i], call.Resolutions[i].RulePath())
 		commands[i].Prompted = true
 		commands[i].Suggestion = suggestion
 
 		forms[approvalID(i, len(call.Argvs))] = &mcpsdk.ElicitParams{
-			Message:         approvalMessage(call.Argvs[i], call.Cwd),
+			Message:         approvalMessage(call.Argvs[i], call.Cwd, pos+1, len(needs)),
 			RequestedSchema: approvalSchema(suggestion, g.store.Project.Path),
 		}
 	}
@@ -87,7 +88,7 @@ func (g *gate) request(call approvalCall, needs []int) (gateOutcome, error) {
 // persisted, so a user who approved one command with remember checked does not lose that rule to
 // a decline on another.
 func (g *gate) answer(call approvalCall, entry *pendingEntry, needs []int) (gateOutcome, error) {
-	var declined int
+	var declined [][]string
 	var rules [][]string
 
 	for _, i := range needs {
@@ -110,7 +111,7 @@ func (g *gate) answer(call approvalCall, entry *pendingEntry, needs []int) (gate
 		// "always accept / always decline" enum to work around that: the prompt already carries
 		// Accept and Decline buttons, and duplicating that choice inside the form is clunky.
 		if res.Action != actionAccept {
-			declined++
+			declined = append(declined, call.Argvs[i])
 			continue
 		}
 
@@ -128,8 +129,8 @@ func (g *gate) answer(call approvalCall, entry *pendingEntry, needs []int) (gate
 	}
 
 	warning := g.persistRemembered(call, entry, rules)
-	if declined > 0 {
-		return gateOutcome{}, declinedError(call.Tool)
+	if len(declined) > 0 {
+		return gateOutcome{}, declinedError(call.Tool, declined, len(call.Argvs) > 1, warning)
 	}
 
 	return gateOutcome{Warning: warning}, nil
@@ -239,6 +240,29 @@ func resolutionChanged(a, b *model.Resolution) bool {
 	return a.Resolved != b.Resolved || a.Canonical != b.Canonical
 }
 
-func declinedError(tool string) error {
-	return fmt.Errorf("%s refused: command was declined at the approval prompt", tool)
+// declinedError refuses the call for every declined command, listed in command order. The warning
+// is the remember diagnostic from the accepted forms. A refusal has no result to carry it, so it
+// rides in the error text.
+//
+// A pool is a call with more than one distinct command. It always names what was declined, so the
+// user can tell which form refused. A lone command is the one that was asked about.
+func declinedError(tool string, declined [][]string, pool bool, warning string) error {
+	var b strings.Builder
+	if len(declined) == 1 {
+		fmt.Fprintf(&b, "%s refused: command was declined at the approval prompt", tool)
+	} else {
+		fmt.Fprintf(&b, "%s refused: %d commands were declined at the approval prompt", tool, len(declined))
+	}
+
+	if pool {
+		for _, argv := range declined {
+			fmt.Fprintf(&b, "\n  %s", model.EscapeArgs(argv))
+		}
+	}
+
+	if warning != "" {
+		fmt.Fprintf(&b, "\n%s", warning)
+	}
+
+	return errors.New(b.String())
 }

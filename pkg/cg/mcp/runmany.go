@@ -22,9 +22,9 @@ const (
 	// per-run supervisor.
 	maxPoolParallelism = 32
 
-	// maxPoolCommands caps distinct argvs. The gate elicits per distinct
-	// unapproved argv, so a product-only bound would let one malformed call
-	// fire hundreds of approval prompts before any side effect.
+	// maxPoolCommands caps distinct argvs. The gate builds one approval form per distinct
+	// unapproved argv and shows them in one batch, so a product-only bound would let one
+	// malformed call put hundreds of forms in front of the user before any side effect.
 	maxPoolCommands = 100
 
 	// poolExcerptBudget caps the total excerpt bytes across a pool's summary,
