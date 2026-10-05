@@ -190,35 +190,3 @@ func elicitationAvailable(req *mcpsdk.CallToolRequest) bool {
 	params := req.Session.InitializeParams()
 	return params != nil && params.Capabilities != nil && params.Capabilities.Elicitation != nil
 }
-
-// multiRoundTripVersion is the first MCP protocol version that forbids a server from sending
-// elicitation/create while serving a request. On it and later versions, a handler must return its
-// elicitations as InputRequests and read the answers from the client's retry of the same call.
-//
-// On older versions the SDK's receiving middleware fulfills returned InputRequests itself with a
-// classic elicitation and reinvokes the handler exactly once. One round of InputRequests therefore
-// works on every version, but a second round only works from this version on.
-//
-// Protocol versions are ISO dates, so string comparison orders them.
-const multiRoundTripVersion = "2026-07-28"
-
-// negotiatedVersion reports the protocol version the session negotiated, or empty when the
-// request carries no session.
-func negotiatedVersion(req *mcpsdk.CallToolRequest) string {
-	if req == nil || req.Session == nil {
-		return ""
-	}
-
-	params := req.Session.InitializeParams()
-	if params == nil {
-		return ""
-	}
-
-	return params.ProtocolVersion
-}
-
-// multiRoundTripAvailable reports whether the client itself fulfills InputRequests and retries,
-// so a handler may chain more than one round.
-func multiRoundTripAvailable(req *mcpsdk.CallToolRequest) bool {
-	return negotiatedVersion(req) >= multiRoundTripVersion
-}

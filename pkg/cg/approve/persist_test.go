@@ -1,6 +1,7 @@
 package approve
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -234,6 +235,31 @@ func TestCheckDivergenceAbsentStaysAbsent(t *testing.T) {
 	}
 	if current != nil {
 		t.Errorf("current = %q, want nil", current)
+	}
+}
+
+func TestWriteDirectRefusesChangedFile(t *testing.T) {
+	t.Parallel()
+
+	root := writeProject(t, "version: 1\nallow:\n  - prefix: [make]\n")
+	s := loadProject(t, root)
+
+	edited := "version: 1\nallow:\n  - prefix: [make]\n  - prefix: [npm, ci]\n"
+	if err := os.WriteFile(ProjectPath(root, ""), []byte(edited), 0o600); err != nil {
+		t.Fatalf("hand edit: %v", err)
+	}
+
+	err := s.AppendProjectAllowPrefix([]string{"go", "test"}, WriteDirect)
+	if !errors.Is(err, ErrProjectChanged) {
+		t.Fatalf("AppendProjectAllowPrefix error = %v, want ErrProjectChanged", err)
+	}
+
+	raw, err := os.ReadFile(ProjectPath(root, ""))
+	if err != nil {
+		t.Fatalf("reading project file: %v", err)
+	}
+	if string(raw) != edited {
+		t.Errorf("the hand edit was clobbered:\n%s", raw)
 	}
 }
 

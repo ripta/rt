@@ -291,6 +291,32 @@ var roundTests = []roundTest{
 		WantErr:   "declined at the approval prompt",
 		WantFile:  []string{"prefix: [echo]"},
 	},
+	{
+		Name:    "a bad rule field still persists another form's remember",
+		Project: "version: 1\n",
+		Argvs:   [][]string{echoHi, {"printf", "x"}},
+		Answers: mcpsdk.InputResponseMap{
+			"approval-1": accept(map[string]any{"remember": true, "rule": "[echo]"}),
+			"approval-2": accept(map[string]any{"remember": true, "rule": "not a list"}),
+		},
+
+		WantForms:  2,
+		WantErr:    "rule must be a YAML list",
+		WantFile:   []string{"prefix: [echo]"},
+		AbsentFile: []string{"printf"},
+	},
+	{
+		Name:    "a missing answer still persists another form's remember",
+		Project: "version: 1\n",
+		Argvs:   [][]string{echoHi, {"printf", "x"}},
+		Answers: mcpsdk.InputResponseMap{
+			"approval-2": accept(map[string]any{"remember": true, "rule": "[printf]"}),
+		},
+
+		WantForms: 2,
+		WantErr:   "call the tool again",
+		WantFile:  []string{"prefix: [printf]"},
+	},
 }
 
 func TestApprovalRound(t *testing.T) {

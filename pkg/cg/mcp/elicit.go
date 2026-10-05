@@ -333,3 +333,35 @@ func elicitCases() []string {
 	sort.Strings(cs)
 	return cs
 }
+
+// multiRoundTripVersion is the first MCP protocol version on which the client itself fulfills
+// InputRequests and retries the call. The cg_elicit_test probe needs it to chain more than one
+// round.
+//
+// On older versions the SDK's receiving middleware fulfills returned InputRequests itself with a
+// classic elicitation and reinvokes the handler exactly once. One round therefore works on every
+// version, but a second round only works from this version on.
+//
+// Protocol versions are ISO dates, so string comparison orders them.
+const multiRoundTripVersion = "2026-07-28"
+
+// negotiatedVersion reports the protocol version the session negotiated, or empty when the
+// request carries no session. The cg_elicit_test probe echoes it in its output.
+func negotiatedVersion(req *mcpsdk.CallToolRequest) string {
+	if req == nil || req.Session == nil {
+		return ""
+	}
+
+	params := req.Session.InitializeParams()
+	if params == nil {
+		return ""
+	}
+
+	return params.ProtocolVersion
+}
+
+// multiRoundTripAvailable reports whether the probe may chain more than one round, which needs a
+// client that fulfills InputRequests and retries itself.
+func multiRoundTripAvailable(req *mcpsdk.CallToolRequest) bool {
+	return negotiatedVersion(req) >= multiRoundTripVersion
+}

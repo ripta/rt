@@ -29,9 +29,9 @@ const (
 // caller what to do next, because the retry is the only place the user sees it.
 var ErrPendingApproval = fmt.Errorf("approval is no longer pending; call the tool again to be prompted afresh")
 
-// pendingCommand is what the gate worked out for one command in a pending call. Later rounds
-// reuse it instead of resolving and suggesting again, so the retry applies the same rule the user
-// was shown.
+// pendingCommand is what the gate worked out for one command in a pending call. The retry
+// reuses it instead of resolving and suggesting again, so it applies the same rule the user was
+// shown.
 type pendingCommand struct {
 	Resolution *model.Resolution
 	Suggestion []string

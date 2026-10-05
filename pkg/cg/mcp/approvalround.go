@@ -84,12 +84,14 @@ func (g *gate) request(call approvalCall, needs []int) (gateOutcome, error) {
 // answer applies the client's answers to a retry. needs holds the commands the live ruleset
 // still wants approved. Every other command was allowed by a rule and needs no answer.
 //
-// A decline or cancel refuses the call, but only after every accepted form's remember has been
-// persisted, so a user who approved one command with remember checked does not lose that rule to
-// a decline on another.
+// A decline, cancel, missing answer, or malformed rule refuses the call, but only after every
+// accepted form's remember has been persisted, so a user who approved one command with remember
+// checked does not lose that rule to a problem with another. The first answer error is the one
+// reported. Refusal always comes before any spawn.
 func (g *gate) answer(call approvalCall, entry *pendingEntry, needs []int) (gateOutcome, error) {
 	var declined [][]string
 	var rules [][]string
+	var answerErr error
 
 	for _, i := range needs {
 		cmd := entry.Commands[i]
@@ -102,7 +104,10 @@ func (g *gate) answer(call approvalCall, entry *pendingEntry, needs []int) (gate
 
 		res, err := elicitAnswer(call.Responses, approvalID(i, len(call.Argvs)))
 		if err != nil {
-			return gateOutcome{}, fmt.Errorf("%s refused: %w", call.Tool, err)
+			if answerErr == nil {
+				answerErr = err
+			}
+			continue
 		}
 
 		// A declined or cancelled prompt refuses the command this once and persists nothing.
@@ -121,7 +126,10 @@ func (g *gate) answer(call approvalCall, entry *pendingEntry, needs []int) (gate
 
 		tokens, err := parseRuleField(res.Content, cmd.Suggestion)
 		if err != nil {
-			return gateOutcome{}, fmt.Errorf("%s refused: %w", call.Tool, err)
+			if answerErr == nil {
+				answerErr = err
+			}
+			continue
 		}
 		if !slices.ContainsFunc(rules, func(r []string) bool { return slices.Equal(r, tokens) }) {
 			rules = append(rules, tokens)
@@ -129,6 +137,9 @@ func (g *gate) answer(call approvalCall, entry *pendingEntry, needs []int) (gate
 	}
 
 	warning := g.persistRemembered(call, entry, rules)
+	if answerErr != nil {
+		return gateOutcome{}, fmt.Errorf("%s refused: %w", call.Tool, answerErr)
+	}
 	if len(declined) > 0 {
 		return gateOutcome{}, declinedError(call.Tool, declined, len(call.Argvs) > 1, warning)
 	}
