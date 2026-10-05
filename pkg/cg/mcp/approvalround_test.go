@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"slices"
 	"strings"
@@ -682,5 +683,51 @@ func TestApprovalRoundStaleRefusalReadsReasonFirst(t *testing.T) {
 	}
 	if !errors.Is(err, ErrPendingApproval) {
 		t.Errorf("err does not match ErrPendingApproval")
+	}
+}
+
+func TestApprovalRoundStaleResolutionRefusesWholeAndPersistsNothing(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+
+	root := t.TempDir()
+	g := newTestGateAt(t, root, "version: 1\n", false)
+
+	call := testCall(echoHi, []string{"printf", "x"}, []string{"printf", "y"})
+	first, err := g.check(call)
+	if err != nil || first.Pending == nil {
+		t.Fatalf("first call = %+v, %v; want input requests", first, err)
+	}
+
+	moved := retryCall(call, first.Pending, mcpsdk.InputResponseMap{
+		"approval-1": accept(map[string]any{"remember": true, "rule": "[echo]"}),
+		"approval-2": accept(map[string]any{"remember": true, "rule": "[printf, x]"}),
+		"approval-3": accept(map[string]any{}),
+	})
+	moved.Resolutions = slices.Clone(call.Resolutions)
+	moved.Resolutions[2] = &model.Resolution{Argv: call.Argvs[2], Resolved: "/elsewhere/printf", Canonical: "/elsewhere/printf"}
+
+	_, err = g.check(moved)
+	if err == nil || !strings.Contains(err.Error(), "now resolves to a different executable") {
+		t.Fatalf("err = %v, want a stale resolution refusal", err)
+	}
+	if !errors.Is(err, ErrPendingApproval) {
+		t.Errorf("err does not match ErrPendingApproval")
+	}
+
+	file, _ := readProjectIfPresent(root)
+	if strings.Contains(file, "prefix:") {
+		t.Errorf("remember was written despite the stale refusal:\n%s", file)
+	}
+}
+
+func TestRememberFailureProjectChanged(t *testing.T) {
+	got := rememberFailure("/p/.cg.yaml", fmt.Errorf("appending: %w", approve.ErrProjectChanged))
+	want := "skipping remember: /p/.cg.yaml changed on disk since the approval was requested; " + pendingAdvice
+	if got != want {
+		t.Errorf("rememberFailure = %q, want %q", got, want)
+	}
+
+	if got := rememberFailure("/p", errors.New("boom")); got != "remember write failed: boom" {
+		t.Errorf("rememberFailure = %q", got)
 	}
 }

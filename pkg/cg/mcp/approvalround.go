@@ -84,10 +84,14 @@ func (g *gate) request(call approvalCall, needs []int) (gateOutcome, error) {
 // answer applies the client's answers to a retry. needs holds the commands the live ruleset
 // still wants approved. Every other command was allowed by a rule and needs no answer.
 //
-// A decline, cancel, missing answer, or malformed rule refuses the call, but only after every
-// accepted form's remember has been persisted, so a user who approved one command with remember
-// checked does not lose that rule to a problem with another. The first answer error is the one
-// reported. Refusal always comes before any spawn.
+// A stale round is refused whole before any answer is read, and nothing is persisted. A command
+// that was not prompted, or that now resolves to a different executable, means the user answered
+// against a state that no longer holds. They are prompted again on the next call.
+//
+// Past that check, a decline, cancel, missing answer, or malformed rule refuses the call, but only
+// after every accepted form's remember has been persisted, so a user who approved one command with
+// remember checked does not lose that rule to a problem with another. The first answer error is
+// the one reported. Refusal always comes before any spawn.
 func (g *gate) answer(call approvalCall, entry *pendingEntry, needs []int) (gateOutcome, error) {
 	var declined [][]string
 	var rules [][]string
@@ -101,6 +105,10 @@ func (g *gate) answer(call approvalCall, entry *pendingEntry, needs []int) (gate
 		if resolutionChanged(cmd.Resolution, call.Resolutions[i]) {
 			return gateOutcome{}, &pendingRefusal{msg: fmt.Sprintf("%s refused: the command now resolves to a different executable than the one that was shown; %s", call.Tool, pendingAdvice)}
 		}
+	}
+
+	for _, i := range needs {
+		cmd := entry.Commands[i]
 
 		res, err := elicitAnswer(call.Responses, approvalID(i, len(call.Argvs)))
 		if err != nil {
@@ -184,11 +192,21 @@ func (g *gate) persistRemembered(call approvalCall, entry *pendingEntry, rules [
 	var failures []string
 	for _, tokens := range rules {
 		if err := g.store.AppendProjectAllowPrefix(tokens, strategy); err != nil {
-			failures = append(failures, fmt.Sprintf("remember write failed: %v", err))
+			failures = append(failures, rememberFailure(g.store.Project.Path, err))
 		}
 	}
 
 	return strings.Join(failures, "; ")
+}
+
+// rememberFailure words a failed rule write. A file that changed between the divergence check and
+// the write reads like the other skipped remembers.
+func rememberFailure(path string, err error) string {
+	if errors.Is(err, approve.ErrProjectChanged) {
+		return fmt.Sprintf("skipping remember: %s changed on disk since the approval was requested; %s", path, pendingAdvice)
+	}
+
+	return fmt.Sprintf("remember write failed: %v", err)
 }
 
 // divergenceStrategy reads the trailing form's answer. It returns a negative strategy to skip
