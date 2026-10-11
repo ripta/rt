@@ -27,8 +27,8 @@ type serverOptions struct {
 func NewCommand() *cobra.Command {
 	opts := &serverOptions{}
 	c := &cobra.Command{
-		Use:           "mcp",
-		Short:         "Start an MCP stdio server exposing cg's capture-run tools",
+		Use:   "mcp",
+		Short: "Start an MCP stdio server exposing cg's capture-run tools",
 		Long: `Start an MCP stdio server exposing cg's capture-run tools.
 
 The server records runs under $TMPDIR/cg, the same directory the other cg
