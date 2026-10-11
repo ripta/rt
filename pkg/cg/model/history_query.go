@@ -293,10 +293,11 @@ func (h *History) QueryStats(q StatsQuery) (*StatsResult, error) {
 	return result, nil
 }
 
-// ExactPooledStats answers, in one scan of the log, what QueryStats and ExactPooled report for
-// each argv: the exact command, run in a pool at parallelism, with the default filters. before
-// limits the samples to runs started strictly before it, and a zero before keeps everything. The
-// result maps ArgvKey to stats, and a command with no samples maps to zero stats.
+// ExactPooledStats reports duration stats for each argv's exact match, pooled at parallelism, in
+// a single log scan. The default filters apply.
+//
+// before limits the samples to runs started strictly before it. A zero before keeps everything.
+// The result maps ArgvKey to stats. A command with no samples maps to zero stats.
 func (h *History) ExactPooledStats(cwd string, argvs [][]string, parallelism int, before time.Time) (map[string]DurationStats, error) {
 	for _, argv := range argvs {
 		if len(argv) == 0 {

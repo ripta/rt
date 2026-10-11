@@ -386,6 +386,10 @@ func (h *History) appendLocked(line []byte) error {
 // openHistoryFile opens a file in the history directory, refusing symlinks and anything that
 // is not a regular file. An existing file with group or other permission bits is tightened to
 // 0600, because the history directory promises owner-only files.
+//
+// A read-only open keeps going when the tightening fails. The file may belong to another user,
+// or sit on a read-only filesystem, and a scan of it still works. A writer must be able to
+// tighten.
 func openHistoryFile(path string, flags int) (*os.File, error) {
 	f, err := openRegularFile(path, flags, 0o600)
 	if err != nil {
@@ -399,7 +403,8 @@ func openHistoryFile(path string, flags int) (*os.File, error) {
 	}
 
 	if info.Mode().Perm()&0o077 != 0 {
-		if err := f.Chmod(0o600); err != nil {
+		readOnly := flags&syscall.O_ACCMODE == syscall.O_RDONLY
+		if err := f.Chmod(0o600); err != nil && !readOnly {
 			f.Close()
 			return nil, fmt.Errorf("tightening %s: %w", path, err)
 		}

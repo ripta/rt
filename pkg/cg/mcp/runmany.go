@@ -184,6 +184,8 @@ func handleRunMany(ctx context.Context, req *mcpsdk.CallToolRequest, reg *runReg
 		}
 	}
 
+	// Taken before the supervisor starts, so it bounds the pool's start from below when pool.json
+	// cannot be read later.
 	launched := time.Now()
 
 	pool, err := model.PoolSupervised(spec)

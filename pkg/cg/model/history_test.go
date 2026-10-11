@@ -335,7 +335,13 @@ func TestHistoryPoolMAC(t *testing.T) {
 func TestHistoryLogHoldsNoArgvOrCwd(t *testing.T) {
 	h := newTestHistory(t)
 
-	cwd := t.TempDir()
+	// t.TempDir ends in a short number that can match digits in a timestamp, so the directory
+	// gets a name that cannot occur by chance.
+	cwd := filepath.Join(t.TempDir(), "cwd-sentinel-dir")
+	if err := os.Mkdir(cwd, 0o755); err != nil {
+		t.Fatalf("Mkdir: %v", err)
+	}
+
 	meta := &Meta{
 		RunInfo: RunInfo{
 			ID:        "SECRET1",

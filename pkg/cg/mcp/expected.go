@@ -110,7 +110,9 @@ func expectedPool(cwd string, commands [][]string, repeat, parallelism int, befo
 
 // estimatePool covers a pool shape seen for the first time. Every distinct command needs a pooled
 // exact match at this parallelism. One command without samples voids the estimate.
-func estimatePool(history *model.History, cwd string, commands [][]string, repeat, parallelism int, before time.Time) *historyInfo {
+func estimatePool(
+	history *model.History, cwd string, commands [][]string, repeat, parallelism int, before time.Time,
+) *historyInfo {
 	if len(commands) == 0 || parallelism < 1 {
 		return nil
 	}

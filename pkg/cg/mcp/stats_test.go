@@ -51,7 +51,39 @@ func newStatsTestHistory(t *testing.T) *model.History {
 		t.Fatalf("OpenHistory: %v", err)
 	}
 
+	waitForSupervisorsAtCleanup(t)
+
 	return h
+}
+
+// waitForSupervisorsAtCleanup registers a cleanup that blocks until every supervisor under the
+// capture root has exited. A supervisor keeps writing after meta.json lands, so the temp
+// directories cannot be removed before then. The cleanup runs before the directories' own, since
+// those were registered earlier.
+func waitForSupervisorsAtCleanup(t *testing.T) {
+	t.Helper()
+
+	root := model.CaptureRoot()
+	t.Cleanup(func() {
+		entries, err := os.ReadDir(root)
+		if err != nil {
+			return
+		}
+
+		for _, e := range entries {
+			dir := filepath.Join(root, e.Name())
+			deadline := time.Now().Add(15 * time.Second)
+			for model.LockFileExists(dir) && !model.RunLockReleased(dir) {
+				if time.Now().After(deadline) {
+					t.Errorf("supervisor for %s still running at cleanup", dir)
+
+					break
+				}
+
+				time.Sleep(20 * time.Millisecond)
+			}
+		}
+	})
 }
 
 func appendStatsTestRuns(t *testing.T, h *model.History, runs []statsTestRun) {

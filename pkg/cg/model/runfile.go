@@ -22,15 +22,16 @@ var ErrUntrustedDir = errors.New("not a directory owned by the current user")
 // The capture root is writable by every process running as this user,
 // including sandboxed ones that the MCP server is not. Following a planted
 // symlink would let such a process read files through the server that its
-// sandbox denies it, and opening a planted FIFO would hang the reader.
-// O_NONBLOCK keeps the FIFO open from blocking; it has no effect on reads of
-// regular files.
+// sandbox denies it.
 func OpenRunFile(path string) (*os.File, error) {
 	return openRegularFile(path, os.O_RDONLY, 0)
 }
 
 // openRegularFile opens path with O_NOFOLLOW and O_NONBLOCK added to flags. It refuses a symlink
 // in the final component and anything that is not a regular file.
+//
+// A planted FIFO would hang a blocking open forever. O_NONBLOCK keeps the open from blocking, and
+// the regular-file check then rejects it. The flag has no effect on regular files.
 func openRegularFile(path string, flags int, perm os.FileMode) (*os.File, error) {
 	f, err := os.OpenFile(path, flags|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, perm)
 	if errors.Is(err, syscall.ELOOP) {
