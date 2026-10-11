@@ -405,6 +405,23 @@ Every distinct command in a pool passes the approval gate below before anything
 spawns. A denial fails the whole call with nothing started, and `repeat` does
 not multiply prompts.
 
+A blocking `cg_run`, `cg_run_many`, or `cg_wait` call sends MCP progress
+notifications while it waits. `cg_wait` sends them for a run and for a pool.
+The interval is fixed at 60 seconds. The server sends them only when the client
+attached a progress token to the call. Each notification carries two fields.
+`progress` is the number of seconds elapsed. `message` is a status line. For a
+run, it gives the elapsed time and the stdout and stderr sizes. For a pool, it
+gives the elapsed time and the done and running counts. The server stops
+sending before it returns, so no notification follows the result.
+
+Keep-alives matter because MCP clients abort a tool call that stays silent for
+too long. Claude Code aborts a stdio call that is idle for 30 minutes.
+`CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT` sets that limit. The limit is 5 minutes for
+network servers. Each progress notification resets the clock, so a long
+`wait_timeout_ms` no longer trips it. Other clients differ. When the client
+sends no progress token, raise `CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT` or the
+client's equivalent for long runs.
+
 `cg_run` checks each command against an approval matcher before running it. The
 default mode prompts for unmatched commands when the client supports elicitation,
 and otherwise fails closed; `cg mcp --blindly-allow` skips the gate entirely.

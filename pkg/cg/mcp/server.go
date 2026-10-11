@@ -73,6 +73,9 @@ func runServer(cmd *cobra.Command, opts *serverOptions) error {
 // serverInstructions steers clients away from polling long runs. Claude Code moves an MCP call that
 // outlives its auto-background threshold into a background task and notifies the model when it
 // completes, so one blocking call costs a single turn where a cg_wait loop costs one per timeout.
+//
+// A blocking call stays alive past the client's idle timeout because cg mcp sends progress
+// notifications while it waits.
 const serverInstructions = `For a long-running command, call cg_run or cg_run_many synchronously and set wait_timeout_ms above the expected duration. The default is 60000, which is shorter than most builds and test suites.
 
 If the client moves the call to the background, keep working or end the turn. Do not poll with cg_wait. The client delivers the result when the run finishes.
