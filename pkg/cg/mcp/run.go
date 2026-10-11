@@ -26,13 +26,14 @@ const (
 
 // runInput is the argument shape for `cg_run`.
 type runInput struct {
-	Command       []string          `json:"command" jsonschema:"argv to execute; index 0 is the program"`
-	Cwd           string            `json:"cwd,omitempty" jsonschema:"working directory; inherits the server's cwd when empty"`
-	Env           map[string]string `json:"env,omitempty" jsonschema:"environment overrides; merged onto the server's env"`
-	Wait          *bool             `json:"wait,omitempty" jsonschema:"block until the child exits or wait_timeout_ms elapses (default true)"`
-	WaitTimeoutMs int               `json:"wait_timeout_ms,omitempty" jsonschema:"how long to wait before returning timed_out=true (default 60000)"`
-	ExcerptBytes  int               `json:"excerpt_bytes,omitempty" jsonschema:"per-stream excerpt cap in bytes (default 4096, max 16384)"`
-	ExcerptFrom   string            `json:"excerpt_from,omitempty" jsonschema:"excerpt window: \"auto\" (default) picks head on success and tail on non-zero exit / signal / timeout; \"head\" or \"tail\" forces the window"`
+	Command         []string          `json:"command" jsonschema:"argv to execute; index 0 is the program"`
+	Cwd             string            `json:"cwd,omitempty" jsonschema:"working directory; inherits the server's cwd when empty"`
+	Env             map[string]string `json:"env,omitempty" jsonschema:"environment overrides; merged onto the server's env"`
+	Wait            *bool             `json:"wait,omitempty" jsonschema:"block until the child exits or wait_timeout_ms elapses (default true)"`
+	WaitTimeoutMs   int               `json:"wait_timeout_ms,omitempty" jsonschema:"how long to wait before returning timed_out=true (default 60000)"`
+	WaitTimeoutAuto bool              `json:"wait_timeout_auto,omitempty" jsonschema:"derive the wait timeout from earlier runs of this exact command in this cwd: max(1.5 x the longest, 60000) ms; an explicit wait_timeout_ms wins; falls back to 60000 with no history"`
+	ExcerptBytes    int               `json:"excerpt_bytes,omitempty" jsonschema:"per-stream excerpt cap in bytes (default 4096, max 16384)"`
+	ExcerptFrom     string            `json:"excerpt_from,omitempty" jsonschema:"excerpt window: \"auto\" (default) picks head on success and tail on non-zero exit / signal / timeout; \"head\" or \"tail\" forces the window"`
 }
 
 // runOutput is the result shape for `cg_run`.
@@ -50,6 +51,10 @@ type runOutput struct {
 	ExcerptFrom   string `json:"excerpt_from,omitempty"`
 	Truncated     bool   `json:"truncated"`
 	StartError    string `json:"start_error,omitempty"`
+	// WaitTimeoutMsUsed is the wait timeout the call applied. It is absent when the call did
+	// not wait.
+	WaitTimeoutMsUsed int `json:"wait_timeout_ms_used,omitempty"`
+	timedOutFields
 	// RememberWarning reports a remembered rule that failed to persist; the
 	// command still ran. It rides here rather than the server's stderr, which an
 	// MCP host would bleed onto the screen.
@@ -59,17 +64,17 @@ type runOutput struct {
 func registerRun(s *mcpsdk.Server, reg *runRegistry, g *gate, sessionID string) {
 	mcpsdk.AddTool(s, &mcpsdk.Tool{
 		Name:        "cg_run",
-		Description: "Run a command with capture. Returns metadata, exit code, and short head-excerpts of stdout and stderr. The run is recorded on disk under $TMPDIR/cg/<id>/ and can be inspected with the other cg tools.",
+		Description: "Run a command with capture. Returns metadata, exit code, and short head-excerpts of stdout and stderr. The run is recorded on disk under $TMPDIR/cg/<id>/ and can be inspected with the other cg tools. Set wait_timeout_auto to size the wait from earlier runs of the same command. The response reports wait_timeout_ms_used. A timed_out response also carries elapsed_ms and, when earlier runs exist, history.",
 	}, func(ctx context.Context, req *mcpsdk.CallToolRequest, in runInput) (*mcpsdk.CallToolResult, runOutput, error) {
 		var el elicitor
 		if elicitationAvailable(req) {
 			el = req.Session
 		}
-		return handleRun(ctx, reg, g, el, sessionID, in)
+		return handleRun(ctx, req, reg, g, el, sessionID, in)
 	})
 }
 
-func handleRun(ctx context.Context, reg *runRegistry, g *gate, el elicitor, sessionID string, in runInput) (*mcpsdk.CallToolResult, runOutput, error) {
+func handleRun(ctx context.Context, req *mcpsdk.CallToolRequest, reg *runRegistry, g *gate, el elicitor, sessionID string, in runInput) (*mcpsdk.CallToolResult, runOutput, error) {
 	if len(in.Command) == 0 {
 		return nil, runOutput{}, fmt.Errorf("command must contain at least one element")
 	}
@@ -100,6 +105,18 @@ func handleRun(ctx context.Context, reg *runRegistry, g *gate, el elicitor, sess
 		wait = *in.Wait
 	}
 
+	timeoutMs := in.WaitTimeoutMs
+	var expected *historyInfo
+	expectedLooked := false
+	if wait && timeoutMs <= 0 {
+		timeoutMs = defaultWaitTimeoutMs
+		if in.WaitTimeoutAuto {
+			expected = expectedRun(in.Command, in.Cwd)
+			expectedLooked = true
+			timeoutMs = autoWaitTimeoutMs(expected)
+		}
+	}
+
 	run, err := model.RunSupervised(in.Command, model.SuperviseOptions{Resolved: resolved, Cwd: in.Cwd, Env: in.Env, SessionID: sessionID})
 	if err != nil {
 		var sf *model.StartFailure
@@ -118,26 +135,28 @@ func handleRun(ctx context.Context, reg *runRegistry, g *gate, el elicitor, sess
 		return nil, out, nil
 	}
 
-	timeoutMs := in.WaitTimeoutMs
-	if timeoutMs <= 0 {
-		timeoutMs = defaultWaitTimeoutMs
+	waitStart := time.Now()
+	finished, err := waitWithKeepAlive(ctx, run.Done, nil, time.Duration(timeoutMs)*time.Millisecond, newRunReporter(req, run.Dir))
+	if err != nil {
+		return nil, runOutput{}, err
 	}
 
-	timer := time.NewTimer(time.Duration(timeoutMs) * time.Millisecond)
-	defer timer.Stop()
-
-	select {
-	case <-run.Done:
+	if finished {
 		out := finishedOutput(run, excerpt, in.ExcerptFrom)
+		out.WaitTimeoutMsUsed = timeoutMs
 		out.RememberWarning = warning
 		return nil, out, nil
-	case <-timer.C:
-		out := timedOutOutput(run, excerpt, in.ExcerptFrom)
-		out.RememberWarning = warning
-		return nil, out, nil
-	case <-ctx.Done():
-		return nil, runOutput{}, ctx.Err()
 	}
+
+	if !expectedLooked {
+		expected = expectedRun(in.Command, in.Cwd)
+	}
+
+	out := timedOutOutput(run, excerpt, in.ExcerptFrom)
+	out.WaitTimeoutMsUsed = timeoutMs
+	out.timedOutFields = timedOutFieldsFor(readRunStart(run.Dir), waitStart, expected)
+	out.RememberWarning = warning
+	return nil, out, nil
 }
 
 // finishedOutput builds the result for a fully completed run, reading

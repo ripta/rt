@@ -13,7 +13,7 @@ import (
 func TestHandleWaitUnknownID(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 
-	_, _, err := handleWait(context.Background(), newRunRegistry(), waitInput{ID: "ZZZZZZ"})
+	_, _, err := handleWait(context.Background(), nil, newRunRegistry(), waitInput{ID: "ZZZZZZ"})
 	if err == nil {
 		t.Fatalf("expected error for unknown ID")
 	}
@@ -32,7 +32,7 @@ func TestHandleWaitAlreadyFinished(t *testing.T) {
 		DurationMs: 5,
 	})
 
-	_, out, err := handleWait(context.Background(), newRunRegistry(), waitInput{ID: "AAAAAA"})
+	_, out, err := handleWait(context.Background(), nil, newRunRegistry(), waitInput{ID: "AAAAAA"})
 	if err != nil {
 		t.Fatalf("handleWait: %v", err)
 	}
@@ -69,7 +69,7 @@ func TestHandleWaitFastPath(t *testing.T) {
 	}()
 
 	start := time.Now()
-	_, out, err := handleWait(context.Background(), reg, waitInput{ID: "AAAAAA", TimeoutMs: 5000})
+	_, out, err := handleWait(context.Background(), nil, reg, waitInput{ID: "AAAAAA", TimeoutMs: 5000})
 	elapsed := time.Since(start)
 	if err != nil {
 		t.Fatalf("handleWait: %v", err)
@@ -92,7 +92,7 @@ func TestHandleWaitFastPathSupervised(t *testing.T) {
 	reg := newRunRegistry()
 
 	async := false
-	_, started, err := handleRun(context.Background(), reg, nil, nil, "", runInput{
+	_, started, err := handleRun(context.Background(), nil, reg, nil, nil, "", runInput{
 		Command: []string{"sh", "-c", "sleep 0.2; echo fp"},
 		Wait:    &async,
 	})
@@ -105,7 +105,7 @@ func TestHandleWaitFastPathSupervised(t *testing.T) {
 
 	// The registry holds the Done channel driven by supervisor-exit EOF, so
 	// the wait takes the in-process path and sees the finished run.
-	_, out, err := handleWait(context.Background(), reg, waitInput{ID: started.ID, TimeoutMs: 5000})
+	_, out, err := handleWait(context.Background(), nil, reg, waitInput{ID: started.ID, TimeoutMs: 5000})
 	if err != nil {
 		t.Fatalf("handleWait: %v", err)
 	}
@@ -130,7 +130,7 @@ func TestHandleWaitSlowPath(t *testing.T) {
 		})
 	}()
 
-	_, out, err := handleWait(context.Background(), newRunRegistry(), waitInput{ID: "AAAAAA", TimeoutMs: 5000})
+	_, out, err := handleWait(context.Background(), nil, newRunRegistry(), waitInput{ID: "AAAAAA", TimeoutMs: 5000})
 	if err != nil {
 		t.Fatalf("handleWait: %v", err)
 	}
@@ -147,7 +147,7 @@ func TestHandleWaitTimeout(t *testing.T) {
 
 	seedRunDir(t, "AAAAAA", nil)
 
-	_, out, err := handleWait(context.Background(), newRunRegistry(), waitInput{ID: "AAAAAA", TimeoutMs: 100})
+	_, out, err := handleWait(context.Background(), nil, newRunRegistry(), waitInput{ID: "AAAAAA", TimeoutMs: 100})
 	if err != nil {
 		t.Fatalf("handleWait: %v", err)
 	}
@@ -203,7 +203,7 @@ func TestHandleWaitPoolAlreadyFinished(t *testing.T) {
 	finishPoolManifest(m)
 	seedPoolDir(t, "AAAAAA", m)
 
-	_, out, err := handleWait(context.Background(), newRunRegistry(), waitInput{ID: "AAAAAA"})
+	_, out, err := handleWait(context.Background(), nil, newRunRegistry(), waitInput{ID: "AAAAAA"})
 	if err != nil {
 		t.Fatalf("handleWait: %v", err)
 	}
@@ -236,7 +236,7 @@ func TestHandleWaitPoolFastPath(t *testing.T) {
 	}()
 
 	start := time.Now()
-	_, out, err := handleWait(context.Background(), reg, waitInput{ID: "AAAAAA", TimeoutMs: 5000})
+	_, out, err := handleWait(context.Background(), nil, reg, waitInput{ID: "AAAAAA", TimeoutMs: 5000})
 	elapsed := time.Since(start)
 	if err != nil {
 		t.Fatalf("handleWait: %v", err)
@@ -264,7 +264,7 @@ func TestHandleWaitPoolSlowPath(t *testing.T) {
 		_ = model.WritePoolManifest(dir, m)
 	}()
 
-	_, out, err := handleWait(context.Background(), newRunRegistry(), waitInput{ID: "AAAAAA", TimeoutMs: 5000})
+	_, out, err := handleWait(context.Background(), nil, newRunRegistry(), waitInput{ID: "AAAAAA", TimeoutMs: 5000})
 	if err != nil {
 		t.Fatalf("handleWait: %v", err)
 	}
@@ -281,7 +281,7 @@ func TestHandleWaitPoolTimeoutPartialSummary(t *testing.T) {
 
 	seedPoolDir(t, "AAAAAA", runningPoolManifest("AAAAAA"))
 
-	_, out, err := handleWait(context.Background(), newRunRegistry(), waitInput{ID: "AAAAAA", TimeoutMs: 100})
+	_, out, err := handleWait(context.Background(), nil, newRunRegistry(), waitInput{ID: "AAAAAA", TimeoutMs: 100})
 	if err != nil {
 		t.Fatalf("handleWait: %v", err)
 	}

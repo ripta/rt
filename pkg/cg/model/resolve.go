@@ -583,9 +583,9 @@ func writeLsTable(w io.Writer, rows []lsRow, now time.Time, wide bool) error {
 // and aligns everything with a tabwriter.
 func lsRowValues(r lsRow, now time.Time) (state, exit, runtime, system, user, command string) {
 	if r.pool != nil {
-		dur := formatDuration(now.Sub(r.pool.StartedAt))
+		dur := FormatDuration(now.Sub(r.pool.StartedAt))
 		if r.pool.FinishedAt != nil {
-			dur = formatDuration(r.pool.FinishedAt.Sub(r.pool.StartedAt))
+			dur = FormatDuration(r.pool.FinishedAt.Sub(r.pool.StartedAt))
 		}
 		return "pool:" + r.poolState, "?", dur, "?", "?", formatPoolCounts(r.pool.Counts())
 	}
@@ -597,11 +597,11 @@ func lsRowValues(r lsRow, now time.Time) (state, exit, runtime, system, user, co
 		if r.meta.Signal != nil {
 			exit = fmt.Sprintf("%d", -*r.meta.Signal)
 		}
-		dur := formatDuration(time.Duration(r.meta.DurationMs) * time.Millisecond)
+		dur := FormatDuration(time.Duration(r.meta.DurationMs) * time.Millisecond)
 		sys, usr := "?", "?"
 		if r.meta.Usage != nil {
-			sys = formatDuration(r.meta.Usage.systemDuration())
-			usr = formatDuration(r.meta.Usage.userDuration())
+			sys = FormatDuration(r.meta.Usage.systemDuration())
+			usr = FormatDuration(r.meta.Usage.userDuration())
 		}
 		return RunStateFinished, exit, dur, sys, usr, formatLsCommand(r.meta.Command)
 	}
@@ -614,11 +614,11 @@ func lsRowValues(r lsRow, now time.Time) (state, exit, runtime, system, user, co
 		status = RunStateAbandoned
 	}
 	if r.start != nil {
-		elapsed := formatDuration(now.Sub(r.start.StartedAt))
+		elapsed := FormatDuration(now.Sub(r.start.StartedAt))
 		return status, "?", elapsed, "?", "?", formatLsCommand(r.start.Command)
 	}
 	if !r.mtime.IsZero() {
-		elapsed := "~" + formatDuration(now.Sub(r.mtime))
+		elapsed := "~" + FormatDuration(now.Sub(r.mtime))
 		return status, "?", elapsed, "?", "?", "?"
 	}
 	return status, "?", "?", "?", "?", "?"

@@ -30,6 +30,9 @@ type SuperviseSpec struct {
 	Env       map[string]string `json:"env,omitempty"`
 	Pool      string            `json:"pool,omitempty"`
 	SessionID string            `json:"session_id,omitempty"`
+
+	// Parallelism is used only for the history record. It is 0 for a standalone run.
+	Parallelism int `json:"parallelism,omitempty"`
 }
 
 // resolution reconstructs the Resolution the server computed, for ExecPath and
@@ -186,6 +189,10 @@ func superviseRun(dir string, in io.Reader, out io.Writer) error {
 
 	RemovePidFile(dir)
 	RemoveStartInfo(dir)
+
+	// History is advisory and the supervisor has no terminal to report to.
+	_ = AppendRunHistory(meta, spec.Parallelism)
+
 	return nil
 }
 

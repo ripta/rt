@@ -1,0 +1,64 @@
+{
+  "cwd": "/",
+  "matches": [
+    {
+      "match_type": "exact",
+      "command": [
+        "make",
+        "test",
+        "JOBS=10",
+        "FOO=file"
+      ],
+      "pool": true,
+      "parallelism": 4,
+      "stats": {
+        "count": 2,
+        "min_ms": 500000,
+        "max_ms": 600000,
+        "avg_ms": 550000,
+        "p50_ms": 500000,
+        "p90_ms": 600000,
+        "last_ms": 600000,
+        "last_at": "2026-10-04T12:00:00Z"
+      }
+    },
+    {
+      "match_type": "prefix",
+      "command_prefix": [
+        "make",
+        "test"
+      ],
+      "pool": true,
+      "parallelism": 2,
+      "stats": {
+        "count": 1,
+        "min_ms": 30000,
+        "max_ms": 30000,
+        "avg_ms": 30000,
+        "p50_ms": 30000,
+        "p90_ms": 30000,
+        "last_ms": 30000,
+        "last_at": "2026-10-02T12:00:00Z"
+      }
+    },
+    {
+      "match_type": "prefix",
+      "command_prefix": [
+        "make",
+        "test"
+      ],
+      "pool": true,
+      "parallelism": 4,
+      "stats": {
+        "count": 1,
+        "min_ms": 35000,
+        "max_ms": 35000,
+        "avg_ms": 35000,
+        "p50_ms": 35000,
+        "p90_ms": 35000,
+        "last_ms": 35000,
+        "last_at": "2026-10-03T12:00:00Z"
+      }
+    }
+  ]
+}

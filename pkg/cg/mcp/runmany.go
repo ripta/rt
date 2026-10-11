@@ -34,15 +34,16 @@ const (
 
 // runManyInput is the argument shape for `cg_run_many`.
 type runManyInput struct {
-	Commands      [][]string        `json:"commands" jsonschema:"list of argvs to execute; index 0 of each is the program"`
-	Repeat        int               `json:"repeat,omitempty" jsonschema:"how many times each command runs (default 1)"`
-	Parallelism   int               `json:"parallelism,omitempty" jsonschema:"worker count (default 1, max 32); with 1 runs execute in listed order with repeats consecutive"`
-	OnError       string            `json:"on_error,omitempty" jsonschema:"what a failure does to the rest of the pool: \"continue\" (default) runs everything, \"stop\" schedules nothing new, \"kill\" additionally cancels in-flight runs"`
-	Cwd           string            `json:"cwd,omitempty" jsonschema:"working directory shared by every run; inherits the server's cwd when empty"`
-	Env           map[string]string `json:"env,omitempty" jsonschema:"environment overrides shared by every run; merged onto the server's env"`
-	Wait          *bool             `json:"wait,omitempty" jsonschema:"block until the pool finishes or wait_timeout_ms elapses (default true)"`
-	WaitTimeoutMs int               `json:"wait_timeout_ms,omitempty" jsonschema:"how long to wait before returning timed_out=true with a partial summary (default 60000)"`
-	ExcerptBytes  *int              `json:"excerpt_bytes,omitempty" jsonschema:"per-stream tail excerpt cap in bytes for failed runs (default 4096, max 16384); 0 disables excerpts"`
+	Commands        [][]string        `json:"commands" jsonschema:"list of argvs to execute; index 0 of each is the program"`
+	Repeat          int               `json:"repeat,omitempty" jsonschema:"how many times each command runs (default 1)"`
+	Parallelism     int               `json:"parallelism,omitempty" jsonschema:"worker count (default 1, max 32); with 1 runs execute in listed order with repeats consecutive"`
+	OnError         string            `json:"on_error,omitempty" jsonschema:"what a failure does to the rest of the pool: \"continue\" (default) runs everything, \"stop\" schedules nothing new, \"kill\" additionally cancels in-flight runs"`
+	Cwd             string            `json:"cwd,omitempty" jsonschema:"working directory shared by every run; inherits the server's cwd when empty"`
+	Env             map[string]string `json:"env,omitempty" jsonschema:"environment overrides shared by every run; merged onto the server's env"`
+	Wait            *bool             `json:"wait,omitempty" jsonschema:"block until the pool finishes or wait_timeout_ms elapses (default true)"`
+	WaitTimeoutMs   int               `json:"wait_timeout_ms,omitempty" jsonschema:"how long to wait before returning timed_out=true with a partial summary (default 60000)"`
+	WaitTimeoutAuto bool              `json:"wait_timeout_auto,omitempty" jsonschema:"derive the wait timeout from earlier pools of this shape, else from each command's pooled history: max(1.5 x the expected wall time, 60000) ms; an explicit wait_timeout_ms wins; falls back to 60000 with no history"`
+	ExcerptBytes    *int              `json:"excerpt_bytes,omitempty" jsonschema:"per-stream tail excerpt cap in bytes for failed runs (default 4096, max 16384); 0 disables excerpts"`
 }
 
 // runManyOutput is the result shape for `cg_run_many`: the pool ID plus the
@@ -54,6 +55,12 @@ type runManyOutput struct {
 	TimedOut        bool   `json:"timed_out,omitempty"`
 	StartError      string `json:"start_error,omitempty"`
 	RememberWarning string `json:"remember_warning,omitempty"`
+
+	// WaitTimeoutMsUsed is the wait timeout the call applied. It is absent when the call did
+	// not wait.
+	WaitTimeoutMsUsed int `json:"wait_timeout_ms_used,omitempty"`
+
+	timedOutFields
 	poolSummary
 }
 
@@ -92,17 +99,17 @@ type poolRunResult struct {
 func registerRunMany(s *mcpsdk.Server, reg *runRegistry, g *gate, sessionID string) {
 	mcpsdk.AddTool(s, &mcpsdk.Tool{
 		Name:        "cg_run_many",
-		Description: "Run a flat pool of commands: each command runs repeat times, at most parallelism at once, with on_error deciding what a failure does to the rest. Returns the pool ID and a summary with per-run IDs; failed runs carry tail excerpts. Every run is an ordinary capture run for cg_meta/cg_stdout/cg_grep drill-down, and cg_wait on the pool ID aggregates. Not a workflow engine: no dependencies between runs, no conditionals, no per-run fallback.",
+		Description: "Run a flat pool of commands: each command runs repeat times, at most parallelism at once, with on_error deciding what a failure does to the rest. Returns the pool ID and a summary with per-run IDs; failed runs carry tail excerpts. Every run is an ordinary capture run for cg_meta/cg_stdout/cg_grep drill-down, and cg_wait on the pool ID aggregates. Not a workflow engine: no dependencies between runs, no conditionals, no per-run fallback. Set wait_timeout_auto to size the wait from earlier pools. The response reports wait_timeout_ms_used. A timed_out response also carries elapsed_ms and, when earlier runs exist, history.",
 	}, func(ctx context.Context, req *mcpsdk.CallToolRequest, in runManyInput) (*mcpsdk.CallToolResult, runManyOutput, error) {
 		var el elicitor
 		if elicitationAvailable(req) {
 			el = req.Session
 		}
-		return handleRunMany(ctx, reg, g, el, sessionID, in)
+		return handleRunMany(ctx, req, reg, g, el, sessionID, in)
 	})
 }
 
-func handleRunMany(ctx context.Context, reg *runRegistry, g *gate, el elicitor, sessionID string, in runManyInput) (*mcpsdk.CallToolResult, runManyOutput, error) {
+func handleRunMany(ctx context.Context, req *mcpsdk.CallToolRequest, reg *runRegistry, g *gate, el elicitor, sessionID string, in runManyInput) (*mcpsdk.CallToolResult, runManyOutput, error) {
 	repeat, parallelism, err := validateRunMany(in)
 	if err != nil {
 		return nil, runManyOutput{}, err
@@ -130,7 +137,7 @@ func handleRunMany(ctx context.Context, reg *runRegistry, g *gate, el elicitor, 
 	resolutions := make(map[string]*model.Resolution, len(in.Commands))
 	var warnings []string
 	for _, argv := range in.Commands {
-		key := argvKey(argv)
+		key := model.ArgvKey(argv)
 		if _, ok := resolutions[key]; ok {
 			continue
 		}
@@ -158,12 +165,28 @@ func handleRunMany(ctx context.Context, reg *runRegistry, g *gate, el elicitor, 
 	}
 	for _, argv := range in.Commands {
 		pc := model.PoolCommand{Argv: argv}
-		if r := resolutions[argvKey(argv)]; r != nil {
+		if r := resolutions[model.ArgvKey(argv)]; r != nil {
 			pc.Resolved = r.Resolved
 			pc.Canonical = r.Canonical
 		}
 		spec.Commands = append(spec.Commands, pc)
 	}
+
+	timeoutMs := in.WaitTimeoutMs
+	var expected *historyInfo
+	expectedLooked := false
+	if wait && timeoutMs <= 0 {
+		timeoutMs = defaultWaitTimeoutMs
+		if in.WaitTimeoutAuto {
+			expected = expectedPool(in.Cwd, in.Commands, repeat, parallelism, time.Time{})
+			expectedLooked = true
+			timeoutMs = autoWaitTimeoutMs(expected)
+		}
+	}
+
+	// Taken before the supervisor starts, so it bounds the pool's start from below when pool.json
+	// cannot be read later.
+	launched := time.Now()
 
 	pool, err := model.PoolSupervised(spec)
 	if err != nil {
@@ -181,21 +204,26 @@ func handleRunMany(ctx context.Context, reg *runRegistry, g *gate, el elicitor, 
 		return nil, runManyOutput{ID: pool.ID, Started: true, RememberWarning: warning}, nil
 	}
 
-	timeoutMs := in.WaitTimeoutMs
-	if timeoutMs <= 0 {
-		timeoutMs = defaultWaitTimeoutMs
+	waitStart := time.Now()
+	finished, err := waitWithKeepAlive(ctx, pool.Done, nil, time.Duration(timeoutMs)*time.Millisecond, newPoolReporter(req, pool.Dir))
+	if err != nil {
+		return nil, runManyOutput{}, err
 	}
 
-	timer := time.NewTimer(time.Duration(timeoutMs) * time.Millisecond)
-	defer timer.Stop()
+	out := runManyOutput{ID: pool.ID, RememberWarning: warning, TimedOut: !finished, WaitTimeoutMsUsed: timeoutMs}
+	if !finished {
+		poolStart := readPoolStart(pool.Dir)
+		if !expectedLooked {
+			// The pool's members have already appended their own records, which must not feed
+			// the estimate. Without a recorded start, the launch time is a safe upper bound.
+			before := poolStart
+			if before.IsZero() {
+				before = launched
+			}
 
-	out := runManyOutput{ID: pool.ID, RememberWarning: warning}
-	select {
-	case <-pool.Done:
-	case <-timer.C:
-		out.TimedOut = true
-	case <-ctx.Done():
-		return nil, runManyOutput{}, ctx.Err()
+			expected = expectedPool(in.Cwd, in.Commands, repeat, parallelism, before)
+		}
+		out.timedOutFields = timedOutFieldsFor(poolStart, waitStart, expected)
 	}
 
 	summary, err := buildPoolSummary(pool.Dir, excerpt)
@@ -248,7 +276,7 @@ func validateRunMany(in runManyInput) (repeat, parallelism int, err error) {
 
 	distinct := make(map[string]struct{}, len(in.Commands))
 	for _, argv := range in.Commands {
-		distinct[argvKey(argv)] = struct{}{}
+		distinct[model.ArgvKey(argv)] = struct{}{}
 	}
 	if len(distinct) > maxPoolCommands {
 		violations = append(violations, fmt.Sprintf("%d distinct commands exceeds the maximum %d", len(distinct), maxPoolCommands))
@@ -268,12 +296,6 @@ func validateRunMany(in runManyInput) (repeat, parallelism int, err error) {
 		parallelism = total
 	}
 	return repeat, parallelism, nil
-}
-
-// argvKey builds a map key for an argv. Argv tokens cannot contain NUL, so a
-// NUL join is collision-free.
-func argvKey(argv []string) string {
-	return strings.Join(argv, "\x00")
 }
 
 // buildPoolSummary reads pool.json and builds the summary, attaching tail

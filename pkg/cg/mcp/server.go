@@ -27,8 +27,8 @@ type serverOptions struct {
 func NewCommand() *cobra.Command {
 	opts := &serverOptions{}
 	c := &cobra.Command{
-		Use:           "mcp",
-		Short:         "Start an MCP stdio server exposing cg's capture-run tools",
+		Use:   "mcp",
+		Short: "Start an MCP stdio server exposing cg's capture-run tools",
 		Long: `Start an MCP stdio server exposing cg's capture-run tools.
 
 The server records runs under $TMPDIR/cg, the same directory the other cg
@@ -73,7 +73,14 @@ func runServer(cmd *cobra.Command, opts *serverOptions) error {
 // serverInstructions steers clients away from polling long runs. Claude Code moves an MCP call that
 // outlives its auto-background threshold into a background task and notifies the model when it
 // completes, so one blocking call costs a single turn where a cg_wait loop costs one per timeout.
+//
+// A blocking call stays alive past the client's idle timeout because cg mcp sends progress
+// notifications while it waits.
 const serverInstructions = `For a long-running command, call cg_run or cg_run_many synchronously and set wait_timeout_ms above the expected duration. The default is 60000, which is shorter than most builds and test suites.
+
+Do not guess the expected duration. Call cg_stats with the command to see how long earlier runs took, or set wait_timeout_auto so cg sizes the wait from that history. An explicit wait_timeout_ms wins over wait_timeout_auto. The response reports the value used as wait_timeout_ms_used.
+
+A response that timed out carries elapsed_ms and, when earlier runs exist, history. Use them to size the next cg_wait timeout.
 
 If the client moves the call to the background, keep working or end the turn. Do not poll with cg_wait. The client delivers the result when the run finishes.
 
@@ -92,6 +99,7 @@ func newServer(v string, startedAt time.Time, sessionID string, g *gate) *mcpsdk
 	registerRunMany(s, reg, g, sessionID)
 	registerList(s)
 	registerMeta(s)
+	registerStats(s)
 	registerWait(s, reg)
 	registerCancel(s, reg)
 	registerPaths(s)

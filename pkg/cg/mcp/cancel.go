@@ -92,7 +92,7 @@ func handleCancel(ctx context.Context, reg *runRegistry, in cancelInput) (*mcpsd
 		return nil, out, nil
 	}
 
-	finished, werr := awaitFinish(ctx, reg, in.ID, time.Duration(in.EscalateAfterMs)*time.Millisecond)
+	finished, werr := awaitFinish(ctx, reg, in.ID, time.Duration(in.EscalateAfterMs)*time.Millisecond, nil)
 	if werr != nil {
 		return nil, cancelOutput{}, werr
 	}
@@ -154,7 +154,7 @@ func handlePoolCancel(ctx context.Context, reg *runRegistry, in cancelInput, out
 		return nil, out, nil
 	}
 
-	finished, werr := awaitPoolFinish(ctx, reg, in.ID, dir, time.Duration(in.EscalateAfterMs)*time.Millisecond)
+	finished, werr := awaitPoolFinish(ctx, reg, in.ID, dir, time.Duration(in.EscalateAfterMs)*time.Millisecond, nil)
 	if werr != nil {
 		return nil, cancelOutput{}, werr
 	}

@@ -1,0 +1,158 @@
+{
+  "cwd": "/",
+  "matches": [
+    {
+      "match_type": "exact",
+      "command": [
+        "make",
+        "test",
+        "JOBS=10",
+        "FOO=file"
+      ],
+      "pool": false,
+      "stats": {
+        "count": 3,
+        "min_ms": 100000,
+        "max_ms": 300000,
+        "avg_ms": 200000,
+        "p50_ms": 200000,
+        "p90_ms": 300000,
+        "last_ms": 300000,
+        "last_at": "2026-10-03T12:00:00Z"
+      }
+    },
+    {
+      "match_type": "exact",
+      "command": [
+        "make",
+        "test",
+        "JOBS=10",
+        "FOO=file"
+      ],
+      "pool": true,
+      "parallelism": 4,
+      "stats": {
+        "count": 2,
+        "min_ms": 500000,
+        "max_ms": 600000,
+        "avg_ms": 550000,
+        "p50_ms": 500000,
+        "p90_ms": 600000,
+        "last_ms": 600000,
+        "last_at": "2026-10-04T12:00:00Z"
+      }
+    },
+    {
+      "match_type": "prefix",
+      "command_prefix": [
+        "make",
+        "test",
+        "JOBS=10",
+        "FOO=file"
+      ],
+      "pool": false,
+      "stats": {
+        "count": 1,
+        "min_ms": 400000,
+        "max_ms": 400000,
+        "avg_ms": 400000,
+        "p50_ms": 400000,
+        "p90_ms": 400000,
+        "last_ms": 400000,
+        "last_at": "2026-10-04T12:00:00Z"
+      }
+    },
+    {
+      "match_type": "prefix",
+      "command_prefix": [
+        "make",
+        "test",
+        "JOBS=10"
+      ],
+      "pool": false,
+      "stats": {
+        "count": 2,
+        "min_ms": 50000,
+        "max_ms": 60000,
+        "avg_ms": 55000,
+        "p50_ms": 50000,
+        "p90_ms": 60000,
+        "last_ms": 60000,
+        "last_at": "2026-10-02T12:00:00Z"
+      }
+    },
+    {
+      "match_type": "prefix",
+      "command_prefix": [
+        "make",
+        "test"
+      ],
+      "pool": false,
+      "stats": {
+        "count": 1,
+        "min_ms": 20000,
+        "max_ms": 20000,
+        "avg_ms": 20000,
+        "p50_ms": 20000,
+        "p90_ms": 20000,
+        "last_ms": 20000,
+        "last_at": "2026-10-01T12:00:00Z"
+      }
+    },
+    {
+      "match_type": "prefix",
+      "command_prefix": [
+        "make",
+        "test"
+      ],
+      "pool": true,
+      "parallelism": 2,
+      "stats": {
+        "count": 1,
+        "min_ms": 30000,
+        "max_ms": 30000,
+        "avg_ms": 30000,
+        "p50_ms": 30000,
+        "p90_ms": 30000,
+        "last_ms": 30000,
+        "last_at": "2026-10-02T12:00:00Z"
+      }
+    },
+    {
+      "match_type": "prefix",
+      "command_prefix": [
+        "make",
+        "test"
+      ],
+      "pool": true,
+      "parallelism": 4,
+      "stats": {
+        "count": 1,
+        "min_ms": 35000,
+        "max_ms": 35000,
+        "avg_ms": 35000,
+        "p50_ms": 35000,
+        "p90_ms": 35000,
+        "last_ms": 35000,
+        "last_at": "2026-10-03T12:00:00Z"
+      }
+    },
+    {
+      "match_type": "prefix",
+      "command_prefix": [
+        "make"
+      ],
+      "pool": false,
+      "stats": {
+        "count": 1,
+        "min_ms": 5000,
+        "max_ms": 5000,
+        "avg_ms": 5000,
+        "p50_ms": 5000,
+        "p90_ms": 5000,
+        "last_ms": 5000,
+        "last_at": "2026-10-01T12:00:00Z"
+      }
+    }
+  ]
+}

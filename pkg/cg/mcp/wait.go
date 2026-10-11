@@ -27,19 +27,20 @@ type waitOutput struct {
 	ID       string `json:"id"`
 	Finished bool   `json:"finished"`
 	metaFields
+	timedOutFields
 	poolSummary
 }
 
 func registerWait(s *mcpsdk.Server, reg *runRegistry) {
 	mcpsdk.AddTool(s, &mcpsdk.Tool{
 		Name:        "cg_wait",
-		Description: "Block until a capture run or pool finishes or timeout_ms elapses. For a run, returns {id, finished: true, ...meta} on completion or {id, finished: false} on timeout. For a pool, returns the same summary as cg_run_many, partial on timeout. Unknown ID is a tool error.",
+		Description: "Block until a capture run or pool finishes or timeout_ms elapses. For a run, returns {id, finished: true, ...meta} on completion or {id, finished: false} on timeout. For a pool, returns the same summary as cg_run_many, partial on timeout. A timeout response also carries elapsed_ms and, when earlier runs exist, history. Unknown ID is a tool error.",
 	}, func(ctx context.Context, req *mcpsdk.CallToolRequest, in waitInput) (*mcpsdk.CallToolResult, waitOutput, error) {
-		return handleWait(ctx, reg, in)
+		return handleWait(ctx, req, reg, in)
 	})
 }
 
-func handleWait(ctx context.Context, reg *runRegistry, in waitInput) (*mcpsdk.CallToolResult, waitOutput, error) {
+func handleWait(ctx context.Context, req *mcpsdk.CallToolRequest, reg *runRegistry, in waitInput) (*mcpsdk.CallToolResult, waitOutput, error) {
 	timeoutMs := in.TimeoutMs
 	if timeoutMs <= 0 {
 		timeoutMs = defaultWaitTimeoutMs
@@ -61,15 +62,20 @@ func handleWait(ctx context.Context, reg *runRegistry, in waitInput) (*mcpsdk.Ca
 	// A directory without meta.json is either an in-flight run or a pool; the
 	// manifest's presence is what distinguishes the two.
 	if m, perr := model.ReadPoolManifest(dir); perr == nil {
-		return handlePoolWait(ctx, reg, in.ID, dir, m, time.Duration(timeoutMs)*time.Millisecond)
+		return handlePoolWait(ctx, req, reg, in.ID, dir, m, time.Duration(timeoutMs)*time.Millisecond)
 	}
 
-	finished, werr := awaitFinish(ctx, reg, in.ID, time.Duration(timeoutMs)*time.Millisecond)
+	waitStart := time.Now()
+	finished, werr := awaitFinish(ctx, reg, in.ID, time.Duration(timeoutMs)*time.Millisecond, newRunReporter(req, dir))
 	if werr != nil {
 		return nil, waitOutput{}, werr
 	}
 	if !finished {
-		return nil, waitOutput{ID: in.ID, Finished: false}, nil
+		return nil, waitOutput{
+			ID:             in.ID,
+			Finished:       false,
+			timedOutFields: timedOutFieldsFor(readRunStart(dir), waitStart, expectedRunDir(dir)),
+		}, nil
 	}
 	out, ferr := finishedWaitOutput(in.ID, dir)
 	return nil, out, ferr
@@ -80,58 +86,41 @@ func handleWait(ctx context.Context, reg *runRegistry, in waitInput) (*mcpsdk.Ca
 // cg_cancel both need: the registry Done channel when this server started the
 // run, and filesystem polling otherwise. The caller must have already
 // confirmed the run is in flight; awaitFinish only watches for the transition
-// to finished. A false return with a nil error means the timeout fired.
-func awaitFinish(ctx context.Context, reg *runRegistry, id string, timeout time.Duration) (bool, error) {
-	timer := time.NewTimer(timeout)
-	defer timer.Stop()
-
+// to finished. A false return with a nil error means the timeout fired. A
+// nil report sends nothing.
+func awaitFinish(ctx context.Context, reg *runRegistry, id string, timeout time.Duration, report progressReporter) (bool, error) {
 	if reg != nil {
 		if done, ok := reg.Done(id); ok {
-			select {
-			case <-done:
-				return true, nil
-			case <-timer.C:
-				return false, nil
-			case <-ctx.Done():
-				return false, ctx.Err()
-			}
+			return waitWithKeepAlive(ctx, done, nil, timeout, report)
 		}
 	}
 
-	ticker := time.NewTicker(waitPollInterval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-timer.C:
+	poll := func() (bool, error) {
+		_, err := model.LookupRunDir(id)
+		switch {
+		case err == nil, errors.Is(err, model.ErrFailedRun):
+			return true, nil
+		case errors.Is(err, model.ErrUnknownRunID):
+			return false, fmt.Errorf("unknown run id: %s", id)
+		case errors.Is(err, model.ErrIncompleteRun):
 			return false, nil
-		case <-ctx.Done():
-			return false, ctx.Err()
-		case <-ticker.C:
-			_, e := model.LookupRunDir(id)
-			if e == nil {
-				return true, nil
-			}
-			if errors.Is(e, model.ErrUnknownRunID) {
-				return false, fmt.Errorf("unknown run id: %s", id)
-			}
-			if errors.Is(e, model.ErrFailedRun) {
-				return true, nil
-			}
-			if !errors.Is(e, model.ErrIncompleteRun) {
-				return false, e
-			}
+		default:
+			return false, err
 		}
 	}
+
+	return waitWithKeepAlive(ctx, nil, poll, timeout, report)
 }
 
 // handlePoolWait blocks until the pool finishes or the timeout elapses, then
 // returns the same summary as the sync cg_run_many call, built with the
 // default excerpt size. A timeout returns finished: false with the partial
 // summary; the pool keeps running.
-func handlePoolWait(ctx context.Context, reg *runRegistry, id, dir string, m *model.PoolManifest, timeout time.Duration) (*mcpsdk.CallToolResult, waitOutput, error) {
+func handlePoolWait(ctx context.Context, req *mcpsdk.CallToolRequest, reg *runRegistry, id, dir string, m *model.PoolManifest, timeout time.Duration) (*mcpsdk.CallToolResult, waitOutput, error) {
+	waitStart := time.Now()
 	finished := m.FinishedAt != nil
 	if !finished {
-		f, err := awaitPoolFinish(ctx, reg, id, dir, timeout)
+		f, err := awaitPoolFinish(ctx, reg, id, dir, timeout, newPoolReporter(req, dir))
 		if err != nil {
 			return nil, waitOutput{}, err
 		}
@@ -142,48 +131,33 @@ func handlePoolWait(ctx context.Context, reg *runRegistry, id, dir string, m *mo
 	if err != nil {
 		return nil, waitOutput{}, err
 	}
-	return nil, waitOutput{ID: id, Finished: finished, poolSummary: summary}, nil
+	out := waitOutput{ID: id, Finished: finished, poolSummary: summary}
+	if !finished {
+		out.timedOutFields = timedOutFieldsFor(m.StartedAt, waitStart, expectedPoolManifest(m))
+	}
+	return nil, out, nil
 }
 
 // awaitPoolFinish mirrors awaitFinish for pools: the registry Done channel
 // when this server started the pool, and manifest polling otherwise, since a
 // pool never grows a meta.json. A false return with a nil error means the
-// timeout fired.
-func awaitPoolFinish(ctx context.Context, reg *runRegistry, id, dir string, timeout time.Duration) (bool, error) {
-	timer := time.NewTimer(timeout)
-	defer timer.Stop()
-
+// timeout fired. A nil report sends nothing.
+func awaitPoolFinish(ctx context.Context, reg *runRegistry, id, dir string, timeout time.Duration, report progressReporter) (bool, error) {
 	if reg != nil {
 		if done, ok := reg.Done(id); ok {
-			select {
-			case <-done:
-				return true, nil
-			case <-timer.C:
-				return false, nil
-			case <-ctx.Done():
-				return false, ctx.Err()
-			}
+			return waitWithKeepAlive(ctx, done, nil, timeout, report)
 		}
 	}
 
-	ticker := time.NewTicker(waitPollInterval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-timer.C:
-			return false, nil
-		case <-ctx.Done():
-			return false, ctx.Err()
-		case <-ticker.C:
-			m, err := model.ReadPoolManifest(dir)
-			if err != nil {
-				return false, fmt.Errorf("reading pool.json for %s: %w", id, err)
-			}
-			if m.FinishedAt != nil {
-				return true, nil
-			}
+	poll := func() (bool, error) {
+		m, err := model.ReadPoolManifest(dir)
+		if err != nil {
+			return false, fmt.Errorf("reading pool.json for %s: %w", id, err)
 		}
+		return m.FinishedAt != nil, nil
 	}
+
+	return waitWithKeepAlive(ctx, nil, poll, timeout, report)
 }
 
 // finishedWaitOutput reads meta.json from dir and builds the populated wait

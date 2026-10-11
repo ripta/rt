@@ -51,6 +51,9 @@ type SuperviseOptions struct {
 	Env       map[string]string
 	Pool      string
 	SessionID string
+
+	// Parallelism is used only for the history record. It is 0 for a standalone run.
+	Parallelism int
 }
 
 // RunSupervised starts args[0] with args[1:] under capture, parented by a
@@ -114,7 +117,7 @@ func RunSupervised(args []string, opts SuperviseOptions) (*CaptureRun, error) {
 		return failStart(fmt.Errorf("starting supervisor: %w", err))
 	}
 
-	spec := SuperviseSpec{Argv: args, Cwd: cwd, Env: opts.Env, Pool: opts.Pool, SessionID: opts.SessionID}
+	spec := SuperviseSpec{Argv: args, Cwd: cwd, Env: opts.Env, Pool: opts.Pool, SessionID: opts.SessionID, Parallelism: opts.Parallelism}
 	if resolved != nil {
 		spec.Resolved = resolved.Resolved
 		spec.Canonical = resolved.Canonical

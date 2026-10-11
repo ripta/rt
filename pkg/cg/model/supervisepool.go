@@ -175,6 +175,10 @@ func supervisePool(dir string, in io.Reader, out io.Writer) error {
 	}
 
 	RemovePidFile(dir)
+
+	// History is advisory and the supervisor has no terminal to report to.
+	_ = AppendPoolHistory(manifest)
+
 	return nil
 }
 
@@ -255,6 +259,8 @@ func schedulePool(dir string, spec *PoolSpec, manifest *PoolManifest, sigCh <-ch
 			Env:       spec.Env,
 			Pool:      manifest.ID,
 			SessionID: manifest.SessionID,
+
+			Parallelism: spec.Parallelism,
 		})
 		if err != nil {
 			var sf *StartFailure
