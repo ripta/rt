@@ -35,9 +35,9 @@ func (lc *lineCountingReader) Read(p []byte) (int, error) {
 	return n, err
 }
 
-// formatDuration renders d with tiered rounding so the finish-line duration
+// FormatDuration renders d with tiered rounding so the finish-line duration
 // stays readable at every scale.
-func formatDuration(d time.Duration) string {
+func FormatDuration(d time.Duration) string {
 	switch {
 	case d < time.Second:
 		return d.Round(time.Millisecond).String()
@@ -57,7 +57,7 @@ func formatFinish(code int, signaled bool, sig int, d time.Duration, u Usage, ou
 	if signaled {
 		head = fmt.Sprintf("signal=%d", sig)
 	}
-	line := fmt.Sprintf("Finished %s in %s %s (out=%d err=%d)", head, formatDuration(d), u.cpuToken(), outLines, errLines)
+	line := fmt.Sprintf("Finished %s in %s %s (out=%d err=%d)", head, FormatDuration(d), u.cpuToken(), outLines, errLines)
 	if id != "" {
 		line += " id=" + id
 	}

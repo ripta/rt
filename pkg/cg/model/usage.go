@@ -69,7 +69,7 @@ func (u Usage) systemDuration() time.Duration {
 // cpuToken renders the compact cpu=user/sys token for the Finished line. It is
 // the single most diagnostic usage signal, so it rides the default line.
 func (u Usage) cpuToken() string {
-	return fmt.Sprintf("cpu=%s/%s", formatDuration(u.userDuration()), formatDuration(u.systemDuration()))
+	return fmt.Sprintf("cpu=%s/%s", FormatDuration(u.userDuration()), FormatDuration(u.systemDuration()))
 }
 
 // formatUsage renders the full verbose "Usage ..." line emitted under -v. It
@@ -78,15 +78,15 @@ func (u Usage) cpuToken() string {
 func formatUsage(u Usage) string {
 	return fmt.Sprintf(
 		"Usage user=%s sys=%s maxrss=%s pids=%d minflt=%d majflt=%d nvcsw=%d nivcsw=%d inblock=%d oublock=%d source=%s",
-		formatDuration(u.userDuration()), formatDuration(u.systemDuration()), formatBytes(u.MaxRSSBytes),
+		FormatDuration(u.userDuration()), FormatDuration(u.systemDuration()), FormatBytes(u.MaxRSSBytes),
 		u.PeakPids, u.MinorFaults, u.MajorFaults, u.VoluntaryCtxSwitches, u.InvoluntaryCtxSwitches,
 		u.BlockInputOps, u.BlockOutputOps, u.Source,
 	)
 }
 
-// formatBytes renders a byte count with a binary-scaled unit suffix. Values
+// FormatBytes renders a byte count with a binary-scaled unit suffix. Values
 // under 1 KiB show as a plain byte count. Larger values show one decimal place.
-func formatBytes(n int64) string {
+func FormatBytes(n int64) string {
 	const unit = 1024
 	if n < unit {
 		return fmt.Sprintf("%dB", n)

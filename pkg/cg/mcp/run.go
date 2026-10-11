@@ -65,11 +65,11 @@ func registerRun(s *mcpsdk.Server, reg *runRegistry, g *gate, sessionID string) 
 		if elicitationAvailable(req) {
 			el = req.Session
 		}
-		return handleRun(ctx, reg, g, el, sessionID, in)
+		return handleRun(ctx, req, reg, g, el, sessionID, in)
 	})
 }
 
-func handleRun(ctx context.Context, reg *runRegistry, g *gate, el elicitor, sessionID string, in runInput) (*mcpsdk.CallToolResult, runOutput, error) {
+func handleRun(ctx context.Context, req *mcpsdk.CallToolRequest, reg *runRegistry, g *gate, el elicitor, sessionID string, in runInput) (*mcpsdk.CallToolResult, runOutput, error) {
 	if len(in.Command) == 0 {
 		return nil, runOutput{}, fmt.Errorf("command must contain at least one element")
 	}
@@ -123,21 +123,20 @@ func handleRun(ctx context.Context, reg *runRegistry, g *gate, el elicitor, sess
 		timeoutMs = defaultWaitTimeoutMs
 	}
 
-	timer := time.NewTimer(time.Duration(timeoutMs) * time.Millisecond)
-	defer timer.Stop()
+	finished, err := waitWithKeepAlive(ctx, run.Done, nil, time.Duration(timeoutMs)*time.Millisecond, newRunReporter(req, run.Dir))
+	if err != nil {
+		return nil, runOutput{}, err
+	}
 
-	select {
-	case <-run.Done:
+	if finished {
 		out := finishedOutput(run, excerpt, in.ExcerptFrom)
 		out.RememberWarning = warning
 		return nil, out, nil
-	case <-timer.C:
-		out := timedOutOutput(run, excerpt, in.ExcerptFrom)
-		out.RememberWarning = warning
-		return nil, out, nil
-	case <-ctx.Done():
-		return nil, runOutput{}, ctx.Err()
 	}
+
+	out := timedOutOutput(run, excerpt, in.ExcerptFrom)
+	out.RememberWarning = warning
+	return nil, out, nil
 }
 
 // finishedOutput builds the result for a fully completed run, reading

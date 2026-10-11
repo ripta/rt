@@ -233,7 +233,7 @@ func TestRestartToleranceWaitAndList(t *testing.T) {
 		t.Fatalf("writing stop file: %v", err)
 	}
 
-	_, out, err := handleWait(context.Background(), reg, waitInput{ID: id, TimeoutMs: 10000})
+	_, out, err := handleWait(context.Background(), nil, reg, waitInput{ID: id, TimeoutMs: 10000})
 	if err != nil {
 		t.Fatalf("handleWait: %v", err)
 	}
@@ -288,7 +288,7 @@ func TestRestartCancelRefused(t *testing.T) {
 		t.Fatalf("handleCancel err = %v, want not started by this server", err)
 	}
 
-	_, wout, err := handleWait(context.Background(), reg, waitInput{ID: id, TimeoutMs: 200})
+	_, wout, err := handleWait(context.Background(), nil, reg, waitInput{ID: id, TimeoutMs: 200})
 	if err != nil {
 		t.Fatalf("handleWait: %v", err)
 	}
@@ -335,7 +335,7 @@ func TestRestartTolerancePool(t *testing.T) {
 	// getting scheduled and the pool finishing.
 	reg := newRunRegistry()
 
-	_, out, err := handleWait(context.Background(), reg, waitInput{ID: id, TimeoutMs: 10000})
+	_, out, err := handleWait(context.Background(), nil, reg, waitInput{ID: id, TimeoutMs: 10000})
 	if err != nil {
 		t.Fatalf("handleWait: %v", err)
 	}

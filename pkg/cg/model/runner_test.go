@@ -610,8 +610,8 @@ func TestFormatDuration(t *testing.T) {
 
 	for _, tt := range formatDurationTests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := formatDuration(tt.in); got != tt.want {
-				t.Errorf("formatDuration(%s) = %q, want %q", tt.in, got, tt.want)
+			if got := FormatDuration(tt.in); got != tt.want {
+				t.Errorf("FormatDuration(%s) = %q, want %q", tt.in, got, tt.want)
 			}
 		})
 	}

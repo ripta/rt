@@ -329,7 +329,7 @@ func TestRunManyAsyncThenWait(t *testing.T) {
 		t.Errorf("async return carries a summary %+v, want none", started.poolSummary)
 	}
 
-	_, out, err := handleWait(context.Background(), reg, waitInput{ID: started.ID, TimeoutMs: 30000})
+	_, out, err := handleWait(context.Background(), nil, reg, waitInput{ID: started.ID, TimeoutMs: 30000})
 	if err != nil {
 		t.Fatalf("handleWait: %v", err)
 	}
