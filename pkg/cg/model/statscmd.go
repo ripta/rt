@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"strconv"
+	"strings"
 	"text/tabwriter"
 	"time"
 
@@ -72,26 +73,21 @@ func (opts *statsOptions) run(cmd *cobra.Command, args []string) error {
 		return usage("invalid --output %q: want table|json", opts.Output)
 	}
 
-	exitFilter, err := ParseExitCodeFilter(opts.ExitCode)
+	filters := StatsFilters{
+		Cwd:      opts.Cwd,
+		Since:    opts.Since,
+		ExitCode: opts.ExitCode,
+		Samples:  opts.Samples,
+		Pool:     opts.Pool,
+	}
+
+	query, err := filters.Query(args, time.Now())
 	if err != nil {
-		return usage("invalid --exit-code: %v", err)
-	}
-
-	query := NewStatsQuery(args)
-	query.Cwd = opts.Cwd
-	query.ExitCode = exitFilter
-	query.Samples = opts.Samples
-	query.Pool = opts.Pool
-
-	if opts.Since != "" {
-		since, err := ParseFilterTime(opts.Since, time.Now())
-		if err != nil {
-			return usage("invalid --since: %v", err)
+		var filterErr *StatsFilterError
+		if errors.As(err, &filterErr) {
+			return usage("invalid --%s: %v", strings.ReplaceAll(filterErr.Field, "_", "-"), filterErr.Err)
 		}
-		query.Since = &since
-	}
 
-	if err := query.Validate(); err != nil {
 		return usage("%v", err)
 	}
 

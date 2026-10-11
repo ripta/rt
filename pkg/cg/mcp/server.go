@@ -95,6 +95,7 @@ func newServer(v string, startedAt time.Time, sessionID string, g *gate) *mcpsdk
 	registerRunMany(s, reg, g, sessionID)
 	registerList(s)
 	registerMeta(s)
+	registerStats(s)
 	registerWait(s, reg)
 	registerCancel(s, reg)
 	registerPaths(s)
