@@ -317,3 +317,75 @@ func TestApprovalEndToEndFailedPrompt(t *testing.T) {
 		})
 	}
 }
+
+// metaCapabilityTest pins where the gate reads the elicitation capability on a 2026-07-28 session.
+// Handler shapes what the client advertises in initialize. Meta is the client capabilities object
+// sent in the call's _meta, which SEP-2575 makes authoritative for the request.
+type metaCapabilityTest struct {
+	Name    string
+	Handler func(context.Context, *mcpsdk.ElicitRequest) (*mcpsdk.ElicitResult, error)
+	Meta    map[string]any
+
+	WantPrompt bool
+}
+
+var metaCapabilityTests = []metaCapabilityTest{
+	{
+		Name: "elicitation only in _meta prompts",
+		Meta: map[string]any{"elicitation": map[string]any{}},
+
+		WantPrompt: true,
+	},
+	{
+		Name:    "elicitation only in initialize fails closed",
+		Handler: (&formScript{}).handle,
+		Meta:    map[string]any{},
+	},
+}
+
+// TestApprovalEndToEndCapabilityFromMeta turns off the client's multi round-trip handling so the
+// first call's raw result is visible: an approval form when the gate sees elicitation, or the
+// fail-closed refusal when it does not.
+func TestApprovalEndToEndCapabilityFromMeta(t *testing.T) {
+	for _, test := range metaCapabilityTests {
+		t.Run(test.Name, func(t *testing.T) {
+			t.Setenv("TMPDIR", t.TempDir())
+
+			g := newTestGate(t, "version: 1\n", false)
+			cs := connectGateWith(t, g, protocolMultiRoundTrip, &mcpsdk.ClientOptions{
+				ElicitationHandler: test.Handler,
+				MultiRoundTrip:     &mcpsdk.MultiRoundTripOptions{Disabled: true},
+			})
+
+			res, err := cs.CallTool(context.Background(), &mcpsdk.CallToolParams{
+				Meta:      mcpsdk.Meta{mcpsdk.MetaKeyClientCapabilities: test.Meta},
+				Name:      "cg_run",
+				Arguments: map[string]any{"command": []string{"echo", "hi"}},
+			})
+			if err != nil {
+				t.Fatalf("CallTool: %v", err)
+			}
+
+			if got := res.NeedsInput(); got != test.WantPrompt {
+				t.Fatalf("NeedsInput = %v, want %v (IsError=%v, content=%v)", got, test.WantPrompt, res.IsError, res.Content)
+			}
+			if test.WantPrompt {
+				if _, ok := res.InputRequests["approval-1"]; !ok {
+					t.Errorf("InputRequests = %v, want an approval-1 form", res.InputRequests)
+				}
+
+				return
+			}
+
+			var text []string
+			for _, c := range res.Content {
+				if tc, ok := c.(*mcpsdk.TextContent); ok {
+					text = append(text, tc.Text)
+				}
+			}
+			if !res.IsError || !strings.Contains(strings.Join(text, "\n"), "the client cannot prompt for approval") {
+				t.Errorf("result = %v, want the fail-closed refusal", text)
+			}
+		})
+	}
+}

@@ -261,6 +261,14 @@ func connectElicitProbe(t *testing.T, protocolVersion string, handler func(conte
 func connectGate(t *testing.T, g *gate, protocolVersion string, handler func(context.Context, *mcpsdk.ElicitRequest) (*mcpsdk.ElicitResult, error)) *mcpsdk.ClientSession {
 	t.Helper()
 
+	return connectGateWith(t, g, protocolVersion, &mcpsdk.ClientOptions{ElicitationHandler: handler})
+}
+
+// connectGateWith is connectGate with the client's options spelled out, for tests that shape the
+// client's capabilities or turn off its multi round-trip handling.
+func connectGateWith(t *testing.T, g *gate, protocolVersion string, opts *mcpsdk.ClientOptions) *mcpsdk.ClientSession {
+	t.Helper()
+
 	ctx := context.Background()
 	server := newServer("test", time.Now(), "SESS", g)
 
@@ -271,7 +279,7 @@ func connectGate(t *testing.T, g *gate, protocolVersion string, handler func(con
 	}
 	t.Cleanup(func() { _ = ss.Close() })
 
-	client := mcpsdk.NewClient(&mcpsdk.Implementation{Name: "test-client", Version: "0"}, &mcpsdk.ClientOptions{ElicitationHandler: handler})
+	client := mcpsdk.NewClient(&mcpsdk.Implementation{Name: "test-client", Version: "0"}, opts)
 	cs, err := client.Connect(ctx, clientTransport, &mcpsdk.ClientSessionOptions{ProtocolVersion: protocolVersion})
 	if err != nil {
 		t.Fatalf("client.Connect: %v", err)

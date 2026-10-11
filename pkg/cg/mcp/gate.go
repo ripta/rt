@@ -180,13 +180,17 @@ func (g *gate) failClosedError(tool string) error {
 	return fmt.Errorf("%s refused: no rule matched and the client cannot prompt for approval; add an allow rule to %s or start cg mcp with --blindly-allow", tool, g.store.Project.Path)
 }
 
-// elicitationAvailable reports whether the connected client advertised the
+// elicitationAvailable reports whether the calling client advertised the
 // elicitation capability. It is nil-safe so handlers can call it on a request
 // that has no session.
+//
+// SEP-2575 moves client capabilities into each request's _meta from protocol
+// 2026-07-28 on, and _meta is authoritative for that request. The SDK reads
+// _meta first and falls back to the initialize handshake for older protocols.
 func elicitationAvailable(req *mcpsdk.CallToolRequest) bool {
-	if req == nil || req.Session == nil {
+	if req == nil {
 		return false
 	}
-	params := req.Session.InitializeParams()
-	return params != nil && params.Capabilities != nil && params.Capabilities.Elicitation != nil
+	caps := req.ClientCapabilities()
+	return caps != nil && caps.Elicitation != nil
 }
