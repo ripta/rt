@@ -121,6 +121,18 @@ func openHistoryAt(dir string) (*History, error) {
 		return nil, err
 	}
 
+	// MkdirAll leaves an existing directory as it found it. The ownership check above makes
+	// tightening the mode safe.
+	info, err := os.Stat(dir)
+	if err != nil {
+		return nil, fmt.Errorf("checking history dir: %w", err)
+	}
+	if info.Mode().Perm() != 0o700 {
+		if err := os.Chmod(dir, 0o700); err != nil {
+			return nil, fmt.Errorf("securing history dir: %w", err)
+		}
+	}
+
 	key, err := loadHistoryKey(dir)
 	if err != nil {
 		return nil, err
@@ -186,22 +198,11 @@ func loadHistoryKey(dir string) ([]byte, error) {
 }
 
 func readHistoryKey(path string) ([]byte, error) {
-	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
-	if errors.Is(err, syscall.ELOOP) {
-		return nil, fmt.Errorf("%s: %w", path, ErrNotRegularFile)
-	}
+	f, err := openHistoryFile(path, os.O_RDONLY)
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
-
-	info, err := f.Stat()
-	if err != nil {
-		return nil, err
-	}
-	if !info.Mode().IsRegular() {
-		return nil, fmt.Errorf("%s: %w", path, ErrNotRegularFile)
-	}
 
 	key, err := io.ReadAll(io.LimitReader(f, historyKeyBytes+1))
 	if err != nil {
@@ -383,13 +384,10 @@ func (h *History) appendLocked(line []byte) error {
 }
 
 // openHistoryFile opens a file in the history directory, refusing symlinks and anything that
-// is not a regular file. O_NONBLOCK keeps a planted FIFO from hanging the open, and it has no
-// effect on regular files.
+// is not a regular file. An existing file with group or other permission bits is tightened to
+// 0600, because the history directory promises owner-only files.
 func openHistoryFile(path string, flags int) (*os.File, error) {
-	f, err := os.OpenFile(path, flags|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0o600)
-	if errors.Is(err, syscall.ELOOP) {
-		return nil, fmt.Errorf("%s: %w", path, ErrNotRegularFile)
-	}
+	f, err := openRegularFile(path, flags, 0o600)
 	if err != nil {
 		return nil, err
 	}
@@ -399,9 +397,12 @@ func openHistoryFile(path string, flags int) (*os.File, error) {
 		f.Close()
 		return nil, err
 	}
-	if !info.Mode().IsRegular() {
-		f.Close()
-		return nil, fmt.Errorf("%s: %w", path, ErrNotRegularFile)
+
+	if info.Mode().Perm()&0o077 != 0 {
+		if err := f.Chmod(0o600); err != nil {
+			f.Close()
+			return nil, fmt.Errorf("tightening %s: %w", path, err)
+		}
 	}
 
 	return f, nil

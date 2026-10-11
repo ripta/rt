@@ -85,7 +85,10 @@ func expectedRunDir(dir string) *historyInfo {
 
 // expectedPool looks up the pool record for the pool's exact shape first. It then falls back to
 // the member estimate. parallelism must be the value the pool supervisor records.
-func expectedPool(cwd string, commands [][]string, repeat, parallelism int) *historyInfo {
+//
+// A pool that already started has member records of its own in the log. Pass its start as before,
+// so the member estimate counts only runs from earlier pools. A zero before keeps every run.
+func expectedPool(cwd string, commands [][]string, repeat, parallelism int, before time.Time) *historyInfo {
 	history, err := model.OpenHistory()
 	if err != nil {
 		return nil
@@ -102,40 +105,29 @@ func expectedPool(cwd string, commands [][]string, repeat, parallelism int) *his
 		}
 	}
 
-	return estimatePool(history, cwd, commands, repeat, parallelism)
+	return estimatePool(history, cwd, commands, repeat, parallelism, before)
 }
 
 // estimatePool covers a pool shape seen for the first time. Every distinct command needs a pooled
 // exact match at this parallelism. One command without samples voids the estimate.
-func estimatePool(history *model.History, cwd string, commands [][]string, repeat, parallelism int) *historyInfo {
+func estimatePool(history *model.History, cwd string, commands [][]string, repeat, parallelism int, before time.Time) *historyInfo {
 	if len(commands) == 0 || parallelism < 1 {
 		return nil
 	}
 
-	seen := make(map[string]struct{}, len(commands))
+	stats, err := history.ExactPooledStats(cwd, commands, parallelism, before)
+	if err != nil {
+		return nil
+	}
 
 	var longest int64
 	for _, argv := range commands {
-		key := model.ArgvKey(argv)
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		seen[key] = struct{}{}
-
-		query := model.NewStatsQuery(argv)
-		query.Cwd = cwd
-
-		result, err := history.QueryStats(query)
-		if err != nil {
+		pooled := stats[model.ArgvKey(argv)]
+		if pooled.Count == 0 {
 			return nil
 		}
 
-		pooled := result.ExactPooled(parallelism)
-		if pooled == nil || pooled.Stats.Count == 0 {
-			return nil
-		}
-
-		longest = max(longest, pooled.Stats.MaxMs)
+		longest = max(longest, pooled.MaxMs)
 	}
 
 	batches := (int64(len(commands)*repeat) + int64(parallelism) - 1) / int64(parallelism)
@@ -145,7 +137,7 @@ func estimatePool(history *model.History, cwd string, commands [][]string, repea
 
 // expectedPoolManifest looks up a pool by the shape its manifest recorded.
 func expectedPoolManifest(m *model.PoolManifest) *historyInfo {
-	return expectedPool(m.Cwd, m.Commands, m.Repeat, m.Parallelism)
+	return expectedPool(m.Cwd, m.Commands, m.Repeat, m.Parallelism, m.StartedAt)
 }
 
 // autoWaitTimeoutMs turns an expectation into a wait timeout: max_ms with 50% headroom, never

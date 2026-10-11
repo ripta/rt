@@ -231,7 +231,8 @@ with a longer argv than the query counts at the prefix level. For
 `make`. A stored run of `make test JOBS=10 -k` counts at `make test JOBS=10`
 but is never an exact match.
 
-cg cannot know which arguments change a duration. It reports every level. The caller applies its own judgment.
+cg cannot know which arguments change a duration. It reports every level. The
+caller applies its own judgment.
 
 Pooled and standalone runs never share an entry. Pool members with
 `parallelism` above 1 compete for CPU. Under `--pool any`, a level with both
@@ -267,24 +268,27 @@ after a dependency bump. `count` says how far to trust the rest. A pooled entry
 carries `parallelism` when it is known. The exact entry that `--pool only`
 returns with a count of 0 omits it.
 
-A run appends one line to a history log once its `meta.json` is written. The log lives outside the
-capture root, so `cg prune` and `$TMPDIR` cleanup do not touch it. Its
-directory is `$XDG_STATE_HOME/cg`, or `~/.local/state/cg` when
+A run appends one line to a history log once its `meta.json` is written. The log
+lives outside the capture root, so `cg prune` and `$TMPDIR` cleanup do not touch
+it. Its directory is `$XDG_STATE_HOME/cg`, or `~/.local/state/cg` when
 `XDG_STATE_HOME` is unset. The directory is mode 0700 and its files are mode
-0600.
+0600. cg tightens a directory or file it finds with looser modes.
 
 | File | Purpose |
 |------|---------|
 | `history.jsonl` | The log. One JSON record per line. |
 | `history.1.jsonl` | The previous generation. |
 | `history.key` | The 32-byte key for the argv and cwd MACs. |
-| `history.lock` | The lock that serializes appends and rotation. |
+| `history.lock` | The lock that serializes appends and rotation. The first-query import holds it exclusively. Scans hold it shared. |
 | `history.imported` | The marker that the first-query import has run. |
 
-Appends take an exclusive lock, so concurrent finishes never interleave partial
-lines. When `history.jsonl` passes 8 MB, it is renamed to `history.1.jsonl` and
-replaces any older generation. Queries read both files. Two generations hold far
-more runs than `--samples` needs. The log needs no compaction.
+Appends take `history.lock` exclusively, so concurrent finishes never interleave
+partial lines. The same lock serializes rotation. When `history.jsonl` passes
+8 MB, it is renamed to `history.1.jsonl` and replaces any older generation. The
+first-query import also holds the lock exclusively. Queries read both files
+while holding the lock shared, so a rotation cannot land between the two reads.
+Two generations hold far more runs than `--samples` needs. The log needs no
+compaction.
 
 A run record holds its version in `v`, the kind (`run`), the run ID, the start
 time, `duration_ms`, the exit code, the signal, whether the run was pooled, its
@@ -318,8 +322,8 @@ its `parallelism` is unknown. Deleting `history.jsonl` alone does not re-import,
 because the marker stays. Delete `history.imported` to force a re-import.
 
 The log also holds a record for each finished pool, with the pool's wall time.
-These pool records are internal. `cg stats` and `cg_stats` do not show them. They
-feed two things. One is the `cg_run_many` auto timeout. The other is the
+These pool records are internal. `cg stats` and `cg_stats` do not show them.
+They feed two things. One is the `cg_run_many` auto timeout. The other is the
 `history` object, with `source: "pool"`, on a timed-out response.
 
 `cg note` records free-form memos that outlive a single run. A note carries an
@@ -551,8 +555,8 @@ default, so existing callers keep the 60000 ms default. An explicit
 `max(1.5 x the longest expected duration, 60000)` ms. The response reports the
 value it used as `wait_timeout_ms_used`. With no history, the timeout is 60000.
 
-The expected duration for `cg_run` comes from the exact, standalone match for the
-command and cwd, with the default filters. Prefix matches never count, since
+The expected duration for `cg_run` comes from the exact, standalone match for
+the command and cwd, with the default filters. Prefix matches never count, since
 `make` says little about `make test`. For `cg_run_many`, the first source with
 samples wins:
 
@@ -578,10 +582,12 @@ and `cg_run_many` report `wait_timeout_ms_used` on every call that waited.
 ```
 
 `source` says where the numbers came from. `run` is the exact standalone match.
-`pool` is the wall time of earlier identical pools. Both carry `count`, `p50_ms`,
-`p90_ms`, and `max_ms`. `estimate` is the member estimate. It carries only
-`max_ms`, which holds the estimate. An agent that timed out can size its next
-`cg_wait` from `elapsed_ms` and `history`.
+`pool` is the wall time of earlier identical pools. Both carry `count`,
+`p50_ms`, `p90_ms`, and `max_ms`. `estimate` is the member estimate. It carries
+only `max_ms`, which holds the estimate. The estimate counts only runs that
+started before the pool did, so a pool's own members never feed its estimate. An
+agent that timed out can size its next `cg_wait` from `elapsed_ms` and
+`history`.
 
 `cg_run` checks each command against an approval matcher before running it. The
 default mode prompts for unmatched commands when the client supports elicitation,

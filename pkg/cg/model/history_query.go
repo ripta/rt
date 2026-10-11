@@ -51,17 +51,36 @@ type StatsQuery struct {
 	// Since keeps runs started at or after it. Nil keeps everything.
 	Since *time.Time
 
+	// Before keeps runs started strictly before it. Nil keeps everything.
+	Before *time.Time
+
 	ExitCode ExitCodeFilter
 	Samples  int
 	Pool     string
 }
 
+// DefaultStatsExitCode is the exit-code expression a stats lookup uses when the caller gives none.
+// It keeps failed runs out of a duration estimate.
+const DefaultStatsExitCode = "0"
+
+var defaultStatsExitCodeFilter = mustParseExitCodeFilter(DefaultStatsExitCode)
+
+func mustParseExitCodeFilter(s string) ExitCodeFilter {
+	f, err := ParseExitCodeFilter(s)
+	if err != nil {
+		panic(err)
+	}
+
+	return f
+}
+
 // NewStatsQuery returns a query for argv with the default filters.
 func NewStatsQuery(argv []string) StatsQuery {
 	return StatsQuery{
-		Argv:    argv,
-		Samples: DefaultStatsSamples,
-		Pool:    StatsPoolAny,
+		Argv:     argv,
+		ExitCode: defaultStatsExitCodeFilter,
+		Samples:  DefaultStatsSamples,
+		Pool:     StatsPoolAny,
 	}
 }
 
@@ -240,6 +259,9 @@ func (h *History) QueryStats(q StatsQuery) (*StatsResult, error) {
 		if q.Since != nil && rec.StartedAt.Before(*q.Since) {
 			return
 		}
+		if q.Before != nil && !rec.StartedAt.Before(*q.Before) {
+			return
+		}
 		if (q.Pool == StatsPoolNone && rec.Pool) || (q.Pool == StatsPoolOnly && !rec.Pool) {
 			return
 		}
@@ -269,6 +291,86 @@ func (h *History) QueryStats(q StatsQuery) (*StatsResult, error) {
 	}
 
 	return result, nil
+}
+
+// ExactPooledStats answers, in one scan of the log, what QueryStats and ExactPooled report for
+// each argv: the exact command, run in a pool at parallelism, with the default filters. before
+// limits the samples to runs started strictly before it, and a zero before keeps everything. The
+// result maps ArgvKey to stats, and a command with no samples maps to zero stats.
+func (h *History) ExactPooledStats(cwd string, argvs [][]string, parallelism int, before time.Time) (map[string]DurationStats, error) {
+	for _, argv := range argvs {
+		if len(argv) == 0 {
+			return nil, fmt.Errorf("%w: command is required", ErrInvalidStatsQuery)
+		}
+	}
+
+	resolved, err := CanonicalCwd(cwd)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := h.EnsureImported(); err != nil {
+		return nil, err
+	}
+
+	type target struct {
+		level   statsLevel
+		mac     string
+		samples []statsSample
+	}
+
+	cwdMAC := h.CwdMAC(resolved)
+	targets := make(map[string]*target, len(argvs))
+	for _, argv := range argvs {
+		key := ArgvKey(argv)
+		if targets[key] != nil {
+			continue
+		}
+
+		level := statsLevels(len(argv))[0]
+		targets[key] = &target{level: level, mac: h.ArgvMACs(argv)[level.idx]}
+	}
+
+	filter := defaultStatsExitCodeFilter
+
+	err = h.scanLog(func(header historyHeader, line []byte) {
+		if header.Kind != HistoryKindRun {
+			return
+		}
+
+		var rec RunHistoryRecord
+		if json.Unmarshal(line, &rec) != nil {
+			return
+		}
+		if rec.CwdMAC != cwdMAC || rec.Signal != nil || !filter.Match(rec.ExitCode) {
+			return
+		}
+		if !rec.Pool || rec.Parallelism != parallelism {
+			return
+		}
+		if !before.IsZero() && !rec.StartedAt.Before(before) {
+			return
+		}
+
+		for _, t := range targets {
+			idx := t.level.idx
+			if len(rec.ArgvMACs) != idx+1 || rec.ArgvMACs[idx] != t.mac {
+				continue
+			}
+
+			t.samples = append(t.samples, statsSample{rec.StartedAt, rec.DurationMs})
+		}
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	stats := make(map[string]DurationStats, len(targets))
+	for key, t := range targets {
+		stats[key] = computeStats(t.samples, DefaultStatsSamples)
+	}
+
+	return stats, nil
 }
 
 // buildLevel turns a level's grouped samples into entries: standalone first, then pooled by

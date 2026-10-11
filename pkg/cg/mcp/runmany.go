@@ -178,11 +178,13 @@ func handleRunMany(ctx context.Context, req *mcpsdk.CallToolRequest, reg *runReg
 	if wait && timeoutMs <= 0 {
 		timeoutMs = defaultWaitTimeoutMs
 		if in.WaitTimeoutAuto {
-			expected = expectedPool(in.Cwd, in.Commands, repeat, parallelism)
+			expected = expectedPool(in.Cwd, in.Commands, repeat, parallelism, time.Time{})
 			expectedLooked = true
 			timeoutMs = autoWaitTimeoutMs(expected)
 		}
 	}
+
+	launched := time.Now()
 
 	pool, err := model.PoolSupervised(spec)
 	if err != nil {
@@ -208,10 +210,18 @@ func handleRunMany(ctx context.Context, req *mcpsdk.CallToolRequest, reg *runReg
 
 	out := runManyOutput{ID: pool.ID, RememberWarning: warning, TimedOut: !finished, WaitTimeoutMsUsed: timeoutMs}
 	if !finished {
+		poolStart := readPoolStart(pool.Dir)
 		if !expectedLooked {
-			expected = expectedPool(in.Cwd, in.Commands, repeat, parallelism)
+			// The pool's members have already appended their own records, which must not feed
+			// the estimate. Without a recorded start, the launch time is a safe upper bound.
+			before := poolStart
+			if before.IsZero() {
+				before = launched
+			}
+
+			expected = expectedPool(in.Cwd, in.Commands, repeat, parallelism, before)
 		}
-		out.timedOutFields = timedOutFieldsFor(readPoolStart(pool.Dir), waitStart, expected)
+		out.timedOutFields = timedOutFieldsFor(poolStart, waitStart, expected)
 	}
 
 	summary, err := buildPoolSummary(pool.Dir, excerpt)

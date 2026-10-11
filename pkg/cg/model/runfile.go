@@ -26,7 +26,13 @@ var ErrUntrustedDir = errors.New("not a directory owned by the current user")
 // O_NONBLOCK keeps the FIFO open from blocking; it has no effect on reads of
 // regular files.
 func OpenRunFile(path string) (*os.File, error) {
-	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
+	return openRegularFile(path, os.O_RDONLY, 0)
+}
+
+// openRegularFile opens path with O_NOFOLLOW and O_NONBLOCK added to flags. It refuses a symlink
+// in the final component and anything that is not a regular file.
+func openRegularFile(path string, flags int, perm os.FileMode) (*os.File, error) {
+	f, err := os.OpenFile(path, flags|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, perm)
 	if errors.Is(err, syscall.ELOOP) {
 		return nil, fmt.Errorf("%s: %w", path, ErrNotRegularFile)
 	}

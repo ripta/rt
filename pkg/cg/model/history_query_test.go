@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -328,6 +329,17 @@ func TestQueryStatsFilters(t *testing.T) {
 		}
 	})
 
+	t.Run("before drops runs started at or after it", func(t *testing.T) {
+		q := fixtureQuery("make test JOBS=10 FOO=file")
+		before := statsFixtureBase.AddDate(0, 0, 2)
+		q.Before = &before
+
+		stats := exact(t, q)
+		if stats.Count != 2 || stats.MaxMs != 200000 {
+			t.Errorf("stats = %+v, want the two runs before day 2", stats)
+		}
+	})
+
 	t.Run("cwd selects its own runs", func(t *testing.T) {
 		q := fixtureQuery("make test JOBS=10 FOO=file")
 		q.Cwd = "/tmp"
@@ -347,6 +359,76 @@ func TestQueryStatsFilters(t *testing.T) {
 			t.Errorf("stats = %+v, want the two most recent runs", stats)
 		}
 	})
+}
+
+func TestExactPooledStatsMatchesQueryStats(t *testing.T) {
+	h := newFixtureHistory(t)
+	appendFixtureRuns(t, h, statsFixtureRuns)
+
+	long := make([]string, HistoryMaxArgvMACs+8)
+	for i := range long {
+		long[i] = fmt.Sprintf("a%d", i)
+	}
+	for i, day := range []int{0, 1, 2} {
+		fixtureRun{
+			ID: fmt.Sprintf("LONGP%d", i), Argv: strings.Join(long, " "), Day: day,
+			DurationMs: int64(i+1) * 1000, Parallelism: 4,
+		}.append(t, h)
+	}
+
+	argvs := [][]string{
+		strings.Fields("make test JOBS=10 FOO=file"),
+		strings.Fields("make test"),
+		strings.Fields("make"),
+		strings.Fields("never ran"),
+		long,
+	}
+
+	for _, parallelism := range []int{2, 4, 8} {
+		for _, before := range []time.Time{{}, statsFixtureBase.AddDate(0, 0, 3)} {
+			got, err := h.ExactPooledStats(statsFixtureCwd, argvs, parallelism, before)
+			if err != nil {
+				t.Fatalf("ExactPooledStats: %v", err)
+			}
+
+			for _, argv := range argvs {
+				q := NewStatsQuery(argv)
+				q.Cwd = statsFixtureCwd
+				if !before.IsZero() {
+					q.Before = &before
+				}
+
+				var want DurationStats
+				if m := queryStats(t, h, q).ExactPooled(parallelism); m != nil {
+					want = m.Stats
+				}
+
+				if g := got[ArgvKey(argv)]; !reflect.DeepEqual(g, want) {
+					t.Errorf("parallelism %d before %v argv %v: got %+v, want %+v", parallelism, before, argv, g, want)
+				}
+			}
+		}
+	}
+}
+
+func TestExactPooledStatsRejectsEmptyArgv(t *testing.T) {
+	h := newFixtureHistory(t)
+
+	_, err := h.ExactPooledStats(statsFixtureCwd, [][]string{{}}, 1, time.Time{})
+	if !errors.Is(err, ErrInvalidStatsQuery) {
+		t.Errorf("err = %v, want ErrInvalidStatsQuery", err)
+	}
+}
+
+func TestNewStatsQueryDefaultExitCode(t *testing.T) {
+	want, err := ParseExitCodeFilter(DefaultStatsExitCode)
+	if err != nil {
+		t.Fatalf("ParseExitCodeFilter: %v", err)
+	}
+
+	if got := NewStatsQuery([]string{"x"}).ExitCode; got != want {
+		t.Errorf("ExitCode = %+v, want %+v", got, want)
+	}
 }
 
 func TestQueryStatsPercentiles(t *testing.T) {

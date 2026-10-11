@@ -531,6 +531,46 @@ func TestHistoryPermissions(t *testing.T) {
 	}
 }
 
+func TestHistoryTightensLooseModes(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "cg")
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatalf("Mkdir: %v", err)
+	}
+
+	logPath := filepath.Join(dir, HistoryLogFilename)
+	if err := os.WriteFile(logPath, nil, 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	keyPath := filepath.Join(dir, HistoryKeyFilename)
+	if err := os.WriteFile(keyPath, bytes.Repeat([]byte{0x42}, historyKeyBytes), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	h, err := openHistoryAt(dir)
+	if err != nil {
+		t.Fatalf("openHistoryAt: %v", err)
+	}
+	if err := h.Append(paddedRecord("x")); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+
+	for _, path := range []string{dir, logPath, keyPath} {
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatalf("stat %s: %v", path, err)
+		}
+
+		want := os.FileMode(0o600)
+		if info.IsDir() {
+			want = 0o700
+		}
+		if got := info.Mode().Perm(); got != want {
+			t.Errorf("%s mode = %o, want %o", path, got, want)
+		}
+	}
+}
+
 func TestHistoryRefusesFIFOLog(t *testing.T) {
 	h := newTestHistory(t)
 

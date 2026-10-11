@@ -45,7 +45,7 @@ func NewStatsCommand() *cobra.Command {
 
 	c.Flags().StringVar(&opts.Cwd, "cwd", "", "working `DIR` the runs started in (default: the current directory)")
 	c.Flags().StringVar(&opts.Since, "since", "", "only count runs started at or after TIME: a duration ago (e.g. 4h, 7d), an RFC3339 timestamp, or a YYYY-MM-DD date")
-	c.Flags().StringVar(&opts.ExitCode, "exit-code", "0", "only count runs with this exit code: N (equals), !=N, >=N, >N, <N, or <=N; signaled runs never count")
+	c.Flags().StringVar(&opts.ExitCode, "exit-code", DefaultStatsExitCode, "only count runs with this exit code: N (equals), !=N, >=N, >N, <N, or <=N; signaled runs never count")
 	c.Flags().IntVar(&opts.Samples, "samples", DefaultStatsSamples, fmt.Sprintf("count at most this many of the most recent runs per entry (1 to %d)", MaxStatsSamples))
 	c.Flags().StringVar(&opts.Pool, "pool", StatsPoolAny, "pool membership: any, none (standalone runs only), or only (pooled runs only)")
 	c.Flags().StringVarP(&opts.Output, "output", "o", statsOutputTable, "output format: table or json")

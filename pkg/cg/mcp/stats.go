@@ -11,9 +11,6 @@ import (
 	"github.com/ripta/rt/pkg/cg/model"
 )
 
-// defaultStatsExitCode keeps failed runs out of a duration estimate unless the caller asks for them.
-const defaultStatsExitCode = "0"
-
 // statsInput is the argument shape for `cg_stats`.
 type statsInput struct {
 	Command  []string `json:"command" jsonschema:"the command and its arguments, exactly as passed to cg_run"`
@@ -41,7 +38,7 @@ func handleStats(_ context.Context, _ *mcpsdk.CallToolRequest, in statsInput) (*
 	}
 	// Omitted inputs arrive as zero values. Fill in the CLI's flag defaults so both surfaces agree.
 	if filters.ExitCode == "" {
-		filters.ExitCode = defaultStatsExitCode
+		filters.ExitCode = model.DefaultStatsExitCode
 	}
 	if filters.Samples == 0 {
 		filters.Samples = model.DefaultStatsSamples
