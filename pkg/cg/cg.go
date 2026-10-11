@@ -42,6 +42,7 @@ func NewCommand() *cobra.Command {
 	c.AddCommand(model.NewErrCommand())
 	c.AddCommand(model.NewPathsCommand())
 	c.AddCommand(model.NewLsCommand())
+	c.AddCommand(model.NewStatsCommand())
 	c.AddCommand(model.NewPruneCommand())
 	c.AddCommand(model.NewMetaCommand())
 	c.AddCommand(model.NewWaitCommand())

@@ -1,0 +1,79 @@
+{
+  "cwd": "/",
+  "matches": [
+    {
+      "match_type": "exact",
+      "command": [
+        "make",
+        "test",
+        "JOBS=10",
+        "FOO=file"
+      ],
+      "pool": false,
+      "stats": {
+        "count": 1,
+        "min_ms": 1000,
+        "max_ms": 1000,
+        "avg_ms": 1000,
+        "p50_ms": 1000,
+        "p90_ms": 1000,
+        "last_ms": 1000,
+        "last_at": "2026-10-05T12:00:00Z"
+      }
+    },
+    {
+      "match_type": "prefix",
+      "command_prefix": [
+        "make",
+        "test",
+        "JOBS=10"
+      ],
+      "pool": false,
+      "stats": {
+        "count": 1,
+        "min_ms": 1000,
+        "max_ms": 1000,
+        "avg_ms": 1000,
+        "p50_ms": 1000,
+        "p90_ms": 1000,
+        "last_ms": 1000,
+        "last_at": "2026-10-05T12:00:00Z"
+      }
+    },
+    {
+      "match_type": "prefix",
+      "command_prefix": [
+        "make",
+        "test"
+      ],
+      "pool": false,
+      "stats": {
+        "count": 1,
+        "min_ms": 1000,
+        "max_ms": 1000,
+        "avg_ms": 1000,
+        "p50_ms": 1000,
+        "p90_ms": 1000,
+        "last_ms": 1000,
+        "last_at": "2026-10-05T12:00:00Z"
+      }
+    },
+    {
+      "match_type": "prefix",
+      "command_prefix": [
+        "make"
+      ],
+      "pool": false,
+      "stats": {
+        "count": 1,
+        "min_ms": 1000,
+        "max_ms": 1000,
+        "avg_ms": 1000,
+        "p50_ms": 1000,
+        "p90_ms": 1000,
+        "last_ms": 1000,
+        "last_at": "2026-10-05T12:00:00Z"
+      }
+    }
+  ]
+}

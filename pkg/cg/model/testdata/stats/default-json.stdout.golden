@@ -1,0 +1,194 @@
+{
+  "cwd": "/",
+  "matches": [
+    {
+      "match_type": "exact",
+      "command": [
+        "make",
+        "test",
+        "JOBS=10",
+        "FOO=file"
+      ],
+      "pool": false,
+      "stats": {
+        "count": 3,
+        "min_ms": 100000,
+        "max_ms": 300000,
+        "avg_ms": 200000,
+        "p50_ms": 200000,
+        "p90_ms": 300000,
+        "last_ms": 300000,
+        "last_at": "2026-10-03T12:00:00Z"
+      }
+    },
+    {
+      "match_type": "exact",
+      "command": [
+        "make",
+        "test",
+        "JOBS=10",
+        "FOO=file"
+      ],
+      "pool": true,
+      "parallelism": 4,
+      "stats": {
+        "count": 2,
+        "min_ms": 500000,
+        "max_ms": 600000,
+        "avg_ms": 550000,
+        "p50_ms": 500000,
+        "p90_ms": 600000,
+        "last_ms": 600000,
+        "last_at": "2026-10-04T12:00:00Z"
+      }
+    },
+    {
+      "match_type": "prefix",
+      "command_prefix": [
+        "make",
+        "test",
+        "JOBS=10"
+      ],
+      "pool": false,
+      "stats": {
+        "count": 6,
+        "min_ms": 50000,
+        "max_ms": 400000,
+        "avg_ms": 185000,
+        "p50_ms": 100000,
+        "p90_ms": 400000,
+        "last_ms": 400000,
+        "last_at": "2026-10-04T12:00:00Z"
+      }
+    },
+    {
+      "match_type": "prefix",
+      "command_prefix": [
+        "make",
+        "test",
+        "JOBS=10"
+      ],
+      "pool": true,
+      "parallelism": 4,
+      "stats": {
+        "count": 2,
+        "min_ms": 500000,
+        "max_ms": 600000,
+        "avg_ms": 550000,
+        "p50_ms": 500000,
+        "p90_ms": 600000,
+        "last_ms": 600000,
+        "last_at": "2026-10-04T12:00:00Z"
+      }
+    },
+    {
+      "match_type": "prefix",
+      "command_prefix": [
+        "make",
+        "test"
+      ],
+      "pool": false,
+      "stats": {
+        "count": 7,
+        "min_ms": 20000,
+        "max_ms": 400000,
+        "avg_ms": 161428,
+        "p50_ms": 100000,
+        "p90_ms": 400000,
+        "last_ms": 400000,
+        "last_at": "2026-10-04T12:00:00Z"
+      }
+    },
+    {
+      "match_type": "prefix",
+      "command_prefix": [
+        "make",
+        "test"
+      ],
+      "pool": true,
+      "parallelism": 2,
+      "stats": {
+        "count": 1,
+        "min_ms": 30000,
+        "max_ms": 30000,
+        "avg_ms": 30000,
+        "p50_ms": 30000,
+        "p90_ms": 30000,
+        "last_ms": 30000,
+        "last_at": "2026-10-02T12:00:00Z"
+      }
+    },
+    {
+      "match_type": "prefix",
+      "command_prefix": [
+        "make",
+        "test"
+      ],
+      "pool": true,
+      "parallelism": 4,
+      "stats": {
+        "count": 3,
+        "min_ms": 35000,
+        "max_ms": 600000,
+        "avg_ms": 378333,
+        "p50_ms": 500000,
+        "p90_ms": 600000,
+        "last_ms": 600000,
+        "last_at": "2026-10-04T12:00:00Z"
+      }
+    },
+    {
+      "match_type": "prefix",
+      "command_prefix": [
+        "make"
+      ],
+      "pool": false,
+      "stats": {
+        "count": 8,
+        "min_ms": 5000,
+        "max_ms": 400000,
+        "avg_ms": 141875,
+        "p50_ms": 60000,
+        "p90_ms": 400000,
+        "last_ms": 400000,
+        "last_at": "2026-10-04T12:00:00Z"
+      }
+    },
+    {
+      "match_type": "prefix",
+      "command_prefix": [
+        "make"
+      ],
+      "pool": true,
+      "parallelism": 2,
+      "stats": {
+        "count": 1,
+        "min_ms": 30000,
+        "max_ms": 30000,
+        "avg_ms": 30000,
+        "p50_ms": 30000,
+        "p90_ms": 30000,
+        "last_ms": 30000,
+        "last_at": "2026-10-02T12:00:00Z"
+      }
+    },
+    {
+      "match_type": "prefix",
+      "command_prefix": [
+        "make"
+      ],
+      "pool": true,
+      "parallelism": 4,
+      "stats": {
+        "count": 3,
+        "min_ms": 35000,
+        "max_ms": 600000,
+        "avg_ms": 378333,
+        "p50_ms": 500000,
+        "p90_ms": 600000,
+        "last_ms": 600000,
+        "last_at": "2026-10-04T12:00:00Z"
+      }
+    }
+  ]
+}

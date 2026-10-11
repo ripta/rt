@@ -322,16 +322,43 @@ func (h *History) Append(record any) error {
 	}
 	line = append(line, '\n')
 
+	unlock, err := h.lock()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
+	return h.appendLocked(line)
+}
+
+// lock takes the exclusive history lock. The returned function releases it.
+func (h *History) lock() (func(), error) {
+	return h.lockWith(syscall.LOCK_EX)
+}
+
+// lockShared takes the history lock shared. Readers do not block each other, but they exclude an
+// appender, so a rotation cannot land between the two generation reads of one scan.
+func (h *History) lockShared() (func(), error) {
+	return h.lockWith(syscall.LOCK_SH)
+}
+
+func (h *History) lockWith(how int) (func(), error) {
 	lock, err := openHistoryFile(filepath.Join(h.dir, HistoryLockFilename), os.O_CREATE|os.O_RDWR)
 	if err != nil {
-		return fmt.Errorf("opening history lock: %w", err)
-	}
-	defer lock.Close()
-
-	if err := flockExclusive(lock); err != nil {
-		return fmt.Errorf("locking history: %w", err)
+		return nil, fmt.Errorf("opening history lock: %w", err)
 	}
 
+	if err := flock(lock, how); err != nil {
+		lock.Close()
+		return nil, fmt.Errorf("locking history: %w", err)
+	}
+
+	return func() { lock.Close() }, nil
+}
+
+// appendLocked writes one line, rotating first when the log is over the size limit. The caller
+// holds the history lock.
+func (h *History) appendLocked(line []byte) error {
 	logPath := filepath.Join(h.dir, HistoryLogFilename)
 	if info, err := os.Lstat(logPath); err == nil && info.Size() > h.maxBytes {
 		if err := os.Rename(logPath, filepath.Join(h.dir, HistoryRotatedFilename)); err != nil {
@@ -380,10 +407,10 @@ func openHistoryFile(path string, flags int) (*os.File, error) {
 	return f, nil
 }
 
-// flockExclusive blocks until it holds an exclusive lock on f.
-func flockExclusive(f *os.File) error {
+// flock blocks until it holds the lock kind how on f.
+func flock(f *os.File, how int) error {
 	for {
-		err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX)
+		err := syscall.Flock(int(f.Fd()), how)
 		if !errors.Is(err, syscall.EINTR) {
 			return err
 		}

@@ -17,6 +17,7 @@ func newTestRoot() *cobra.Command {
 	c.AddCommand(NewErrCommand())
 	c.AddCommand(NewPathsCommand())
 	c.AddCommand(NewLsCommand())
+	c.AddCommand(NewStatsCommand())
 	c.AddCommand(NewPruneCommand())
 	c.AddCommand(NewMetaCommand())
 	c.AddCommand(NewWaitCommand())
