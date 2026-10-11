@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -275,5 +276,192 @@ func TestRunStatus(t *testing.T) {
 	want := "running " + model.FormatDuration(842*time.Second) + "; stdout 2.0KB, stderr 0B"
 	if got != want {
 		t.Errorf("runStatus = %q, want %q", got, want)
+	}
+}
+
+var poolStatusPattern = regexp.MustCompile(`^running \S+; (\d+/1 done \(\d+ ok, \d+ failed\)), \d+ running$`)
+
+var poolKeepAliveScenarios = []keepAliveScenario{
+	{
+		Name: "cg_run_many",
+		Run: func(t *testing.T, rec *progressRecorder, meta mcpsdk.Meta) map[string]any {
+			cs := connectProgressClient(t, rec)
+			return callTool(t, cs, meta, "cg_run_many", map[string]any{
+				"commands":        [][]string{{"sh", "-c", "sleep 0.5; echo hi"}},
+				"wait_timeout_ms": 20000,
+			})
+		},
+	},
+	{
+		Name: "cg_wait registry path",
+		Run: func(t *testing.T, rec *progressRecorder, meta mcpsdk.Meta) map[string]any {
+			cs := connectProgressClient(t, rec)
+			started := callTool(t, cs, nil, "cg_run_many", map[string]any{
+				"commands": [][]string{{"sh", "-c", "sleep 0.5; echo hi"}},
+				"wait":     false,
+			})
+			return callTool(t, cs, meta, "cg_wait", map[string]any{
+				"id":         started["id"],
+				"timeout_ms": 20000,
+			})
+		},
+	},
+	{
+		Name: "cg_wait polling path",
+		Run: func(t *testing.T, rec *progressRecorder, meta mcpsdk.Meta) map[string]any {
+			starter := connectProgressClient(t, &progressRecorder{})
+			started := callTool(t, starter, nil, "cg_run_many", map[string]any{
+				"commands": [][]string{{"sh", "-c", "sleep 0.5; echo hi"}},
+				"wait":     false,
+			})
+
+			// A second server has an empty registry, so cg_wait has to poll the filesystem.
+			cs := connectProgressClient(t, rec)
+			return callTool(t, cs, meta, "cg_wait", map[string]any{
+				"id":         started["id"],
+				"timeout_ms": 20000,
+			})
+		},
+	},
+}
+
+func TestPoolKeepAliveTokenedCall(t *testing.T) {
+	for _, tt := range poolKeepAliveScenarios {
+		t.Run(tt.Name, func(t *testing.T) {
+			t.Setenv("TMPDIR", t.TempDir())
+			setKeepAliveInterval(t, 10*time.Millisecond)
+
+			rec := &progressRecorder{}
+			out := tt.Run(t, rec, mcpsdk.Meta{"progressToken": testProgressToken})
+
+			if finished, ok := out["finished"].(bool); ok && !finished {
+				t.Fatalf("wait did not finish: %+v", out)
+			}
+			if timedOut, _ := out["timed_out"].(bool); timedOut {
+				t.Fatalf("pool timed out: %+v", out)
+			}
+
+			got := rec.settle(keepAliveQuiet)
+			if len(got) < 2 {
+				t.Fatalf("got %d notifications, want at least 2", len(got))
+			}
+
+			prev := -1.0
+			doneCounts := ""
+			flat := 0
+			for i, n := range got {
+				if n.ProgressToken != testProgressToken {
+					t.Errorf("notification %d token = %v, want %q", i, n.ProgressToken, testProgressToken)
+				}
+				if n.Progress <= prev {
+					t.Errorf("notification %d progress = %v, want > %v", i, n.Progress, prev)
+				}
+				prev = n.Progress
+
+				if n.Total != 0 {
+					t.Errorf("notification %d total = %v, want unset", i, n.Total)
+				}
+				match := poolStatusPattern.FindStringSubmatch(n.Message)
+				if match == nil {
+					t.Errorf("notification %d message = %q, want pool status", i, n.Message)
+					continue
+				}
+
+				switch {
+				case i == 0:
+					doneCounts = match[1]
+					flat = 1
+				case flat == i && match[1] == doneCounts:
+					flat++
+				}
+			}
+
+			if flat < 2 {
+				t.Errorf("only %d leading notifications shared the done counts %q, want at least 2 with progress rising", flat, doneCounts)
+			}
+
+			if after := rec.settle(keepAliveQuiet); len(after) != len(got) {
+				t.Errorf("%d notifications arrived after the result", len(after)-len(got))
+			}
+		})
+	}
+}
+
+func TestPoolKeepAliveUntokenedCall(t *testing.T) {
+	for _, tt := range poolKeepAliveScenarios {
+		t.Run(tt.Name, func(t *testing.T) {
+			t.Setenv("TMPDIR", t.TempDir())
+			setKeepAliveInterval(t, 10*time.Millisecond)
+
+			rec := &progressRecorder{}
+			tt.Run(t, rec, nil)
+
+			if got := rec.settle(keepAliveQuiet); len(got) != 0 {
+				t.Errorf("got %d notifications without a progress token, want 0", len(got))
+			}
+		})
+	}
+}
+
+type poolStatusTest struct {
+	Name string
+	Runs []model.PoolRunRecord
+	Want string
+}
+
+var poolStatusTests = []poolStatusTest{
+	{
+		Name: "mixed outcomes",
+		Runs: []model.PoolRunRecord{
+			{Status: model.PoolRunFinished, ExitCode: intPtr(0)},
+			{Status: model.PoolRunFinished, ExitCode: intPtr(1)},
+			{Status: model.PoolRunRunning},
+			{Status: model.PoolRunPending},
+		},
+		Want: "; 2/4 done (1 ok, 1 failed), 1 running",
+	},
+	{
+		Name: "skipped runs count as done",
+		Runs: []model.PoolRunRecord{
+			{Status: model.PoolRunFinished, ExitCode: intPtr(1)},
+			{Status: model.PoolRunSkipped},
+			{Status: model.PoolRunSkipped},
+		},
+		Want: "; 3/3 done (0 ok, 1 failed, 2 skipped), 0 running",
+	},
+	{
+		Name: "nothing started",
+		Runs: []model.PoolRunRecord{{Status: model.PoolRunPending}},
+		Want: "; 0/1 done (0 ok, 0 failed), 0 running",
+	},
+}
+
+func TestPoolStatus(t *testing.T) {
+	for _, tt := range poolStatusTests {
+		t.Run(tt.Name, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := model.WritePoolManifest(dir, &model.PoolManifest{StartedAt: time.Now(), Runs: tt.Runs}); err != nil {
+				t.Fatalf("WritePoolManifest: %v", err)
+			}
+
+			want := "running " + model.FormatDuration(2*time.Second) + tt.Want
+			if got := poolStatus(dir, 2*time.Second); got != want {
+				t.Errorf("poolStatus = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+func TestPoolStatusUnreadableManifest(t *testing.T) {
+	got := poolStatus(t.TempDir(), 2*time.Second)
+	want := "running " + model.FormatDuration(2*time.Second)
+	if got != want {
+		t.Errorf("poolStatus = %q, want %q", got, want)
+	}
+}
+
+func TestNewPoolReporterWithoutToken(t *testing.T) {
+	if r := newPoolReporter(nil, t.TempDir()); r != nil {
+		t.Errorf("reporter for nil request is non-nil")
 	}
 }

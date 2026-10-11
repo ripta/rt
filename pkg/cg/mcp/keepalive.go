@@ -77,6 +77,46 @@ func runStatus(dir string, elapsed time.Duration) string {
 	)
 }
 
+// newPoolReporter builds a reporter for a pool in dir. The start time comes from pool.json so a
+// pool begun by another server reports its true age. When the manifest cannot be read, the wait's
+// own start stands in.
+func newPoolReporter(req *mcpsdk.CallToolRequest, dir string) progressReporter {
+	if progressTokenOf(req) == nil {
+		return nil
+	}
+
+	start := time.Now()
+	if m, err := model.ReadPoolManifest(dir); err == nil && !m.StartedAt.IsZero() {
+		start = m.StartedAt
+	}
+
+	return newProgressReporter(req, start, func(elapsed time.Duration) string {
+		return poolStatus(dir, elapsed)
+	})
+}
+
+// poolStatus describes a pool in flight. The manifest is re-read on every call. A read failure
+// drops the counts rather than failing the wait.
+//
+// Skipped runs count as done. The skipped category is shown only when it is non-zero.
+func poolStatus(dir string, elapsed time.Duration) string {
+	msg := "running " + model.FormatDuration(elapsed)
+
+	m, err := model.ReadPoolManifest(dir)
+	if err != nil {
+		return msg
+	}
+
+	c := m.Counts()
+	breakdown := fmt.Sprintf("%d ok, %d failed", c.Succeeded, c.Failed)
+	if c.Skipped > 0 {
+		breakdown += fmt.Sprintf(", %d skipped", c.Skipped)
+	}
+
+	return fmt.Sprintf("%s; %d/%d done (%s), %d running",
+		msg, c.Succeeded+c.Failed+c.Skipped, c.Total, breakdown, c.Running)
+}
+
 func streamSize(path string) string {
 	info, err := os.Stat(path)
 	if err != nil {

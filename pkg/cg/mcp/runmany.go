@@ -98,11 +98,11 @@ func registerRunMany(s *mcpsdk.Server, reg *runRegistry, g *gate, sessionID stri
 		if elicitationAvailable(req) {
 			el = req.Session
 		}
-		return handleRunMany(ctx, reg, g, el, sessionID, in)
+		return handleRunMany(ctx, req, reg, g, el, sessionID, in)
 	})
 }
 
-func handleRunMany(ctx context.Context, reg *runRegistry, g *gate, el elicitor, sessionID string, in runManyInput) (*mcpsdk.CallToolResult, runManyOutput, error) {
+func handleRunMany(ctx context.Context, req *mcpsdk.CallToolRequest, reg *runRegistry, g *gate, el elicitor, sessionID string, in runManyInput) (*mcpsdk.CallToolResult, runManyOutput, error) {
 	repeat, parallelism, err := validateRunMany(in)
 	if err != nil {
 		return nil, runManyOutput{}, err
@@ -186,17 +186,12 @@ func handleRunMany(ctx context.Context, reg *runRegistry, g *gate, el elicitor, 
 		timeoutMs = defaultWaitTimeoutMs
 	}
 
-	timer := time.NewTimer(time.Duration(timeoutMs) * time.Millisecond)
-	defer timer.Stop()
-
-	out := runManyOutput{ID: pool.ID, RememberWarning: warning}
-	select {
-	case <-pool.Done:
-	case <-timer.C:
-		out.TimedOut = true
-	case <-ctx.Done():
-		return nil, runManyOutput{}, ctx.Err()
+	finished, err := waitWithKeepAlive(ctx, pool.Done, nil, time.Duration(timeoutMs)*time.Millisecond, newPoolReporter(req, pool.Dir))
+	if err != nil {
+		return nil, runManyOutput{}, err
 	}
+
+	out := runManyOutput{ID: pool.ID, RememberWarning: warning, TimedOut: !finished}
 
 	summary, err := buildPoolSummary(pool.Dir, excerpt)
 	if err != nil {
