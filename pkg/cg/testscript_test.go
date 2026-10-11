@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/rogpeppe/go-internal/testscript"
@@ -63,5 +64,9 @@ func TestCgScript(t *testing.T) {
 
 	testscript.Run(t, testscript.Params{
 		Dir: "testdata",
+		Setup: func(env *testscript.Env) error {
+			env.Setenv("XDG_STATE_HOME", filepath.Join(env.WorkDir, ".state"))
+			return nil
+		},
 	})
 }

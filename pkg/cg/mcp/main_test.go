@@ -33,7 +33,16 @@ func TestMain(m *testing.M) {
 		os.Exit(spawnPoolMain(os.Args[2:]))
 	}
 
-	os.Exit(m.Run())
+	// Supervisors spawned by tests inherit this, so no test writes the real state dir.
+	state, err := os.MkdirTemp("", "cg-state-")
+	if err != nil {
+		panic(err)
+	}
+	os.Setenv("XDG_STATE_HOME", state)
+
+	code := m.Run()
+	os.RemoveAll(state)
+	os.Exit(code)
 }
 
 // cgMain dispatches to the two hidden commands RunSupervised/PoolSupervised

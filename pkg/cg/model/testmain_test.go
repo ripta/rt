@@ -21,7 +21,20 @@ func TestMain(m *testing.M) {
 		}
 	}
 
-	os.Exit(m.Run())
+	if len(os.Args) >= 3 && os.Args[1] == "history-append" {
+		os.Exit(historyAppendMain(os.Args[2:]))
+	}
+
+	// Supervisors spawned by tests inherit this, so no test writes the real state dir.
+	state, err := os.MkdirTemp("", "cg-state-")
+	if err != nil {
+		panic(err)
+	}
+	os.Setenv("XDG_STATE_HOME", state)
+
+	code := m.Run()
+	os.RemoveAll(state)
+	os.Exit(code)
 }
 
 func cgMain() int {

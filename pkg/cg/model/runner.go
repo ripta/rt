@@ -299,6 +299,8 @@ func (opts *Options) run(cmd *cobra.Command, args []string) error {
 		}
 		if err := WriteMeta(cap.Dir, meta); err != nil {
 			_ = writeInfo(fmt.Sprintf("meta.json write failed: %s", err))
+		} else if err := AppendRunHistory(meta, 0); err != nil {
+			fmt.Fprintf(cmd.ErrOrStderr(), "history append failed: %s\n", err)
 		}
 		RemovePidFile(cap.Dir)
 		RemoveStartInfo(cap.Dir)

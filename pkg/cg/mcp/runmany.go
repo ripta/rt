@@ -130,7 +130,7 @@ func handleRunMany(ctx context.Context, req *mcpsdk.CallToolRequest, reg *runReg
 	resolutions := make(map[string]*model.Resolution, len(in.Commands))
 	var warnings []string
 	for _, argv := range in.Commands {
-		key := argvKey(argv)
+		key := model.ArgvKey(argv)
 		if _, ok := resolutions[key]; ok {
 			continue
 		}
@@ -158,7 +158,7 @@ func handleRunMany(ctx context.Context, req *mcpsdk.CallToolRequest, reg *runReg
 	}
 	for _, argv := range in.Commands {
 		pc := model.PoolCommand{Argv: argv}
-		if r := resolutions[argvKey(argv)]; r != nil {
+		if r := resolutions[model.ArgvKey(argv)]; r != nil {
 			pc.Resolved = r.Resolved
 			pc.Canonical = r.Canonical
 		}
@@ -243,7 +243,7 @@ func validateRunMany(in runManyInput) (repeat, parallelism int, err error) {
 
 	distinct := make(map[string]struct{}, len(in.Commands))
 	for _, argv := range in.Commands {
-		distinct[argvKey(argv)] = struct{}{}
+		distinct[model.ArgvKey(argv)] = struct{}{}
 	}
 	if len(distinct) > maxPoolCommands {
 		violations = append(violations, fmt.Sprintf("%d distinct commands exceeds the maximum %d", len(distinct), maxPoolCommands))
@@ -263,12 +263,6 @@ func validateRunMany(in runManyInput) (repeat, parallelism int, err error) {
 		parallelism = total
 	}
 	return repeat, parallelism, nil
-}
-
-// argvKey builds a map key for an argv. Argv tokens cannot contain NUL, so a
-// NUL join is collision-free.
-func argvKey(argv []string) string {
-	return strings.Join(argv, "\x00")
 }
 
 // buildPoolSummary reads pool.json and builds the summary, attaching tail
