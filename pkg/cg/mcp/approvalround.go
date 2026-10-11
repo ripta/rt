@@ -145,8 +145,14 @@ func (g *gate) answer(call approvalCall, entry *pendingEntry, needs []int) (gate
 		}
 	}
 
+	// The refusals below still carry the remember warning. The rules from the accepted forms were
+	// already written or skipped, and the user would otherwise never learn which.
 	warning := g.persistRemembered(call, entry, rules)
 	if answerErr != nil {
+		if warning != "" {
+			return gateOutcome{}, fmt.Errorf("%s refused: %w\n%s", call.Tool, answerErr, warning)
+		}
+
 		return gateOutcome{}, fmt.Errorf("%s refused: %w", call.Tool, answerErr)
 	}
 	if len(declined) > 0 {

@@ -61,6 +61,9 @@ func readProjectIfPresent(root string) (string, error) {
 // after load and before the first call. EditSecond rewrites it between the two calls.
 // AllowBetween remembers an allow prefix through the store between the two calls, as another call
 // in the same session could.
+//
+// WantErrWarning is a remember warning that a refused retry must carry in its error, since a
+// refusal returns no Warning of its own.
 type roundTest struct {
 	Name         string
 	Project      string
@@ -70,12 +73,13 @@ type roundTest struct {
 	Argvs        [][]string
 	Answers      mcpsdk.InputResponseMap
 
-	WantForms   int
-	WantDiverge bool
-	WantErr     string
-	WantWarning string
-	WantFile    []string
-	AbsentFile  []string
+	WantForms      int
+	WantDiverge    bool
+	WantErr        string
+	WantErrWarning string
+	WantWarning    string
+	WantFile       []string
+	AbsentFile     []string
 }
 
 var echoHi = []string{"echo", "hi"}
@@ -318,6 +322,37 @@ var roundTests = []roundTest{
 		WantErr:   "call the tool again",
 		WantFile:  []string{"prefix: [printf]"},
 	},
+	{
+		Name:       "a bad rule field still reports a skipped remember",
+		Project:    baseRules,
+		EditSecond: editRules,
+		Argvs:      [][]string{echoHi, {"printf", "x"}},
+		Answers: mcpsdk.InputResponseMap{
+			"approval-1": accept(map[string]any{"remember": true, "rule": "[echo]"}),
+			"approval-2": accept(map[string]any{"remember": true, "rule": "not a list"}),
+		},
+
+		WantForms:      2,
+		WantErr:        "rule must be a YAML list",
+		WantErrWarning: "skipping remember: ",
+		WantFile:       []string{"prefix: [npm, ci]"},
+		AbsentFile:     []string{"prefix: [echo]"},
+	},
+	{
+		Name:       "a missing answer still reports a skipped remember",
+		Project:    baseRules,
+		EditSecond: editRules,
+		Argvs:      [][]string{echoHi, {"printf", "x"}},
+		Answers: mcpsdk.InputResponseMap{
+			"approval-2": accept(map[string]any{"remember": true, "rule": "[printf]"}),
+		},
+
+		WantForms:      2,
+		WantErr:        `no answer for input request "approval-1"`,
+		WantErrWarning: "skipping remember: ",
+		WantFile:       []string{"prefix: [npm, ci]"},
+		AbsentFile:     []string{"prefix: [printf]"},
+	},
 }
 
 func TestApprovalRound(t *testing.T) {
@@ -367,6 +402,9 @@ func TestApprovalRound(t *testing.T) {
 			if test.WantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), test.WantErr) {
 					t.Fatalf("retry error = %v, want it to contain %q", err, test.WantErr)
+				}
+				if !strings.Contains(err.Error(), test.WantErrWarning) {
+					t.Errorf("retry error = %q, want it to carry the remember warning %q", err, test.WantErrWarning)
 				}
 			} else if err != nil {
 				t.Fatalf("retry: %v", err)
