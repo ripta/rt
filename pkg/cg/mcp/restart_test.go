@@ -33,9 +33,11 @@ func spawnRunMain(args []string) int {
 // and reads back the run ID. The helper inherits this process's environment,
 // so a t.Setenv'd TMPDIR points both processes at the same capture root. A
 // cleanup kills the child's process group if the run is still in flight at
-// test end.
+// test end, then waits for the supervisor to finish writing before the temp
+// directory is removed.
 func startServerRun(t *testing.T, args ...string) (*exec.Cmd, string, string) {
 	t.Helper()
+	waitForSupervisorsAtCleanup(t)
 
 	server := exec.Command(os.Args[0], append([]string{"spawn-run"}, args...)...)
 	stdout, err := server.StdoutPipe()
@@ -115,9 +117,11 @@ func spawnPoolMain(args []string) int {
 // process's environment, so a t.Setenv'd TMPDIR points every process at the
 // same capture root. A cleanup SIGINTs the pool supervisor if the pool is
 // still in flight at test end; SIGINT is the kill-everything protocol signal,
-// so in-flight members die with it.
+// so in-flight members die with it. Like startServerRun, cleanup then waits
+// for the supervisors to finish writing before the temp directory is removed.
 func startServerPool(t *testing.T, args ...string) (*exec.Cmd, string, string) {
 	t.Helper()
+	waitForSupervisorsAtCleanup(t)
 
 	server := exec.Command(os.Args[0], append([]string{"spawn-pool"}, args...)...)
 	stdout, err := server.StdoutPipe()
