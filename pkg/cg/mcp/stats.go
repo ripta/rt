@@ -24,7 +24,7 @@ type statsInput struct {
 func registerStats(s *mcpsdk.Server) {
 	mcpsdk.AddTool(s, &mcpsdk.Tool{
 		Name:        "cg_stats",
-		Description: "Report how long earlier runs of a command took, from cg's duration history. Returns the same JSON as `cg stats -o json`. The first match is the exact command. Each shorter prefix of it that has samples follows, longest first. Durations are in milliseconds. Pooled and standalone runs are separate entries. An exact match with no samples has count 0 rather than an error.",
+		Description: "Report how long earlier runs of a command took, from cg's duration history. Returns the same JSON as `cg stats -o json`. The first match is the exact command. Stored runs that start with the whole command and have more arguments follow as a prefix match. Each shorter prefix that has samples follows, longest first. Every run counts once, at its longest match. A prefix match whose command_prefix equals the whole command holds runs that start with it and have more arguments. Durations are in milliseconds. Pooled and standalone runs are separate entries. An exact match with no samples has count 0 rather than an error.",
 	}, handleStats)
 }
 

@@ -224,12 +224,25 @@ cg stats [flags] -- COMMAND [ARGS...]
 | `-o`, `--output` | `table` | `table` or `json`. |
 
 The first entry is the exact match. It equals the command's argv and nothing
-else. It is always present, with a count of 0 when there are no samples. Each
-shorter prefix of the argv that has samples follows, longest first. A stored run
-with a longer argv than the query counts at the prefix level. For
-`make test JOBS=10`, the levels are `make test JOBS=10`, `make test`, and
-`make`. A stored run of `make test JOBS=10 -k` counts at `make test JOBS=10`
-but is never an exact match.
+else. It is always present, with a count of 0 when there are no samples. A
+prefix entry follows for stored runs that start with the whole argv and have
+more arguments. It appears only when it has samples. Each shorter prefix of the
+argv that has samples comes after that, longest first.
+
+Every stored run counts once, at the longest prefix of the query that it
+matches. The levels never overlap. For `make test`, take stored runs of
+`make test` ×3, `make test JOBS=10` ×5, and `make lint` ×2. The exact entry
+counts 3, the `make test` prefix entry counts 5, and the `make` prefix entry
+counts 2.
+
+The table marks a prefix row with a trailing `…`, so `make test …` reads as
+"`make test` and more". Prefix entries in JSON have `match_type` `prefix`. A
+prefix entry whose `command_prefix` equals the whole command holds runs that
+start with it and have more arguments. An
+argv of more than 32 tokens has no entry for longer runs, because cg cannot
+prove that such a run starts with the whole query. That run counts at the
+deepest prefix level that it matches, and prefix levels between 32 tokens and
+the full argv are not reported.
 
 cg cannot know which arguments change a duration. It reports every level. The
 caller applies its own judgment.
@@ -250,7 +263,8 @@ cwd: /home/rt/projects/rt
 MATCH   POOL     COUNT  MIN   P50    P90    MAX    AVG    LAST   LAST AT               COMMAND
 exact   -        10     4m0s  11m30s 12m0s  12m15s 10m55s 11m41s 2026-10-09T18:22:04Z  make test
 exact   pool x4  3      6m2s  7m10s  8m5s   8m5s   7m20s  7m10s  2026-10-08T09:41:10Z  make test
-prefix  -        31     2s    3m5s   11m40s 12m15s 5m12s  11m41s 2026-10-09T18:22:04Z  make
+prefix  -        5      3m1s  4m20s  5m10s  5m10s  4m15s  4m50s  2026-10-09T10:03:44Z  make test …
+prefix  -        2      2s    1m1s   2m0s   2m0s   1m1s   2m0s   2026-10-09T17:30:12Z  make …
 
 ❯ cg stats -o json -- make test
 {"cwd": "/home/rt/projects/rt", "matches": [

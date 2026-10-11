@@ -168,14 +168,12 @@ var queryShapeTests = []queryShapeTest{
 		Want: []matchShape{
 			{StatsMatchExact, "make test JOBS=10 FOO=file", false, 0, 3},
 			{StatsMatchExact, "make test JOBS=10 FOO=file", true, 4, 2},
-			{StatsMatchPrefix, "make test JOBS=10", false, 0, 6},
-			{StatsMatchPrefix, "make test JOBS=10", true, 4, 2},
-			{StatsMatchPrefix, "make test", false, 0, 7},
+			{StatsMatchPrefix, "make test JOBS=10 FOO=file", false, 0, 1},
+			{StatsMatchPrefix, "make test JOBS=10", false, 0, 2},
+			{StatsMatchPrefix, "make test", false, 0, 1},
 			{StatsMatchPrefix, "make test", true, 2, 1},
-			{StatsMatchPrefix, "make test", true, 4, 3},
-			{StatsMatchPrefix, "make", false, 0, 8},
-			{StatsMatchPrefix, "make", true, 2, 1},
-			{StatsMatchPrefix, "make", true, 4, 3},
+			{StatsMatchPrefix, "make test", true, 4, 1},
+			{StatsMatchPrefix, "make", false, 0, 1},
 		},
 	},
 	{
@@ -183,9 +181,10 @@ var queryShapeTests = []queryShapeTest{
 		Pool: StatsPoolNone,
 		Want: []matchShape{
 			{StatsMatchExact, "make test JOBS=10 FOO=file", false, 0, 3},
-			{StatsMatchPrefix, "make test JOBS=10", false, 0, 6},
-			{StatsMatchPrefix, "make test", false, 0, 7},
-			{StatsMatchPrefix, "make", false, 0, 8},
+			{StatsMatchPrefix, "make test JOBS=10 FOO=file", false, 0, 1},
+			{StatsMatchPrefix, "make test JOBS=10", false, 0, 2},
+			{StatsMatchPrefix, "make test", false, 0, 1},
+			{StatsMatchPrefix, "make", false, 0, 1},
 		},
 	},
 	{
@@ -193,11 +192,8 @@ var queryShapeTests = []queryShapeTest{
 		Pool: StatsPoolOnly,
 		Want: []matchShape{
 			{StatsMatchExact, "make test JOBS=10 FOO=file", true, 4, 2},
-			{StatsMatchPrefix, "make test JOBS=10", true, 4, 2},
 			{StatsMatchPrefix, "make test", true, 2, 1},
-			{StatsMatchPrefix, "make test", true, 4, 3},
-			{StatsMatchPrefix, "make", true, 2, 1},
-			{StatsMatchPrefix, "make", true, 4, 3},
+			{StatsMatchPrefix, "make test", true, 4, 1},
 		},
 	},
 }
@@ -478,12 +474,14 @@ func TestQueryStatsLongArgv(t *testing.T) {
 		t.Errorf("exact entry = %+v, want 2 samples for the 40-token argv", exact)
 	}
 
-	// Prefix levels run from 32 tokens down to 1. The levels between 32 and 40 are not reported.
-	if len(got.Matches) != 1+HistoryMaxArgvMACs {
-		t.Fatalf("got %d entries, want %d", len(got.Matches), 1+HistoryMaxArgvMACs)
+	// Prefix levels run from 32 tokens down to 1, and only those with samples are reported. The
+	// levels between 32 and 40 are not reported. The run that differs at the last token counts
+	// once, at the 32 token level.
+	if len(got.Matches) != 2 {
+		t.Fatalf("got %d entries, want 2", len(got.Matches))
 	}
-	if first := got.Matches[1]; len(first.CommandPrefix) != HistoryMaxArgvMACs || first.Stats.Count != 3 {
-		t.Errorf("first prefix entry = %+v, want 32 tokens with 3 samples", first)
+	if first := got.Matches[1]; len(first.CommandPrefix) != HistoryMaxArgvMACs || first.Stats.Count != 1 {
+		t.Errorf("first prefix entry = %+v, want 32 tokens with 1 sample", first)
 	}
 }
 
@@ -495,7 +493,10 @@ func TestQueryStatsExactExcludesLongerRuns(t *testing.T) {
 	})
 
 	got := shapesOf(queryStats(t, h, fixtureQuery("make")))
-	want := []matchShape{{StatsMatchExact, "make", false, 0, 1}}
+	want := []matchShape{
+		{StatsMatchExact, "make", false, 0, 1},
+		{StatsMatchPrefix, "make", false, 0, 1},
+	}
 	if !slices.Equal(got, want) {
 		t.Errorf("matches = %+v, want %+v", got, want)
 	}
@@ -504,19 +505,20 @@ func TestQueryStatsExactExcludesLongerRuns(t *testing.T) {
 	want = []matchShape{
 		{StatsMatchExact, "make test lint", false, 0, 0},
 		{StatsMatchPrefix, "make test", false, 0, 1},
-		{StatsMatchPrefix, "make", false, 0, 2},
+		{StatsMatchPrefix, "make", false, 0, 1},
 	}
 	if !slices.Equal(got, want) {
 		t.Errorf("matches = %+v, want %+v", got, want)
 	}
 
-	// A longer stored run counts at the prefix level but not at the exact entry.
+	// A longer stored run counts at the longer level but not at the exact entry.
 	appendFixtureRuns(t, h, []fixtureRun{{ID: "EXA003", Argv: "make test lint", Day: 2, DurationMs: 4000}})
 
 	got = shapesOf(queryStats(t, h, fixtureQuery("make test")))
 	want = []matchShape{
 		{StatsMatchExact, "make test", false, 0, 1},
-		{StatsMatchPrefix, "make", false, 0, 3},
+		{StatsMatchPrefix, "make test", false, 0, 1},
+		{StatsMatchPrefix, "make", false, 0, 1},
 	}
 	if !slices.Equal(got, want) {
 		t.Errorf("matches = %+v, want %+v", got, want)
@@ -559,10 +561,143 @@ func TestQueryStatsExactAtChainDepth(t *testing.T) {
 		})
 	}
 
-	// The 32 token prefix level takes all three runs.
+	// The 32 token prefix level takes the 32 and 34 token runs. The 33 token run is exact.
 	prefix := queryStats(t, h, fixtureQuery(tokens(33))).Matches[1]
-	if len(prefix.CommandPrefix) != 32 || prefix.Stats.Count != 3 {
-		t.Errorf("prefix entry = %+v, want 32 tokens with 3 samples", prefix)
+	if len(prefix.CommandPrefix) != 32 || prefix.Stats.Count != 2 {
+		t.Errorf("prefix entry = %+v, want 32 tokens with 2 samples", prefix)
+	}
+}
+
+func chainTokens(n int) string {
+	parts := make([]string, n)
+	for i := range parts {
+		parts[i] = fmt.Sprintf("t%d", i)
+	}
+
+	return strings.Join(parts, " ")
+}
+
+type chainEdgeTest struct {
+	Name  string
+	Query int
+	Want  []matchShape
+}
+
+// The stored runs for the chain edge tests have 31, 32, 33, and 34 tokens.
+var chainEdgeTests = []chainEdgeTest{
+	{
+		Name:  "31 tokens: every longer run starts with the query",
+		Query: 31,
+		Want: []matchShape{
+			{StatsMatchExact, chainTokens(31), false, 0, 1},
+			{StatsMatchPrefix, chainTokens(31), false, 0, 3},
+		},
+	},
+	{
+		Name:  "32 tokens: runs past the chain depth still start with the query",
+		Query: 32,
+		Want: []matchShape{
+			{StatsMatchExact, chainTokens(32), false, 0, 1},
+			{StatsMatchPrefix, chainTokens(32), false, 0, 2},
+			{StatsMatchPrefix, chainTokens(31), false, 0, 1},
+		},
+	},
+	{
+		Name:  "33 tokens: no longer level, and the 34 token run falls to 32 tokens",
+		Query: 33,
+		Want: []matchShape{
+			{StatsMatchExact, chainTokens(33), false, 0, 1},
+			{StatsMatchPrefix, chainTokens(32), false, 0, 2},
+			{StatsMatchPrefix, chainTokens(31), false, 0, 1},
+		},
+	},
+}
+
+func TestQueryStatsChainEdges(t *testing.T) {
+	h := newFixtureHistory(t)
+	appendFixtureRuns(t, h, []fixtureRun{
+		{ID: "EDG031", Argv: chainTokens(31), Day: 0, DurationMs: 1000},
+		{ID: "EDG032", Argv: chainTokens(32), Day: 1, DurationMs: 2000},
+		{ID: "EDG033", Argv: chainTokens(33), Day: 2, DurationMs: 3000},
+		{ID: "EDG034", Argv: chainTokens(34), Day: 3, DurationMs: 4000},
+	})
+
+	for _, test := range chainEdgeTests {
+		t.Run(test.Name, func(t *testing.T) {
+			got := shapesOf(queryStats(t, h, fixtureQuery(chainTokens(test.Query))))
+			if !slices.Equal(got, test.Want) {
+				t.Errorf("matches differ\n got: %+v\nwant: %+v", got, test.Want)
+			}
+		})
+	}
+}
+
+func TestQueryStatsLevelsAreDisjoint(t *testing.T) {
+	h := newFixtureHistory(t)
+	appendFixtureRuns(t, h, statsFixtureRuns)
+
+	// Every valid fixture run that shares the first token with the query counts at exactly one
+	// entry.
+	for _, query := range []string{"make", "make test", "make test JOBS=10", "make test JOBS=10 FOO=file"} {
+		t.Run(query, func(t *testing.T) {
+			first := strings.Fields(query)[0]
+
+			want := 0
+			for _, r := range statsFixtureRuns {
+				valid := r.ExitCode == 0 && r.Signal == nil && r.Cwd == ""
+				if valid && strings.Fields(r.Argv)[0] == first {
+					want++
+				}
+			}
+
+			total := 0
+			for _, m := range queryStats(t, h, fixtureQuery(query)).Matches {
+				total += m.Stats.Count
+			}
+
+			if total != want {
+				t.Errorf("entries count %d runs, want %d", total, want)
+			}
+		})
+	}
+}
+
+func TestQueryStatsLongerRunsEntry(t *testing.T) {
+	h := newFixtureHistory(t)
+	appendFixtureRuns(t, h, []fixtureRun{
+		{ID: "LNG001", Argv: "make test", Day: 0, DurationMs: 1000},
+		{ID: "LNG002", Argv: "make test", Day: 1, DurationMs: 2000},
+		{ID: "LNG003", Argv: "make test", Day: 2, DurationMs: 3000},
+		{ID: "LNG004", Argv: "make test JOBS=10", Day: 0, DurationMs: 4000},
+		{ID: "LNG005", Argv: "make test JOBS=10", Day: 1, DurationMs: 5000},
+		{ID: "LNG006", Argv: "make test -k", Day: 2, DurationMs: 6000, Parallelism: 4},
+		{ID: "LNG007", Argv: "make test -k", Day: 3, DurationMs: 7000, Parallelism: 2},
+		{ID: "LNG008", Argv: "make test -k", Day: 4, DurationMs: 8000, Parallelism: 4},
+		{ID: "LNG009", Argv: "make lint", Day: 0, DurationMs: 9000},
+		{ID: "LNG010", Argv: "make lint", Day: 1, DurationMs: 9000},
+	})
+
+	got := shapesOf(queryStats(t, h, fixtureQuery("make test")))
+	want := []matchShape{
+		{StatsMatchExact, "make test", false, 0, 3},
+		{StatsMatchPrefix, "make test", false, 0, 2},
+		{StatsMatchPrefix, "make test", true, 2, 1},
+		{StatsMatchPrefix, "make test", true, 4, 2},
+		{StatsMatchPrefix, "make", false, 0, 2},
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("matches differ\n got: %+v\nwant: %+v", got, want)
+	}
+
+	// The longer entry names the whole query. Exact carries the command instead.
+	result := queryStats(t, h, fixtureQuery("make test"))
+	if m := result.Matches[1]; m.MatchType != StatsMatchPrefix || len(m.Command) != 0 {
+		t.Errorf("longer entry = %+v, want a prefix match without command", m)
+	}
+
+	exact := result.ExactStandalone()
+	if exact == nil || exact.Stats.Count != 3 {
+		t.Errorf("exact standalone = %+v, want the 3 equal runs only", exact)
 	}
 }
 

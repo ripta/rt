@@ -181,11 +181,14 @@ func CanonicalCwd(dir string) (string, error) {
 	return f.resolved, nil
 }
 
-// statsLevel is one argv prefix a query reports. idx is the position in the MAC chain.
+// statsLevel is one bucket a query reports. idx is the position in the MAC chain. A longer level
+// holds stored runs that start with the whole query and have more tokens. Its prefixLen is the
+// query length.
 type statsLevel struct {
 	idx       int
 	prefixLen int
 	exact     bool
+	longer    bool
 }
 
 // statsGroup splits a level's samples into standalone and per-parallelism pooled runs.
@@ -199,9 +202,12 @@ type statsSample struct {
 	durationMs int64
 }
 
-// statsLevels lists the exact level, then every proper prefix longest first. For an argv longer
-// than the MAC chain depth, the exact level is the final full-argv entry and prefixes between
-// the depth and the full length are not reported.
+// statsLevels lists the exact level, the longer level, then every proper prefix longest first.
+//
+// An argv longer than the MAC chain depth has no longer level. A stored run with more tokens
+// cannot be proven to start with the whole query, because the chain stops at the depth. Such a
+// run falls to the deepest prefix level it matches. The exact level is the final full-argv entry,
+// and prefixes between the depth and the full length are not reported.
 func statsLevels(argc int) []statsLevel {
 	exactIdx := argc - 1
 	if argc > HistoryMaxArgvMACs {
@@ -209,6 +215,10 @@ func statsLevels(argc int) []statsLevel {
 	}
 
 	levels := []statsLevel{{idx: exactIdx, prefixLen: argc, exact: true}}
+	if argc <= HistoryMaxArgvMACs {
+		levels = append(levels, statsLevel{idx: argc - 1, prefixLen: argc, longer: true})
+	}
+
 	for n := min(argc-1, HistoryMaxArgvMACs); n >= 1; n-- {
 		levels = append(levels, statsLevel{idx: n - 1, prefixLen: n})
 	}
@@ -216,10 +226,24 @@ func statsLevels(argc int) []statsLevel {
 	return levels
 }
 
+// matches reports whether a stored run belongs to the level, given the query's MAC chain.
+func (l statsLevel) matches(stored, macs []string) bool {
+	switch {
+	case l.exact:
+		return len(stored) == l.idx+1 && stored[l.idx] == macs[l.idx]
+	case l.longer:
+		return len(stored) > l.idx+1 && stored[l.idx] == macs[l.idx]
+	default:
+		return len(stored) > l.idx && stored[l.idx] == macs[l.idx]
+	}
+}
+
 // QueryStats reports how long matching runs took. It returns the exact match first, even with
-// no samples, then every shorter prefix of the query that has at least one sample. A stored run
-// longer than the query counts at the matching prefix level and never as its own entry. Pool
-// records do not feed this lookup.
+// no samples. Next come the stored runs longer than the query, then every shorter prefix of the
+// query, each only when it has at least one sample.
+//
+// Each stored run counts once, at the longest level it matches, so the levels never overlap.
+// Pool records do not feed this lookup.
 //
 // The first query imports the runs already on disk. See EnsureImported.
 func (h *History) QueryStats(q StatsQuery) (*StatsResult, error) {
@@ -272,13 +296,11 @@ func (h *History) QueryStats(q StatsQuery) (*StatsResult, error) {
 		}
 
 		for i, level := range levels {
-			if len(rec.ArgvMACs) <= level.idx || rec.ArgvMACs[level.idx] != macs[level.idx] {
-				continue
+			if level.matches(rec.ArgvMACs, macs) {
+				buckets[i][group] = append(buckets[i][group], statsSample{rec.StartedAt, rec.DurationMs})
+
+				break
 			}
-			if level.exact && len(rec.ArgvMACs) != level.idx+1 {
-				continue
-			}
-			buckets[i][group] = append(buckets[i][group], statsSample{rec.StartedAt, rec.DurationMs})
 		}
 	})
 	if err != nil {

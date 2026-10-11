@@ -28,14 +28,16 @@ type statsOptions struct {
 }
 
 // NewStatsCommand returns the `cg stats` subcommand. It reports how long earlier runs of the
-// command took, for the exact argv and for each shorter prefix with samples.
+// command took. Entries cover the exact argv, longer runs that start with it, and each shorter
+// prefix with samples.
 func NewStatsCommand() *cobra.Command {
 	opts := &statsOptions{}
 	c := &cobra.Command{
 		Use:   "stats [flags] -- COMMAND [ARGS...]",
 		Short: "Report how long earlier runs of a command took",
 		Long: "Report durations of earlier runs of a command from the duration history. The first entry is " +
-			"the exact command. Each shorter prefix of it that has samples follows, longest first.",
+			"the exact command. Longer runs that start with it follow, then each shorter prefix that has " +
+			"samples. Every run counts once, at its longest match. A trailing ellipsis marks a prefix row.",
 
 		SilenceErrors: true,
 		SilenceUsage:  true,
@@ -122,9 +124,9 @@ func writeStatsTable(w io.Writer, result *StatsResult) error {
 	for _, m := range result.Matches {
 		s := m.Stats
 
-		command := m.Command
+		command := formatLsCommand(m.Command)
 		if m.MatchType == StatsMatchPrefix {
-			command = m.CommandPrefix
+			command = formatLsCommand(m.CommandPrefix) + " …"
 		}
 
 		fmt.Fprintf(tw, "%s\t%s\t%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
@@ -138,7 +140,7 @@ func writeStatsTable(w io.Writer, result *StatsResult) error {
 			statsDuration(s, s.AvgMs),
 			statsDuration(s, s.LastMs),
 			statsLastAt(s),
-			formatLsCommand(command),
+			command,
 		)
 	}
 

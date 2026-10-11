@@ -96,8 +96,7 @@ func TestEnsureImported(t *testing.T) {
 	want := []matchShape{
 		{StatsMatchExact, "make test", false, 0, 2},
 		{StatsMatchExact, "make test", true, 4, 1},
-		{StatsMatchPrefix, "make", false, 0, 2},
-		{StatsMatchPrefix, "make", true, 4, 2},
+		{StatsMatchPrefix, "make", true, 4, 1},
 	}
 	if got := shapesOf(result); !slices.Equal(got, want) {
 		t.Errorf("matches differ\n got: %+v\nwant: %+v", got, want)
