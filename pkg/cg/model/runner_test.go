@@ -497,7 +497,7 @@ func TestCommandSignalForwarding(t *testing.T) {
 	// Run a child that traps SIGTERM and echoes it, then exits
 	script := `trap 'echo got_sigterm; exit 0' TERM; echo ready; sleep 10`
 
-	var buf bytes.Buffer
+	var buf syncBuffer
 	cmd := newTestRoot()
 	cmd.SetOut(&buf)
 	cmd.SetErr(&buf)
@@ -551,7 +551,7 @@ func TestCommandFinishLineSignaled(t *testing.T) {
 	// Child that does not trap SIGTERM, so the wait status reports the signal.
 	script := `echo ready; sleep 10`
 
-	var buf bytes.Buffer
+	var buf syncBuffer
 	cmd := newTestRoot()
 	cmd.SetOut(&buf)
 	cmd.SetErr(&buf)
