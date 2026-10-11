@@ -331,3 +331,101 @@ func TestRunManyDeclineCarriesRememberWarning(t *testing.T) {
 		})
 	}
 }
+
+// retryArgsTest asks for approval with First, then retries with the first round's request state
+// and an accepting answer but the arguments in Retry. WantRun says whether the retry may run.
+type retryArgsTest struct {
+	Name  string
+	Tool  string
+	First map[string]any
+	Retry map[string]any
+
+	WantRun bool
+}
+
+var retryArgsTests = []retryArgsTest{
+	{
+		Name:  "pool retried unchanged runs",
+		Tool:  "cg_run_many",
+		First: map[string]any{"commands": echoCommands("a")},
+		Retry: map[string]any{"commands": echoCommands("a")},
+
+		WantRun: true,
+	},
+	{
+		Name:  "pool retried with a larger repeat refuses",
+		Tool:  "cg_run_many",
+		First: map[string]any{"commands": echoCommands("a")},
+		Retry: map[string]any{"commands": echoCommands("a"), "repeat": 50},
+	},
+	{
+		Name:  "pool retried with a duplicated command refuses",
+		Tool:  "cg_run_many",
+		First: map[string]any{"commands": echoCommands("a")},
+		Retry: map[string]any{"commands": echoCommands("a", "a")},
+	},
+	{
+		Name:  "pool retried with different parallelism refuses",
+		Tool:  "cg_run_many",
+		First: map[string]any{"commands": echoCommands("a"), "repeat": 4, "parallelism": 1},
+		Retry: map[string]any{"commands": echoCommands("a"), "repeat": 4, "parallelism": 4},
+	},
+	{
+		Name:  "run retried with a different output option refuses",
+		Tool:  "cg_run",
+		First: map[string]any{"command": []string{"echo", "a"}},
+		Retry: map[string]any{"command": []string{"echo", "a"}, "excerpt_bytes": 16},
+	},
+}
+
+// TestApprovalRetryMustRepeatTheCall turns off the client's multi round-trip handling so the test
+// can play the client and send a retry whose arguments differ from the call the user approved.
+func TestApprovalRetryMustRepeatTheCall(t *testing.T) {
+	for _, test := range retryArgsTests {
+		t.Run(test.Name, func(t *testing.T) {
+			t.Setenv("TMPDIR", t.TempDir())
+
+			g := newTestGate(t, "version: 1\n", false)
+			cs := connectGateWith(t, g, protocolMultiRoundTrip, &mcpsdk.ClientOptions{
+				ElicitationHandler: (&formScript{}).handle,
+				MultiRoundTrip:     &mcpsdk.MultiRoundTripOptions{Disabled: true},
+			})
+
+			first, err := cs.CallTool(context.Background(), &mcpsdk.CallToolParams{Name: test.Tool, Arguments: test.First})
+			if err != nil {
+				t.Fatalf("first CallTool: %v", err)
+			}
+			if !first.NeedsInput() {
+				t.Fatalf("first call did not ask for approval: IsError=%v, text=%q", first.IsError, resultText(first))
+			}
+
+			answers := mcpsdk.InputResponseMap{}
+			for id := range first.InputRequests {
+				answers[id] = accept(map[string]any{"remember": false})
+			}
+
+			retry, err := cs.CallTool(context.Background(), &mcpsdk.CallToolParams{
+				Name:           test.Tool,
+				Arguments:      test.Retry,
+				InputResponses: answers,
+				RequestState:   first.RequestState,
+			})
+			if err != nil {
+				t.Fatalf("retry CallTool: %v", err)
+			}
+
+			if test.WantRun {
+				if retry.IsError || retry.NeedsInput() {
+					t.Fatalf("retry did not run: IsError=%v, NeedsInput=%v, text=%q", retry.IsError, retry.NeedsInput(), resultText(retry))
+				}
+
+				return
+			}
+
+			if text := resultText(retry); !retry.IsError || !strings.Contains(text, "call the tool again") {
+				t.Errorf("retry result = %q, want a refusal that says to call the tool again", text)
+			}
+			assertCaptureRootEmpty(t)
+		})
+	}
+}

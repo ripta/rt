@@ -69,6 +69,7 @@ func (g *gate) request(call approvalCall, needs []int) (gateOutcome, error) {
 		Argvs:              call.Argvs,
 		Cwd:                call.Cwd,
 		Env:                call.Env,
+		Args:               call.Args,
 		Commands:           commands,
 		DivergenceSnapshot: current,
 		Diverged:           changed,

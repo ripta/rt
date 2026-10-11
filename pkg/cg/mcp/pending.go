@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/base64"
 	"fmt"
@@ -42,13 +43,19 @@ type pendingCommand struct {
 	Prompted bool
 }
 
-// pendingEntry records a call that is waiting on the user. Tool, Argvs, Cwd, and Env are what the
-// retry must repeat exactly. The remaining fields carry what the first round showed the user.
+// pendingEntry records a call that is waiting on the user. Tool, Argvs, Cwd, Env, and Args are
+// what the retry must repeat exactly. The remaining fields carry what the first round showed the
+// user.
 type pendingEntry struct {
 	Tool  string
 	Argvs [][]string
 	Cwd   string
 	Env   map[string]string
+
+	// Args is the canonical JSON of the whole tool input. Argvs holds only the distinct commands
+	// the gate asked about, so without Args a retry could keep the answer and change what runs
+	// around it, such as a pool's repeat count or duplicate commands.
+	Args []byte
 
 	// Commands runs parallel to Argvs.
 	Commands []pendingCommand
@@ -104,6 +111,7 @@ func (s *pendingStore) add(e pendingEntry) (string, error) {
 	stored := e
 	stored.Argvs = cloneArgvs(e.Argvs)
 	stored.Env = maps.Clone(e.Env)
+	stored.Args = slices.Clone(e.Args)
 	stored.Commands = cloneCommands(e.Commands)
 	stored.DivergenceSnapshot = slices.Clone(e.DivergenceSnapshot)
 	stored.expires = s.clock().Add(pendingTTL)
@@ -125,7 +133,7 @@ func (s *pendingStore) add(e pendingEntry) (string, error) {
 
 // take redeems a nonce. The entry is deleted on lookup whether or not the call matches, so a
 // nonce can be tried once and a wrong guess cannot be retried with corrected arguments.
-func (s *pendingStore) take(nonce, tool string, argvs [][]string, cwd string, env map[string]string) (*pendingEntry, error) {
+func (s *pendingStore) take(nonce, tool string, argvs [][]string, cwd string, env map[string]string, args []byte) (*pendingEntry, error) {
 	s.mu.Lock()
 	e, ok := s.entries[nonce]
 	if ok {
@@ -144,7 +152,7 @@ func (s *pendingStore) take(nonce, tool string, argvs [][]string, cwd string, en
 
 	// A nil map and an empty map both mean no overrides, and a JSON round trip can turn one into
 	// the other. maps.Equal treats them as equal.
-	if e.Tool != tool || e.Cwd != cwd || !maps.Equal(e.Env, env) || !slices.EqualFunc(e.Argvs, argvs, slices.Equal) {
+	if e.Tool != tool || e.Cwd != cwd || !maps.Equal(e.Env, env) || !slices.EqualFunc(e.Argvs, argvs, slices.Equal) || !bytes.Equal(e.Args, args) {
 		return nil, fmt.Errorf("%w: the call differs from the one that was approved", ErrPendingApproval)
 	}
 

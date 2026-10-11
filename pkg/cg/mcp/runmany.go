@@ -148,7 +148,12 @@ func handleRunMany(ctx context.Context, reg *runRegistry, g *gate, req *mcpsdk.C
 		resolved = append(resolved, r)
 	}
 
-	outcome, err := g.check(newApprovalCall(req, "cg_run_many", distinct, resolved, in.Cwd, in.Env))
+	call, err := newApprovalCall(req, "cg_run_many", in, distinct, resolved, in.Cwd, in.Env)
+	if err != nil {
+		return nil, runManyOutput{}, err
+	}
+
+	outcome, err := g.check(call)
 	if err != nil {
 		return nil, runManyOutput{}, err
 	}

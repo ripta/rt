@@ -62,14 +62,7 @@ func callGated(t *testing.T, cs *mcpsdk.ClientSession, tool string, args map[str
 	}
 
 	if res.IsError {
-		var text []string
-		for _, c := range res.Content {
-			if tc, ok := c.(*mcpsdk.TextContent); ok {
-				text = append(text, tc.Text)
-			}
-		}
-
-		return nil, strings.Join(text, "\n"), nil
+		return nil, resultText(res), nil
 	}
 
 	raw, err := json.Marshal(res.StructuredContent)
@@ -81,6 +74,19 @@ func callGated(t *testing.T, cs *mcpsdk.ClientSession, tool string, args map[str
 	}
 
 	return out, "", nil
+}
+
+// resultText joins the text content of a tool result, which is where a tool error's message
+// lands.
+func resultText(res *mcpsdk.CallToolResult) string {
+	var text []string
+	for _, c := range res.Content {
+		if tc, ok := c.(*mcpsdk.TextContent); ok {
+			text = append(text, tc.Text)
+		}
+	}
+
+	return strings.Join(text, "\n")
 }
 
 // approvalE2ETest drives cg_run through a real SDK client. Edit rewrites the project file after
@@ -377,14 +383,8 @@ func TestApprovalEndToEndCapabilityFromMeta(t *testing.T) {
 				return
 			}
 
-			var text []string
-			for _, c := range res.Content {
-				if tc, ok := c.(*mcpsdk.TextContent); ok {
-					text = append(text, tc.Text)
-				}
-			}
-			if !res.IsError || !strings.Contains(strings.Join(text, "\n"), "the client cannot prompt for approval") {
-				t.Errorf("result = %v, want the fail-closed refusal", text)
+			if text := resultText(res); !res.IsError || !strings.Contains(text, "the client cannot prompt for approval") {
+				t.Errorf("result = %q, want the fail-closed refusal", text)
 			}
 		})
 	}

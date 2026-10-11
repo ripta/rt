@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -46,6 +47,10 @@ type approvalCall struct {
 	Cwd         string
 	Env         map[string]string
 
+	// Args is the canonical JSON of the whole tool input. The retry must present the same bytes,
+	// so an approval covers exactly the call the user was asked about.
+	Args []byte
+
 	// CanPrompt reports whether the client advertised elicitation. A command that needs approval
 	// fails closed without it.
 	CanPrompt bool
@@ -55,14 +60,22 @@ type approvalCall struct {
 }
 
 // newApprovalCall builds the gate's view of a tool request. A nil request, as in tests that skip
-// the protocol, has no session and so cannot prompt.
-func newApprovalCall(req *mcpsdk.CallToolRequest, tool string, argvs [][]string, resolutions []*model.Resolution, cwd string, env map[string]string) approvalCall {
+// the protocol, has no session and so cannot prompt. in is the handler's decoded tool input. It is
+// re-encoded rather than taken from the raw arguments, so formatting differences between the two
+// calls do not matter.
+func newApprovalCall(req *mcpsdk.CallToolRequest, tool string, in any, argvs [][]string, resolutions []*model.Resolution, cwd string, env map[string]string) (approvalCall, error) {
+	args, err := json.Marshal(in)
+	if err != nil {
+		return approvalCall{}, fmt.Errorf("%s refused: encoding the call for approval: %w", tool, err)
+	}
+
 	call := approvalCall{
 		Tool:        tool,
 		Argvs:       argvs,
 		Resolutions: resolutions,
 		Cwd:         cwd,
 		Env:         env,
+		Args:        args,
 		CanPrompt:   elicitationAvailable(req),
 	}
 	if req != nil && req.Params != nil {
@@ -70,7 +83,7 @@ func newApprovalCall(req *mcpsdk.CallToolRequest, tool string, argvs [][]string,
 		call.Responses = req.Params.InputResponses
 	}
 
-	return call
+	return call, nil
 }
 
 // gateOutcome is what a permitted call carries back to its handler.
@@ -98,7 +111,7 @@ func (g *gate) check(call approvalCall) (gateOutcome, error) {
 	var entry *pendingEntry
 	if call.State != "" {
 		var err error
-		entry, err = g.pending().take(call.State, call.Tool, call.Argvs, call.Cwd, call.Env)
+		entry, err = g.pending().take(call.State, call.Tool, call.Argvs, call.Cwd, call.Env, call.Args)
 		if err != nil {
 			return gateOutcome{}, fmt.Errorf("%s refused: %w", call.Tool, err)
 		}

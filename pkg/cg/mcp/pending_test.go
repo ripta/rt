@@ -48,15 +48,19 @@ func baseEntry() pendingEntry {
 		Argvs: [][]string{{"git", "status"}, {"go", "test", "./..."}},
 		Cwd:   "/work",
 		Env:   map[string]string{"A": "1"},
+		Args:  []byte(`{"commands":[["git","status"],["go","test","./..."]],"repeat":1}`),
 	}
 }
 
+// pendingTakeTest presents a call to the store's base entry. A nil Args presents the base entry's
+// arguments, so only the cases about Args spell them out.
 type pendingTakeTest struct {
 	Name    string
 	Tool    string
 	Argvs   [][]string
 	Cwd     string
 	Env     map[string]string
+	Args    []byte
 	Advance time.Duration
 	Nonce   string
 	WantErr bool
@@ -167,6 +171,15 @@ var pendingTakeTests = []pendingTakeTest{
 		Nonce:   "not-a-real-nonce",
 		WantErr: true,
 	},
+	{
+		Name:    "arguments differ beyond the gated fields",
+		Tool:    "cg_run_many",
+		Argvs:   [][]string{{"git", "status"}, {"go", "test", "./..."}},
+		Cwd:     "/work",
+		Env:     map[string]string{"A": "1"},
+		Args:    []byte(`{"commands":[["git","status"],["go","test","./..."]],"repeat":500}`),
+		WantErr: true,
+	},
 }
 
 func TestPendingTake(t *testing.T) {
@@ -185,7 +198,12 @@ func TestPendingTake(t *testing.T) {
 
 			clock.Advance(test.Advance)
 
-			got, err := s.take(nonce, test.Tool, test.Argvs, test.Cwd, test.Env)
+			args := test.Args
+			if args == nil {
+				args = baseEntry().Args
+			}
+
+			got, err := s.take(nonce, test.Tool, test.Argvs, test.Cwd, test.Env, args)
 			if test.WantErr {
 				if !errors.Is(err, ErrPendingApproval) {
 					t.Fatalf("take err = %v, want ErrPendingApproval", err)
@@ -212,7 +230,7 @@ func TestPendingTake(t *testing.T) {
 func TestPendingTakeErrorSaysCallAgain(t *testing.T) {
 	s, _ := newTestPendingStore()
 
-	_, err := s.take("missing", "cg_run", nil, "", nil)
+	_, err := s.take("missing", "cg_run", nil, "", nil, nil)
 	if err == nil {
 		t.Fatal("take of a missing nonce succeeded")
 	}
@@ -244,7 +262,7 @@ func TestPendingNilAndEmptyEnvMatch(t *testing.T) {
 				t.Fatalf("add: %v", err)
 			}
 
-			if _, err := s.take(nonce, e.Tool, e.Argvs, e.Cwd, presented); err != nil {
+			if _, err := s.take(nonce, e.Tool, e.Argvs, e.Cwd, presented, e.Args); err != nil {
 				t.Errorf("take: %v", err)
 			}
 		})
@@ -283,9 +301,9 @@ func TestPendingReplayRefused(t *testing.T) {
 			}
 
 			tool, argvs, cwd, env := test.Args(e)
-			_, _ = s.take(nonce, tool, argvs, cwd, env)
+			_, _ = s.take(nonce, tool, argvs, cwd, env, e.Args)
 
-			if _, err := s.take(nonce, e.Tool, e.Argvs, e.Cwd, e.Env); !errors.Is(err, ErrPendingApproval) {
+			if _, err := s.take(nonce, e.Tool, e.Argvs, e.Cwd, e.Env, e.Args); !errors.Is(err, ErrPendingApproval) {
 				t.Errorf("second take err = %v, want ErrPendingApproval", err)
 			}
 
@@ -333,7 +351,7 @@ func TestPendingStoredCopyIsIsolated(t *testing.T) {
 	e.DivergenceSnapshot[0] = 'X'
 
 	want := richEntry()
-	got, err := s.take(nonce, want.Tool, want.Argvs, want.Cwd, want.Env)
+	got, err := s.take(nonce, want.Tool, want.Argvs, want.Cwd, want.Env, want.Args)
 	if err != nil {
 		t.Fatalf("take after caller mutated its copy: %v", err)
 	}
@@ -356,7 +374,7 @@ func TestPendingRoundTrip(t *testing.T) {
 		t.Fatalf("add: %v", err)
 	}
 
-	got, err := s.take(nonce, want.Tool, want.Argvs, want.Cwd, want.Env)
+	got, err := s.take(nonce, want.Tool, want.Argvs, want.Cwd, want.Env, want.Args)
 	if err != nil {
 		t.Fatalf("take: %v", err)
 	}
@@ -419,7 +437,7 @@ func TestPendingEvictsOldest(t *testing.T) {
 
 			for i, nonce := range nonces {
 				e := baseEntry()
-				_, err := s.take(nonce, e.Tool, e.Argvs, fmt.Sprintf("/work/%d", i), e.Env)
+				_, err := s.take(nonce, e.Tool, e.Argvs, fmt.Sprintf("/work/%d", i), e.Env, e.Args)
 				if missing[i] && !errors.Is(err, ErrPendingApproval) {
 					t.Errorf("entry %d survived eviction: err = %v", i, err)
 				}
@@ -476,7 +494,7 @@ func TestPendingSweepBeforeEviction(t *testing.T) {
 	}
 
 	e := baseEntry()
-	if _, err := s.take(first, e.Tool, e.Argvs, e.Cwd, e.Env); !errors.Is(err, ErrPendingApproval) {
+	if _, err := s.take(first, e.Tool, e.Argvs, e.Cwd, e.Env, e.Args); !errors.Is(err, ErrPendingApproval) {
 		t.Errorf("expired entry redeemed: %v", err)
 	}
 
@@ -528,7 +546,7 @@ func TestPendingConcurrentUse(t *testing.T) {
 				return
 			}
 
-			_, _ = s.take(nonce, e.Tool, e.Argvs, e.Cwd, e.Env)
+			_, _ = s.take(nonce, e.Tool, e.Argvs, e.Cwd, e.Env, e.Args)
 		}()
 	}
 

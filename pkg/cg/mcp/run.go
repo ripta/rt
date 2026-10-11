@@ -79,7 +79,12 @@ func handleRun(ctx context.Context, reg *runRegistry, g *gate, req *mcpsdk.CallT
 
 	resolved, _ := model.ResolveCommand(in.Command, in.Cwd)
 
-	outcome, err := g.check(newApprovalCall(req, "cg_run", [][]string{in.Command}, []*model.Resolution{resolved}, in.Cwd, in.Env))
+	call, err := newApprovalCall(req, "cg_run", in, [][]string{in.Command}, []*model.Resolution{resolved}, in.Cwd, in.Env)
+	if err != nil {
+		return nil, runOutput{}, err
+	}
+
+	outcome, err := g.check(call)
 	if err != nil {
 		return nil, runOutput{}, err
 	}
