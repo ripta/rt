@@ -78,6 +78,10 @@ func runServer(cmd *cobra.Command, opts *serverOptions) error {
 // notifications while it waits.
 const serverInstructions = `For a long-running command, call cg_run or cg_run_many synchronously and set wait_timeout_ms above the expected duration. The default is 60000, which is shorter than most builds and test suites.
 
+Do not guess the expected duration. Call cg_stats with the command to see how long earlier runs took, or set wait_timeout_auto so cg sizes the wait from that history. An explicit wait_timeout_ms wins over wait_timeout_auto. The response reports the value used as wait_timeout_ms_used.
+
+A response that timed out carries elapsed_ms and, when earlier runs exist, history. Use them to size the next cg_wait timeout.
+
 If the client moves the call to the background, keep working or end the turn. Do not poll with cg_wait. The client delivers the result when the run finishes.
 
 Use wait=false only to run other work alongside the command. Use cg_wait to resume a run whose original call was lost, such as after a client restart. Runs are recorded on disk, so the ID stays valid.

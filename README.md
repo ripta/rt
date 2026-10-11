@@ -206,6 +206,122 @@ command finishes, grouping by stream. `--log-parse json|logfmt` reformats
 structured log lines inline. cg flags must precede the command; everything after
 the first positional or `--` is passed through to the child untouched.
 
+`cg stats` reports how long earlier runs of a command took. It takes the same
+shape as `cg run`, so swap `run` for `stats`. cg flags must precede the
+command.
+
+```
+cg stats [flags] -- COMMAND [ARGS...]
+```
+
+| Flag | Default | Meaning |
+|------|---------|---------|
+| `--cwd DIR` | the current directory | The directory the runs started in. Symlinks are resolved before comparing. |
+| `--since TIME` | none | Only count runs started at or after TIME. Same grammar as `cg ls --since`. |
+| `--exit-code EXPR` | `0` | Only count runs with this exit code. Same grammar as `cg ls --exit-code`. |
+| `--samples N` | `20` | Count at most the N most recent runs per entry. The maximum is 1000. |
+| `--pool MODE` | `any` | `any` counts every run, `none` only standalone runs, and `only` only pooled runs. |
+| `-o`, `--output` | `table` | `table` or `json`. |
+
+The first entry is the exact match. It equals the command's argv and nothing
+else. It is always present, with a count of 0 when there are no samples. Each
+shorter prefix of the argv that has samples follows, longest first. A stored run
+with a longer argv than the query counts at the prefix level. For
+`make test JOBS=10`, the levels are `make test JOBS=10`, `make test`, and
+`make`. A stored run of `make test JOBS=10 -k` counts at `make test JOBS=10`
+but is never an exact match.
+
+cg cannot know which arguments change a duration. It reports every level. The caller applies its own judgment.
+
+Pooled and standalone runs never share an entry. Pool members with
+`parallelism` above 1 compete for CPU. Under `--pool any`, a level with both
+kinds of samples yields one standalone entry and one entry per distinct
+`parallelism`. Standalone comes first, then pooled by ascending `parallelism`.
+
+By default, `cg stats` counts runs that exited with code 0. Signaled runs never
+count, including cancelled ones. A run that failed in 2 seconds says nothing
+about how long a passing run takes.
+
+```
+❯ cg stats -- make test
+cwd: /home/rt/projects/rt
+
+MATCH   POOL     COUNT  MIN   P50    P90    MAX    AVG    LAST   LAST AT               COMMAND
+exact   -        10     4m0s  11m30s 12m0s  12m15s 10m55s 11m41s 2026-10-09T18:22:04Z  make test
+exact   pool x4  3      6m2s  7m10s  8m5s   8m5s   7m20s  7m10s  2026-10-08T09:41:10Z  make test
+prefix  -        31     2s    3m5s   11m40s 12m15s 5m12s  11m41s 2026-10-09T18:22:04Z  make
+
+❯ cg stats -o json -- make test
+{"cwd": "/home/rt/projects/rt", "matches": [
+  {"match_type": "exact", "command": ["make", "test"], "pool": false,
+   "stats": {"count": 10, "min_ms": 240000, "max_ms": 735000, "avg_ms": 655000,
+             "p50_ms": 690000, "p90_ms": 720000, "last_ms": 701000,
+             "last_at": "2026-10-09T18:22:04Z"}},
+  ...
+]}
+```
+
+Durations in JSON are integer milliseconds. `p50_ms` and `p90_ms` resist a
+single cold-cache run that skews `avg_ms`. `last_ms` and `last_at` show drift
+after a dependency bump. `count` says how far to trust the rest. A pooled entry
+carries `parallelism` when it is known. The exact entry that `--pool only`
+returns with a count of 0 omits it.
+
+A run appends one line to a history log once its `meta.json` is written. The log lives outside the
+capture root, so `cg prune` and `$TMPDIR` cleanup do not touch it. Its
+directory is `$XDG_STATE_HOME/cg`, or `~/.local/state/cg` when
+`XDG_STATE_HOME` is unset. The directory is mode 0700 and its files are mode
+0600.
+
+| File | Purpose |
+|------|---------|
+| `history.jsonl` | The log. One JSON record per line. |
+| `history.1.jsonl` | The previous generation. |
+| `history.key` | The 32-byte key for the argv and cwd MACs. |
+| `history.lock` | The lock that serializes appends and rotation. |
+| `history.imported` | The marker that the first-query import has run. |
+
+Appends take an exclusive lock, so concurrent finishes never interleave partial
+lines. When `history.jsonl` passes 8 MB, it is renamed to `history.1.jsonl` and
+replaces any older generation. Queries read both files. Two generations hold far
+more runs than `--samples` needs. The log needs no compaction.
+
+A run record holds its version in `v`, the kind (`run`), the run ID, the start
+time, `duration_ms`, the exit code, the signal, whether the run was pooled, its
+`parallelism`, a MAC of the cwd, and a MAC for each argv prefix. Prefixes are
+hashed up to 32 tokens. A longer argv also gets a MAC of its full argv, so an
+exact match still works. Prefix levels between 32 tokens and the full length are
+not reported. Readers skip records whose version or kind they do not know.
+
+The log never holds your command line. It holds keyed MACs of argv prefixes and
+of the cwd. Each MAC is HMAC-SHA256 under the key in `history.key`, truncated to
+16 bytes. Argv can carry secrets, such as tokens passed as flags. A
+permanent plaintext copy would outlive the short-lived `meta.json`. A plain hash
+of `make test` can be reversed by hashing common commands. A keyed MAC cannot be
+reversed without the key. A query can report only what its own input names,
+because it recomputes the MACs from the argv and cwd it was given.
+
+The key sits next to the log at mode 0600. Someone who can read both can test
+guesses offline. That takes the same access as reading `~/.zsh_history`. Losing
+the key makes existing history unmatchable. cg generates a new key, and the old
+records age out through rotation.
+
+A history write is best-effort. A failure never changes the run's exit code,
+`meta.json`, or tool output. `cg run` reports it on stderr. The supervisors drop
+it.
+
+The first query imports the finished runs and pools still in the capture root,
+so history does not start empty. It runs when `history.imported` is missing, and
+it skips run IDs already in the log. A pooled member takes its `parallelism`
+from its pool manifest. A member whose pool directory is gone is skipped, since
+its `parallelism` is unknown. Deleting `history.jsonl` alone does not re-import,
+because the marker stays. Delete `history.imported` to force a re-import.
+
+The log also holds a record for each finished pool, with the pool's wall time.
+These pool records are internal. `cg stats` and `cg_stats` do not show them. They
+feed two things. One is the `cg_run_many` auto timeout. The other is the
+`history` object, with `source: "pool"`, on a timed-out response.
+
 `cg note` records free-form memos that outlive a single run. A note carries an
 ID, a required message, an optional set of `key=value` tags, and a creation
 timestamp. Notes persist under `$TMPDIR/cg/notes/` and are shared with the
@@ -263,7 +379,7 @@ Or by hand in the MCP host config:
 }
 ```
 
-The server registers sixteen tools:
+The server registers seventeen tools:
 
 | Tool | Purpose |
 |------|---------|
@@ -279,6 +395,7 @@ The server registers sixteen tools:
 | `cg_stderr` | Fetch captured stderr with byte limits and head/tail windowing. |
 | `cg_grep` | Search captured output and return matching lines. |
 | `cg_prune` | Evict runs by count or age. |
+| `cg_stats` | Report how long earlier runs of a command took, as `cg stats -o json` does. |
 | `cg_note_add` | Record a free-form note with an optional set of `key=value` tags. |
 | `cg_note_list` | List notes newest-first, with an optional key filter and limit. |
 | `cg_note_delete` | Delete a note by ID. |
@@ -421,6 +538,50 @@ network servers. Each progress notification resets the clock, so a long
 `wait_timeout_ms` no longer trips it. Other clients differ. When the client
 sends no progress token, raise `CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT` or the
 client's equivalent for long runs.
+
+An agent has to pick `wait_timeout_ms` before a run starts. The duration history
+removes the guess. `cg_stats` takes `command`, `cwd`, `since`, `exit_code`,
+`samples`, and `pool`. It returns the same JSON as `cg stats -o json`. `cwd`
+defaults to the server's working directory, as it does for `cg_run`. The
+defaults match the CLI.
+
+`cg_run` and `cg_run_many` take a boolean `wait_timeout_auto`. It is off by
+default, so existing callers keep the 60000 ms default. An explicit
+`wait_timeout_ms` always wins. Otherwise the timeout is
+`max(1.5 x the longest expected duration, 60000)` ms. The response reports the
+value it used as `wait_timeout_ms_used`. With no history, the timeout is 60000.
+
+The expected duration for `cg_run` comes from the exact, standalone match for the
+command and cwd, with the default filters. Prefix matches never count, since
+`make` says little about `make test`. For `cg_run_many`, the first source with
+samples wins:
+
+1. The wall time of earlier pools with the same cwd, commands in the same order,
+   `repeat`, and `parallelism`, in which every member succeeded.
+2. An estimate from each distinct command's exact match among pooled runs at the
+   same `parallelism`. The estimate is
+   `ceil(commands x repeat / parallelism) x the longest max_ms`. One command
+   without samples voids it.
+3. The 60000 ms default.
+
+Every timed-out response carries `elapsed_ms`, measured from the recorded start
+of the run or pool. This covers `timed_out: true` from `cg_run` and
+`cg_run_many`, and `finished: false` from `cg_wait` on a run or a pool. The
+response also carries a `history` object when samples exist. It is omitted
+otherwise. Finished responses carry neither `elapsed_ms` nor `history`. `cg_run`
+and `cg_run_many` report `wait_timeout_ms_used` on every call that waited.
+
+```json
+{"id": "K3FQ2M", "timed_out": true, "elapsed_ms": 62000,
+ "history": {"source": "run", "count": 10, "p50_ms": 690000,
+             "p90_ms": 720000, "max_ms": 735000}}
+```
+
+`source` says where the numbers came from. `run` is the exact standalone match.
+`pool` is the wall time of earlier identical pools. Both carry `count`, `p50_ms`,
+`p90_ms`, and `max_ms`. `estimate` is the member estimate. It carries only
+`max_ms`, which holds the estimate. An agent that timed out can size its next
+`cg_wait` from `elapsed_ms` and `history`.
 
 `cg_run` checks each command against an approval matcher before running it. The
 default mode prompts for unmatched commands when the client supports elicitation,
