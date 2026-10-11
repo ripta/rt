@@ -71,16 +71,32 @@ func newManifestReporter(req *mcpsdk.CallToolRequest, readStart func() time.Time
 // newRunReporter builds a reporter for a single run in dir. The start time comes from start.json.
 func newRunReporter(req *mcpsdk.CallToolRequest, dir string) progressReporter {
 	readStart := func() time.Time {
-		info, err := model.ReadStartInfo(dir)
-		if err != nil {
-			return time.Time{}
-		}
-		return info.StartedAt
+		return readRunStart(dir)
 	}
 
 	return newManifestReporter(req, readStart, func(elapsed time.Duration) string {
 		return runStatus(dir, elapsed)
 	})
+}
+
+// readRunStart returns the start time recorded in dir's start.json, or the zero time when it
+// cannot be read.
+func readRunStart(dir string) time.Time {
+	info, err := model.ReadStartInfo(dir)
+	if err != nil {
+		return time.Time{}
+	}
+	return info.StartedAt
+}
+
+// readPoolStart returns the start time recorded in dir's pool.json, or the zero time when it
+// cannot be read.
+func readPoolStart(dir string) time.Time {
+	m, err := model.ReadPoolManifest(dir)
+	if err != nil {
+		return time.Time{}
+	}
+	return m.StartedAt
 }
 
 // runStatus describes a run in flight. Stream sizes are read from disk on every call.
@@ -95,11 +111,7 @@ func runStatus(dir string, elapsed time.Duration) string {
 // newPoolReporter builds a reporter for a pool in dir. The start time comes from pool.json.
 func newPoolReporter(req *mcpsdk.CallToolRequest, dir string) progressReporter {
 	readStart := func() time.Time {
-		m, err := model.ReadPoolManifest(dir)
-		if err != nil {
-			return time.Time{}
-		}
-		return m.StartedAt
+		return readPoolStart(dir)
 	}
 
 	return newManifestReporter(req, readStart, func(elapsed time.Duration) string {

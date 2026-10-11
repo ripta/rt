@@ -27,13 +27,14 @@ type waitOutput struct {
 	ID       string `json:"id"`
 	Finished bool   `json:"finished"`
 	metaFields
+	timedOutFields
 	poolSummary
 }
 
 func registerWait(s *mcpsdk.Server, reg *runRegistry) {
 	mcpsdk.AddTool(s, &mcpsdk.Tool{
 		Name:        "cg_wait",
-		Description: "Block until a capture run or pool finishes or timeout_ms elapses. For a run, returns {id, finished: true, ...meta} on completion or {id, finished: false} on timeout. For a pool, returns the same summary as cg_run_many, partial on timeout. Unknown ID is a tool error.",
+		Description: "Block until a capture run or pool finishes or timeout_ms elapses. For a run, returns {id, finished: true, ...meta} on completion or {id, finished: false} on timeout. For a pool, returns the same summary as cg_run_many, partial on timeout. A timeout response also carries elapsed_ms and, when earlier runs exist, history. Unknown ID is a tool error.",
 	}, func(ctx context.Context, req *mcpsdk.CallToolRequest, in waitInput) (*mcpsdk.CallToolResult, waitOutput, error) {
 		return handleWait(ctx, req, reg, in)
 	})
@@ -64,12 +65,17 @@ func handleWait(ctx context.Context, req *mcpsdk.CallToolRequest, reg *runRegist
 		return handlePoolWait(ctx, req, reg, in.ID, dir, m, time.Duration(timeoutMs)*time.Millisecond)
 	}
 
+	waitStart := time.Now()
 	finished, werr := awaitFinish(ctx, reg, in.ID, time.Duration(timeoutMs)*time.Millisecond, newRunReporter(req, dir))
 	if werr != nil {
 		return nil, waitOutput{}, werr
 	}
 	if !finished {
-		return nil, waitOutput{ID: in.ID, Finished: false}, nil
+		return nil, waitOutput{
+			ID:             in.ID,
+			Finished:       false,
+			timedOutFields: timedOutFieldsFor(readRunStart(dir), waitStart, expectedRunDir(dir)),
+		}, nil
 	}
 	out, ferr := finishedWaitOutput(in.ID, dir)
 	return nil, out, ferr
@@ -111,6 +117,7 @@ func awaitFinish(ctx context.Context, reg *runRegistry, id string, timeout time.
 // default excerpt size. A timeout returns finished: false with the partial
 // summary; the pool keeps running.
 func handlePoolWait(ctx context.Context, req *mcpsdk.CallToolRequest, reg *runRegistry, id, dir string, m *model.PoolManifest, timeout time.Duration) (*mcpsdk.CallToolResult, waitOutput, error) {
+	waitStart := time.Now()
 	finished := m.FinishedAt != nil
 	if !finished {
 		f, err := awaitPoolFinish(ctx, reg, id, dir, timeout, newPoolReporter(req, dir))
@@ -124,7 +131,11 @@ func handlePoolWait(ctx context.Context, req *mcpsdk.CallToolRequest, reg *runRe
 	if err != nil {
 		return nil, waitOutput{}, err
 	}
-	return nil, waitOutput{ID: id, Finished: finished, poolSummary: summary}, nil
+	out := waitOutput{ID: id, Finished: finished, poolSummary: summary}
+	if !finished {
+		out.timedOutFields = timedOutFieldsFor(m.StartedAt, waitStart, expectedPoolManifest(m))
+	}
+	return nil, out, nil
 }
 
 // awaitPoolFinish mirrors awaitFinish for pools: the registry Done channel
