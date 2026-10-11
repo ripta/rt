@@ -35,8 +35,8 @@ func (lc *lineCountingReader) Read(p []byte) (int, error) {
 	return n, err
 }
 
-// FormatDuration renders d with tiered rounding so the finish-line duration
-// stays readable at every scale.
+// FormatDuration renders d with tiered rounding. Durations under a second round to the
+// millisecond. Durations under a minute round to 10ms. Longer durations round to the second.
 func FormatDuration(d time.Duration) string {
 	switch {
 	case d < time.Second:

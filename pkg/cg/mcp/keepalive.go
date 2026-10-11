@@ -50,20 +50,35 @@ func progressTokenOf(req *mcpsdk.CallToolRequest) any {
 	return req.Params.GetProgressToken()
 }
 
-// newRunReporter builds a reporter for a single run in dir. The start time comes from start.json
-// so a run begun by another server reports its true age. Once start.json is gone the wait's own
-// start stands in.
-func newRunReporter(req *mcpsdk.CallToolRequest, dir string) progressReporter {
+// newManifestReporter builds a reporter whose start time comes from a manifest on disk, so work
+// begun by another server reports its true age.
+//
+// The readStart func returns the zero time when the manifest is unreadable. The wait's own start
+// then stands in. It is not called when the call carries no progress token.
+func newManifestReporter(req *mcpsdk.CallToolRequest, readStart func() time.Time, status func(elapsed time.Duration) string) progressReporter {
 	if progressTokenOf(req) == nil {
 		return nil
 	}
 
 	start := time.Now()
-	if info, err := model.ReadStartInfo(dir); err == nil && !info.StartedAt.IsZero() {
-		start = info.StartedAt
+	if t := readStart(); !t.IsZero() {
+		start = t
 	}
 
-	return newProgressReporter(req, start, func(elapsed time.Duration) string {
+	return newProgressReporter(req, start, status)
+}
+
+// newRunReporter builds a reporter for a single run in dir. The start time comes from start.json.
+func newRunReporter(req *mcpsdk.CallToolRequest, dir string) progressReporter {
+	readStart := func() time.Time {
+		info, err := model.ReadStartInfo(dir)
+		if err != nil {
+			return time.Time{}
+		}
+		return info.StartedAt
+	}
+
+	return newManifestReporter(req, readStart, func(elapsed time.Duration) string {
 		return runStatus(dir, elapsed)
 	})
 }
@@ -77,20 +92,17 @@ func runStatus(dir string, elapsed time.Duration) string {
 	)
 }
 
-// newPoolReporter builds a reporter for a pool in dir. The start time comes from pool.json so a
-// pool begun by another server reports its true age. When the manifest cannot be read, the wait's
-// own start stands in.
+// newPoolReporter builds a reporter for a pool in dir. The start time comes from pool.json.
 func newPoolReporter(req *mcpsdk.CallToolRequest, dir string) progressReporter {
-	if progressTokenOf(req) == nil {
-		return nil
+	readStart := func() time.Time {
+		m, err := model.ReadPoolManifest(dir)
+		if err != nil {
+			return time.Time{}
+		}
+		return m.StartedAt
 	}
 
-	start := time.Now()
-	if m, err := model.ReadPoolManifest(dir); err == nil && !m.StartedAt.IsZero() {
-		start = m.StartedAt
-	}
-
-	return newProgressReporter(req, start, func(elapsed time.Duration) string {
+	return newManifestReporter(req, readStart, func(elapsed time.Duration) string {
 		return poolStatus(dir, elapsed)
 	})
 }

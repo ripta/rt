@@ -80,7 +80,8 @@ func handleWait(ctx context.Context, req *mcpsdk.CallToolRequest, reg *runRegist
 // cg_cancel both need: the registry Done channel when this server started the
 // run, and filesystem polling otherwise. The caller must have already
 // confirmed the run is in flight; awaitFinish only watches for the transition
-// to finished. A false return with a nil error means the timeout fired.
+// to finished. A false return with a nil error means the timeout fired. A
+// nil report sends nothing.
 func awaitFinish(ctx context.Context, reg *runRegistry, id string, timeout time.Duration, report progressReporter) (bool, error) {
 	if reg != nil {
 		if done, ok := reg.Done(id); ok {
