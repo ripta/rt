@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -9,58 +10,202 @@ import (
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
+// maxElicitProbe bounds both requests per round and rounds per call. The SDK client gives up
+// after ten tool calls, so ten rounds is one more than it can complete, which lets the probe
+// show what hitting that cap looks like.
+const maxElicitProbe = 10
+
 // elicitInput is the argument shape for `cg_elicit_test`, a diagnostic that
 // exercises MCP elicitation against the connected client. The case selects
 // which kind of form schema to send so each field type can be inspected on its
 // own.
+//
+// Requests and rounds shape the multi round-trip exchange: each round returns that many
+// elicitations together in one input-required result, and the call completes after the last
+// round is answered.
 type elicitInput struct {
-	Case    string `json:"case,omitempty" jsonschema:"which form to send: text, text_default, enum_single, enum_single_titled, enum_multi, enum_multi_titled, checkbox, number, format, all (default all)"`
-	Message string `json:"message,omitempty" jsonschema:"prompt to show the user; a per-case default is used when empty"`
+	Case     string `json:"case,omitempty" jsonschema:"which form to send: text, text_default, enum_single, enum_single_titled, enum_multi, enum_multi_titled, checkbox, number, format, all (default all)"`
+	Message  string `json:"message,omitempty" jsonschema:"prompt to show the user; a per-case default is used when empty"`
+	Requests int    `json:"requests,omitempty" jsonschema:"elicitations sent together in each round (1-10, default 1)"`
+	Rounds   int    `json:"rounds,omitempty" jsonschema:"input-required rounds before the call completes (1-10, default 1); more than one needs protocol 2026-07-28 or later"`
 }
 
-// elicitOutput reports whether elicitation is supported and, when it is, the
-// user's action and submitted form content, plus the schema that was sent so
-// the request and response can be compared.
+// elicitOutput reports whether elicitation is supported and, when it is, every
+// response the client returned across all rounds, plus the schema that was sent
+// so the request and response can be compared.
 type elicitOutput struct {
-	Supported bool           `json:"supported"`
-	Case      string         `json:"case"`
-	Schema    map[string]any `json:"schema,omitempty"`
-	Action    string         `json:"action,omitempty"`
-	Content   map[string]any `json:"content,omitempty"`
-	Error     string         `json:"error,omitempty"`
+	Supported       bool             `json:"supported"`
+	ProtocolVersion string           `json:"protocol_version,omitempty"`
+	Case            string           `json:"case"`
+	Schema          map[string]any   `json:"schema,omitempty"`
+	Responses       []elicitResponse `json:"responses,omitempty"`
+	Error           string           `json:"error,omitempty"`
+}
+
+// elicitResponse is one answered elicitation. ID is the input request key, unique within its
+// round.
+type elicitResponse struct {
+	Round   int            `json:"round"`
+	ID      string         `json:"id"`
+	Action  string         `json:"action"`
+	Content map[string]any `json:"content,omitempty"`
+}
+
+// elicitState is the probe's RequestState, carrying the last round sent and the responses
+// collected so far. It is unsigned on purpose: the probe grants nothing, so a forged state can
+// only misreport the probe's own results.
+type elicitState struct {
+	Round     int              `json:"round"`
+	Responses []elicitResponse `json:"responses,omitempty"`
 }
 
 func registerElicitTest(s *mcpsdk.Server) {
 	mcpsdk.AddTool(s, &mcpsdk.Tool{
 		Name:        "cg_elicit_test",
-		Description: "Diagnostic: send an MCP elicitation form to the client to verify support and inspect how each field type renders and round-trips. Use the case argument to pick a field type.",
-	}, func(ctx context.Context, req *mcpsdk.CallToolRequest, in elicitInput) (*mcpsdk.CallToolResult, elicitOutput, error) {
-		kase := in.Case
-		if kase == "" {
-			kase = "all"
+		Description: "Diagnostic: send MCP elicitation forms to the client to verify support and inspect how each field type renders and round-trips. Use the case argument to pick a field type, requests to send several forms at once, and rounds to chain several input-required rounds.",
+	}, handleElicitTest)
+}
+
+func handleElicitTest(_ context.Context, req *mcpsdk.CallToolRequest, in elicitInput) (*mcpsdk.CallToolResult, elicitOutput, error) {
+	kase := in.Case
+	if kase == "" {
+		kase = "all"
+	}
+
+	out := elicitOutput{Case: kase, ProtocolVersion: negotiatedVersion(req)}
+
+	requests, rounds, err := elicitCounts(in)
+	if err != nil {
+		out.Error = err.Error()
+		return nil, out, nil
+	}
+
+	schema, msg, err := elicitSchema(kase)
+	if err != nil {
+		out.Error = err.Error()
+		return nil, out, nil
+	}
+	if in.Message != "" {
+		msg = in.Message
+	}
+	out.Schema = schema
+
+	if !elicitationAvailable(req) {
+		out.Error = "client did not advertise the elicitation capability"
+		return nil, out, nil
+	}
+	if rounds > 1 && !multiRoundTripAvailable(req) {
+		out.Error = fmt.Sprintf("rounds > 1 needs protocol %s or later, but the client negotiated %s", multiRoundTripVersion, out.ProtocolVersion)
+		return nil, out, nil
+	}
+
+	var state elicitState
+	if req.Params.RequestState != "" {
+		if err := json.Unmarshal([]byte(req.Params.RequestState), &state); err != nil {
+			out.Error = fmt.Sprintf("decoding request state: %v", err)
+			return nil, out, nil
 		}
-		schema, msg, err := elicitSchema(kase)
+	}
+	if state.Round < 0 || state.Round > rounds {
+		out.Error = fmt.Sprintf("request state names round %d, outside 0..%d", state.Round, rounds)
+		return nil, out, nil
+	}
+
+	if state.Round > 0 {
+		collected, err := collectElicitResponses(state.Round, requests, req.Params.InputResponses)
 		if err != nil {
-			return nil, elicitOutput{Case: kase, Error: err.Error()}, nil
+			out.Error = err.Error()
+			return nil, out, nil
 		}
-		if in.Message != "" {
-			msg = in.Message
+		state.Responses = append(state.Responses, collected...)
+	}
+
+	if state.Round >= rounds {
+		out.Supported = true
+		out.Responses = state.Responses
+		return nil, out, nil
+	}
+
+	state.Round++
+	encoded, err := json.Marshal(state)
+	if err != nil {
+		return nil, elicitOutput{}, fmt.Errorf("encoding request state: %w", err)
+	}
+
+	return &mcpsdk.CallToolResult{
+		InputRequests: elicitRequests(state.Round, rounds, requests, msg, schema),
+		RequestState:  string(encoded),
+	}, elicitOutput{}, nil
+}
+
+// elicitCounts applies the defaults for requests and rounds and rejects values outside
+// 1..maxElicitProbe, reporting every violation at once.
+func elicitCounts(in elicitInput) (int, int, error) {
+	requests, rounds := in.Requests, in.Rounds
+	if requests == 0 {
+		requests = 1
+	}
+	if rounds == 0 {
+		rounds = 1
+	}
+
+	var violations []string
+	if requests < 1 || requests > maxElicitProbe {
+		violations = append(violations, fmt.Sprintf("requests must be between 1 and %d, got %d", maxElicitProbe, requests))
+	}
+	if rounds < 1 || rounds > maxElicitProbe {
+		violations = append(violations, fmt.Sprintf("rounds must be between 1 and %d, got %d", maxElicitProbe, rounds))
+	}
+	if len(violations) > 0 {
+		return 0, 0, fmt.Errorf("%s", strings.Join(violations, "; "))
+	}
+
+	return requests, rounds, nil
+}
+
+// elicitRequests builds one round's input requests. Each gets a position suffix whenever there
+// is more than one form in play, so the user can tell the forms apart.
+func elicitRequests(round, rounds, requests int, msg string, schema map[string]any) mcpsdk.InputRequestMap {
+	irs := make(mcpsdk.InputRequestMap, requests)
+	for i := 1; i <= requests; i++ {
+		m := msg
+		if requests > 1 || rounds > 1 {
+			m = fmt.Sprintf("%s\n\n[round %d of %d, form %d of %d]", msg, round, rounds, i, requests)
 		}
-		res, err := req.Session.Elicit(ctx, &mcpsdk.ElicitParams{
-			Message:         msg,
+
+		irs[elicitRequestID(i)] = &mcpsdk.ElicitParams{
+			Message:         m,
 			RequestedSchema: schema,
-		})
-		if err != nil {
-			return nil, elicitOutput{Supported: false, Case: kase, Schema: schema, Error: err.Error()}, nil
 		}
-		return nil, elicitOutput{
-			Supported: true,
-			Case:      kase,
-			Schema:    schema,
-			Action:    res.Action,
-			Content:   res.Content,
-		}, nil
-	})
+	}
+
+	return irs
+}
+
+// collectElicitResponses reads one round's answers in request order. A missing or non-elicit
+// response is an error, since it means the client did not answer what was asked.
+func collectElicitResponses(round, requests int, responses mcpsdk.InputResponseMap) ([]elicitResponse, error) {
+	out := make([]elicitResponse, 0, requests)
+	for i := 1; i <= requests; i++ {
+		id := elicitRequestID(i)
+		resp, ok := responses[id]
+		if !ok {
+			return nil, fmt.Errorf("round %d: no response for input request %q", round, id)
+		}
+
+		res, ok := resp.(*mcpsdk.ElicitResult)
+		if !ok {
+			return nil, fmt.Errorf("round %d: input request %q answered with %T, want an elicitation result", round, id, resp)
+		}
+
+		out = append(out, elicitResponse{Round: round, ID: id, Action: res.Action, Content: res.Content})
+	}
+
+	return out, nil
+}
+
+func elicitRequestID(i int) string {
+	return fmt.Sprintf("form%d", i)
 }
 
 func obj(props map[string]any, required ...string) map[string]any {
@@ -187,4 +332,36 @@ func elicitCases() []string {
 	}
 	sort.Strings(cs)
 	return cs
+}
+
+// multiRoundTripVersion is the first MCP protocol version on which the client itself fulfills
+// InputRequests and retries the call. The cg_elicit_test probe needs it to chain more than one
+// round.
+//
+// On older versions the SDK's receiving middleware fulfills returned InputRequests itself with a
+// classic elicitation and reinvokes the handler exactly once. One round therefore works on every
+// version, but a second round only works from this version on.
+//
+// Protocol versions are ISO dates, so string comparison orders them.
+const multiRoundTripVersion = "2026-07-28"
+
+// negotiatedVersion reports the protocol version the session negotiated, or empty when the
+// request carries no session. The cg_elicit_test probe echoes it in its output.
+func negotiatedVersion(req *mcpsdk.CallToolRequest) string {
+	if req == nil || req.Session == nil {
+		return ""
+	}
+
+	params := req.Session.InitializeParams()
+	if params == nil {
+		return ""
+	}
+
+	return params.ProtocolVersion
+}
+
+// multiRoundTripAvailable reports whether the probe may chain more than one round, which needs a
+// client that fulfills InputRequests and retries itself.
+func multiRoundTripAvailable(req *mcpsdk.CallToolRequest) bool {
+	return negotiatedVersion(req) >= multiRoundTripVersion
 }

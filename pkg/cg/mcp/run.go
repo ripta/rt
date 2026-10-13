@@ -66,25 +66,32 @@ func registerRun(s *mcpsdk.Server, reg *runRegistry, g *gate, sessionID string) 
 		Name:        "cg_run",
 		Description: "Run a command with capture. Returns metadata, exit code, and short head-excerpts of stdout and stderr. The run is recorded on disk under $TMPDIR/cg/<id>/ and can be inspected with the other cg tools. Set wait_timeout_auto to size the wait from earlier runs of the same command. The response reports wait_timeout_ms_used. A timed_out response also carries elapsed_ms and, when earlier runs exist, history.",
 	}, func(ctx context.Context, req *mcpsdk.CallToolRequest, in runInput) (*mcpsdk.CallToolResult, runOutput, error) {
-		var el elicitor
-		if elicitationAvailable(req) {
-			el = req.Session
-		}
-		return handleRun(ctx, req, reg, g, el, sessionID, in)
+		return handleRun(ctx, reg, g, req, sessionID, in)
 	})
 }
 
-func handleRun(ctx context.Context, req *mcpsdk.CallToolRequest, reg *runRegistry, g *gate, el elicitor, sessionID string, in runInput) (*mcpsdk.CallToolResult, runOutput, error) {
+// handleRun gates and runs one command. A command that needs approval ends the call with input
+// requests and runs nothing. req is nil for callers that skip the protocol, which cannot prompt.
+func handleRun(ctx context.Context, reg *runRegistry, g *gate, req *mcpsdk.CallToolRequest, sessionID string, in runInput) (*mcpsdk.CallToolResult, runOutput, error) {
 	if len(in.Command) == 0 {
 		return nil, runOutput{}, fmt.Errorf("command must contain at least one element")
 	}
 
 	resolved, _ := model.ResolveCommand(in.Command, in.Cwd)
 
-	warning, err := g.check(ctx, "cg_run", in, resolved, el)
+	call, err := newApprovalCall(req, "cg_run", in, [][]string{in.Command}, []*model.Resolution{resolved}, in.Cwd, in.Env)
 	if err != nil {
 		return nil, runOutput{}, err
 	}
+
+	outcome, err := g.check(call)
+	if err != nil {
+		return nil, runOutput{}, err
+	}
+	if outcome.Pending != nil {
+		return outcome.Pending, runOutput{}, nil
+	}
+	warning := outcome.Warning
 
 	excerpt := in.ExcerptBytes
 	if excerpt <= 0 {

@@ -1,17 +1,14 @@
 package mcp
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
 
 	jsonschema "github.com/google/jsonschema-go/jsonschema"
-	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/pmezard/go-difflib/difflib"
 	"gopkg.in/yaml.v3"
 
-	"github.com/ripta/rt/pkg/cg/approve"
 	"github.com/ripta/rt/pkg/cg/model"
 )
 
@@ -30,114 +27,22 @@ const (
 	maxDiffBytes = 4000
 )
 
-// prompt asks the user to approve an unmatched command. Accept runs the command
-// and, when remember is checked, persists the edited prefix rule to the project
-// file and swaps it into the live matcher. Decline and cancel refuse this once.
-// The suggestion pre-fills the executable path resolved for the run, chosen by
-// RulePath so a shim keeps its invoked name, and a remembered rule is strict by
-// default; the user can edit it down to a name.
+// approvalMessage renders the human-facing prompt body: the command as it will run and the working
+// directory it runs in.
 //
-// A non-empty first return is a best-effort persistence diagnostic the caller
-// surfaces in the tool result; the command was still approved and runs.
-func (g *gate) prompt(ctx context.Context, tool string, in runInput, resolved *model.Resolution, el elicitor) (string, error) {
-	suggestion := approve.SuggestPrefix(in.Command, resolved.RulePath())
-	res, err := el.Elicit(ctx, &mcpsdk.ElicitParams{
-		Message:         approvalMessage(in),
-		RequestedSchema: approvalSchema(suggestion, g.store.Project.Path),
-	})
-	if err != nil {
-		return "", fmt.Errorf("%s refused: approval prompt failed: %w", tool, err)
-	}
-	// A declined or cancelled prompt refuses the command this once and persists
-	// nothing. Elicitation only returns form content on accept, so the remember
-	// checkbox cannot ride along with a decline to record a deny rule, and there
-	// is no way to remember a denial here. We deliberately do not add an in-form
-	// "always accept / always decline" enum to work around that: the prompt
-	// already carries Accept and Decline buttons, and duplicating that choice
-	// inside the form is clunky.
-	if res.Action != actionAccept {
-		return "", fmt.Errorf("%s refused: command was declined at the approval prompt", tool)
-	}
-
-	if remember(res.Content) {
-		tokens, err := parseRuleField(res.Content, suggestion)
-		if err != nil {
-			return "", fmt.Errorf("%s refused: %w", tool, err)
-		}
-		return g.persistRemember(ctx, tokens, el), nil
-	}
-
-	return "", nil
-}
-
-// persistRemember writes the remembered rule, resolving on-disk divergence
-// through a second prompt. Persistence is best-effort: the command was approved,
-// so a write failure or a skipped divergence still lets the run proceed. It
-// returns a diagnostic the caller surfaces in the tool result, or empty on
-// success, rather than writing to the server's stderr, which an MCP host would
-// bleed onto the screen.
-func (g *gate) persistRemember(ctx context.Context, tokens []string, el elicitor) string {
-	changed, current, err := g.store.CheckProjectDivergence()
-	if err != nil {
-		return fmt.Sprintf("skipping remember: %v", err)
-	}
-
-	strategy := approve.WriteDirect
-	if changed {
-		strategy, err = g.resolveDivergence(ctx, current, el)
-		if err != nil {
-			return fmt.Sprintf("skipping remember: %v", err)
-		}
-		if strategy < 0 {
-			return ""
-		}
-	}
-
-	if err := g.store.AppendProjectAllowPrefix(tokens, strategy); err != nil {
-		return fmt.Sprintf("remember write failed: %v", err)
-	}
-
-	return ""
-}
-
-// resolveDivergence prompts the user to reconcile an on-disk change to the
-// project file. It returns the chosen write strategy, or a negative value to
-// skip persistence. Without an elicitor, or on skip, it returns the skip signal.
-func (g *gate) resolveDivergence(ctx context.Context, current []byte, el elicitor) (approve.WriteStrategy, error) {
-	if el == nil {
-		return -1, nil
-	}
-
-	res, err := el.Elicit(ctx, &mcpsdk.ElicitParams{
-		Message:         divergenceMessage(g.store.Project.Snapshot, current, g.store.Project.Path),
-		RequestedSchema: divergenceSchema(),
-	})
-	if err != nil {
-		return -1, err
-	}
-	if res.Action != actionAccept {
-		return -1, nil
-	}
-
-	switch choice(res.Content, "choice") {
-	case divergeReloadMerge:
-		return approve.WriteReloadMerge, nil
-	case divergeOverwrite:
-		return approve.WriteOverwrite, nil
-	default:
-		return -1, nil
-	}
-}
-
-// approvalMessage renders the human-facing prompt body: the command as it will
-// run and the working directory it runs in.
-func approvalMessage(in runInput) string {
-	cwd := in.Cwd
+// A call with several approval forms leads each one with its position, so every form stands
+// alone. A lone form carries none.
+func approvalMessage(argv []string, cwd string, pos, total int) string {
 	if cwd == "" {
 		cwd = "(server cwd)"
 	}
 
-	return fmt.Sprintf("Allow this command?\n\n  %s\n\nworking directory: %s", model.EscapeArgs(in.Command), cwd)
+	var lead string
+	if total > 1 {
+		lead = fmt.Sprintf("Approval %d of %d\n\n", pos, total)
+	}
+
+	return fmt.Sprintf("%sAllow this command?\n\n  %s\n\nworking directory: %s", lead, model.EscapeArgs(argv), cwd)
 }
 
 // approvalSchema builds the elicitation form: an editable rule field pre-filled
@@ -171,11 +76,12 @@ func approvalSchema(suggestion []string, path string) *jsonschema.Schema {
 	}
 }
 
-// divergenceMessage renders the second prompt's body describing how the project
+// divergenceMessage renders the trailing form's body describing how the project
 // file as loaded differs from its current on-disk content. path is the project
-// rules file the change describes.
+// rules file the change describes. The choice covers every rule remembered in
+// the round and does nothing when no approval form has remember checked.
 func divergenceMessage(snapshot, current []byte, path string) string {
-	return fmt.Sprintf("%s changed on disk since it was loaded. How should the remembered rule be saved?\n\n%s", path, renderDivergence(snapshot, current))
+	return fmt.Sprintf("%s changed on disk since it was loaded. How should remembered rules be saved? This applies to every approval above that has remember checked.\n\n%s", path, renderDivergence(snapshot, current))
 }
 
 // renderDivergence renders a compact view of the change between the loaded
@@ -261,10 +167,11 @@ func divergenceSchema() map[string]any {
 		"choice": map[string]any{
 			"type": "string", "title": "Resolve change",
 			"description": "how to reconcile the on-disk change",
+			"default":     divergeSkip,
 			"oneOf": []any{
-				map[string]any{"const": divergeReloadMerge, "title": "Reload and merge (keep disk changes, add the rule)"},
+				map[string]any{"const": divergeReloadMerge, "title": "Reload and merge (keep disk changes, add the rules)"},
 				map[string]any{"const": divergeOverwrite, "title": "Overwrite (drop disk changes)"},
-				map[string]any{"const": divergeSkip, "title": "Skip (do not save the rule)"},
+				map[string]any{"const": divergeSkip, "title": "Skip (do not save the rules)"},
 			},
 		},
 	}, "choice")

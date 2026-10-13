@@ -18,7 +18,9 @@ type WriteStrategy int
 
 const (
 	// WriteDirect writes cg's in-memory document plus the new rule. Used when
-	// the on-disk file has not diverged from the load-time snapshot.
+	// the on-disk file has not diverged from the load-time snapshot. The write
+	// re-checks that under the store lock and fails with ErrProjectChanged
+	// rather than clobber an edit made after the caller's own check.
 	WriteDirect WriteStrategy = iota
 	// WriteOverwrite writes cg's in-memory document plus the new rule, dropping
 	// any on-disk changes made since load.
@@ -27,6 +29,10 @@ const (
 	// in-memory rules absent from disk, then appends the new rule.
 	WriteReloadMerge
 )
+
+// ErrProjectChanged reports that the project file changed on disk after the
+// snapshot a WriteDirect write was based on, so the write was not made.
+var ErrProjectChanged = fmt.Errorf("project rules changed on disk since they were loaded")
 
 // multiVerbTools are programs whose first argument is a subcommand, so a useful
 // suggested prefix covers argv[0..1] rather than argv[0] alone.
@@ -139,6 +145,16 @@ func (s *Store) AppendProjectAllowPrefix(tokens []string, strategy WriteStrategy
 func (s *Store) baseDocument(strategy WriteStrategy) (*yaml.Node, error) {
 	if strategy == WriteReloadMerge {
 		return s.reloadMergeBase()
+	}
+
+	if strategy == WriteDirect {
+		changed, _, err := s.CheckProjectDivergence()
+		if err != nil {
+			return nil, err
+		}
+		if changed {
+			return nil, ErrProjectChanged
+		}
 	}
 
 	return s.projectDocOrEmpty(), nil
