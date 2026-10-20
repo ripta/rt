@@ -1,6 +1,7 @@
 package calc
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -542,6 +543,123 @@ func TestPositionalArgsDoNotStoreHistory(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "no result for line 0") {
 		t.Fatalf("error mismatch: got %v, want substring %q", err, "no result for line 0")
+	}
+}
+
+type loadCycleTest struct {
+	name string
+
+	// files maps a file name to its contents. "{dir}" in the contents expands to the test's
+	// temp dir, so a file can .load another by absolute path.
+	files    map[string]string
+	symlinks map[string]string
+	start    string
+	wantVars []string
+
+	// wantCount pins how many lines ran, which an unguarded recursion would blow past before
+	// running out of file descriptors.
+	wantCount int
+}
+
+var loadCycleTests = []loadCycleTest{
+	{
+		name:      "self",
+		files:     map[string]string{"a.calc": ".load {dir}/a.calc\nx = 1\n"},
+		start:     "a.calc",
+		wantVars:  []string{"x"},
+		wantCount: 2,
+	},
+	{
+		name: "two files",
+		files: map[string]string{
+			"a.calc": ".load {dir}/b.calc\nx = 1\n",
+			"b.calc": ".load {dir}/a.calc\ny = 2\n",
+		},
+		start:     "a.calc",
+		wantVars:  []string{"x", "y"},
+		wantCount: 4,
+	},
+	{
+		name:      "through symlink",
+		files:     map[string]string{"a.calc": ".load {dir}/link.calc\nx = 1\n"},
+		symlinks:  map[string]string{"link.calc": "a.calc"},
+		start:     "a.calc",
+		wantVars:  []string{"x"},
+		wantCount: 2,
+	},
+}
+
+func TestLoadStopsCycles(t *testing.T) {
+	for _, test := range loadCycleTests {
+		t.Run(test.name, func(t *testing.T) {
+			dir := t.TempDir()
+
+			for name, contents := range test.files {
+				contents = strings.ReplaceAll(contents, "{dir}", dir)
+				if err := os.WriteFile(filepath.Join(dir, name), []byte(contents), 0o600); err != nil {
+					t.Fatalf("WriteFile(%s): %v", name, err)
+				}
+			}
+
+			for name, target := range test.symlinks {
+				if err := os.Symlink(filepath.Join(dir, target), filepath.Join(dir, name)); err != nil {
+					t.Fatalf("Symlink(%s): %v", name, err)
+				}
+			}
+
+			c := &Calculator{DecimalPlaces: 30}
+			if err := c.handleLoad([]string{filepath.Join(dir, test.start)}); err != nil {
+				t.Fatalf("handleLoad: %v", err)
+			}
+
+			if len(c.loading) != 0 {
+				t.Fatalf("loading stack not unwound: %v", c.loading)
+			}
+			if c.count != test.wantCount {
+				t.Fatalf("ran %d lines, want %d", c.count, test.wantCount)
+			}
+
+			for _, name := range test.wantVars {
+				if _, err := c.Evaluate(name); err != nil {
+					t.Fatalf("Evaluate(%s): %v", name, err)
+				}
+			}
+		})
+	}
+}
+
+func TestLoadRecursiveError(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "a.calc")
+	link := filepath.Join(dir, "link.calc")
+
+	if err := os.WriteFile(path, []byte("x = 1\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	if err := os.Symlink(path, link); err != nil {
+		t.Fatalf("Symlink: %v", err)
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("Stat: %v", err)
+	}
+
+	c := &Calculator{DecimalPlaces: 30}
+	c.loading = []loadingFile{{name: path, info: info}}
+
+	err = c.handleLoad([]string{link})
+	if !errors.Is(err, ErrRecursiveLoad) {
+		t.Fatalf("handleLoad error = %v, want %v", err, ErrRecursiveLoad)
+	}
+
+	want := path + " -> " + link
+	if !strings.Contains(err.Error(), want) {
+		t.Fatalf("error %q does not name the cycle %q", err, want)
+	}
+
+	if len(c.loading) != 1 {
+		t.Fatalf("rejected load changed the loading stack: %v", c.loading)
 	}
 }
 

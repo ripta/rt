@@ -22,6 +22,7 @@ import (
 var (
 	ErrInvalidMetaCommand = errors.New("invalid meta-command")
 	ErrInvalidMetaValue   = errors.New("invalid value")
+	ErrRecursiveLoad      = errors.New("recursive .load")
 )
 
 // ExecutionMode represents the context in which an expression is being evaluated
@@ -46,6 +47,14 @@ type Calculator struct {
 	count   int
 	env     *parser.Env
 	history []string
+
+	// loading holds the files of the .load calls in progress, outermost first.
+	loading []loadingFile
+}
+
+type loadingFile struct {
+	name string
+	info os.FileInfo
 }
 
 func (c *Calculator) Evaluate(expr string) (*unified.Real, error) {
@@ -401,6 +410,29 @@ func (c *Calculator) handleLoad(args []string) error {
 		return fmt.Errorf("failed to open file: %w", err)
 	}
 	defer f.Close()
+
+	info, err := f.Stat()
+	if err != nil {
+		return fmt.Errorf("failed to stat file: %w", err)
+	}
+
+	// Compare by file identity, so a symlink or another path to the same file is still caught.
+	for i, lf := range c.loading {
+		if os.SameFile(lf.info, info) {
+			var chain []string
+			for _, outer := range c.loading[i:] {
+				chain = append(chain, outer.name)
+			}
+
+			chain = append(chain, filename)
+			return fmt.Errorf("%w: %s", ErrRecursiveLoad, strings.Join(chain, " -> "))
+		}
+	}
+
+	c.loading = append(c.loading, loadingFile{name: filename, info: info})
+	defer func() {
+		c.loading = c.loading[:len(c.loading)-1]
+	}()
 
 	// Result history is never cleared by user actions, so only user variables and history reset.
 	env := parser.NewEnv()
