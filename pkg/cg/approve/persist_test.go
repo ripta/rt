@@ -116,6 +116,30 @@ func TestAppendUpdatesLiveMatcher(t *testing.T) {
 	}
 }
 
+// TestAppendKeepsEnvPermitAcrossReorder covers the env gate before and after the
+// re-sort: the live ruleset appends the remembered prefix after the permitting
+// exact rule, while the rewritten file sorts it first. Both must run.
+func TestAppendKeepsEnvPermitAcrossReorder(t *testing.T) {
+	t.Parallel()
+
+	root := writeProject(t, "version: 1\nallow:\n  - exact: [make, test]\n    permit_unsafe_envs: [PATH]\n")
+	s := loadProject(t, root)
+	if err := s.AppendProjectAllowPrefix([]string{"make"}, WriteDirect); err != nil {
+		t.Fatalf("AppendProjectAllowPrefix: %v", err)
+	}
+
+	subj := identitySubject([]string{"make", "test"})
+	env := map[string]string{"PATH": "/custom"}
+	if got := s.Ruleset().Evaluate(subj, env); got.Decision != DecisionRun {
+		t.Errorf("live decision = %v (bad envs %v), want run", got.Decision, got.BadEnvs)
+	}
+
+	reloaded := loadProject(t, root)
+	if got := reloaded.Ruleset().Evaluate(subj, env); got.Decision != DecisionRun {
+		t.Errorf("reloaded decision = %v (bad envs %v), want run", got.Decision, got.BadEnvs)
+	}
+}
+
 func TestAppendPreservesCommentsAndQuotesTokens(t *testing.T) {
 	t.Parallel()
 

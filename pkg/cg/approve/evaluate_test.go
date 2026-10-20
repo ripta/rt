@@ -18,6 +18,29 @@ type evaluateTest struct {
 	want        Decision
 	wantBadEnvs []string
 	wantRuleNil bool
+
+	// wantRuleTokens, when set, is the exact or prefix tokens of the rule the
+	// verdict reports.
+	wantRuleTokens []string
+}
+
+func permitRule(kind RuleKind, permit []string, tokens ...string) Rule {
+	r := Rule{kind: kind, PermitUnsafeEnvs: permit}
+	if kind == KindExact {
+		r.Exact = tokens
+	} else {
+		r.Prefix = tokens
+	}
+
+	return r
+}
+
+func ruleTokens(r *Rule) []string {
+	if r.kind == KindExact {
+		return r.Exact
+	}
+
+	return r.Prefix
 }
 
 var evaluateTests = []evaluateTest{
@@ -39,6 +62,62 @@ var evaluateTests = []evaluateTest{
 		allow:       []Rule{prefixRule("make")},
 		argv:        []string{"make"},
 		env:         map[string]string{"LD_PRELOAD": "evil.so"},
+		want:        DecisionRefuse,
+		wantBadEnvs: []string{"LD_PRELOAD"},
+	},
+	{
+		name: "permitting allow after an unpermitting one runs",
+		allow: []Rule{
+			permitRule(KindExact, nil, "make", "test"),
+			permitRule(KindPrefix, []string{"PATH"}, "make"),
+		},
+		argv:           []string{"make", "test"},
+		env:            map[string]string{"PATH": "/custom"},
+		want:           DecisionRun,
+		wantRuleTokens: []string{"make"},
+	},
+	{
+		name: "permitting allow before an unpermitting one runs",
+		allow: []Rule{
+			permitRule(KindPrefix, nil, "make"),
+			permitRule(KindExact, []string{"PATH"}, "make", "test"),
+		},
+		argv:           []string{"make", "test"},
+		env:            map[string]string{"PATH": "/custom"},
+		want:           DecisionRun,
+		wantRuleTokens: []string{"make", "test"},
+	},
+	{
+		name: "no matching allow permits, refuse names the first match",
+		allow: []Rule{
+			permitRule(KindPrefix, nil, "make"),
+			permitRule(KindExact, nil, "make", "test"),
+		},
+		argv:           []string{"make", "test"},
+		env:            map[string]string{"PATH": "/custom"},
+		want:           DecisionRefuse,
+		wantBadEnvs:    []string{"PATH"},
+		wantRuleTokens: []string{"make"},
+	},
+	{
+		name: "a permitting allow that does not match is ignored",
+		allow: []Rule{
+			permitRule(KindPrefix, nil, "make"),
+			permitRule(KindExact, []string{"PATH"}, "make", "install"),
+		},
+		argv:        []string{"make", "test"},
+		env:         map[string]string{"PATH": "/custom"},
+		want:        DecisionRefuse,
+		wantBadEnvs: []string{"PATH"},
+	},
+	{
+		name: "permits split across rules do not combine",
+		allow: []Rule{
+			permitRule(KindPrefix, []string{"PATH"}, "make"),
+			permitRule(KindExact, []string{"LD_PRELOAD"}, "make", "test"),
+		},
+		argv:        []string{"make", "test"},
+		env:         map[string]string{"PATH": "/custom", "LD_PRELOAD": "x.so"},
 		want:        DecisionRefuse,
 		wantBadEnvs: []string{"LD_PRELOAD"},
 	},
@@ -93,6 +172,14 @@ func TestEvaluate(t *testing.T) {
 			}
 			if tt.wantRuleNil && got.Rule != nil {
 				t.Errorf("Evaluate() rule = %v, want nil", got.Rule)
+			}
+			if tt.wantRuleTokens != nil {
+				if got.Rule == nil {
+					t.Fatalf("Evaluate() rule = nil, want %v", tt.wantRuleTokens)
+				}
+				if !slices.Equal(ruleTokens(got.Rule), tt.wantRuleTokens) {
+					t.Errorf("Evaluate() rule = %v, want %v", ruleTokens(got.Rule), tt.wantRuleTokens)
+				}
 			}
 		})
 	}

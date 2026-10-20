@@ -249,6 +249,25 @@ func TestLoadRestrictCrossLayer(t *testing.T) {
 	}
 }
 
+// TestLoadEnvPermitCrossLayer covers a project allow that permits an override
+// shadowed by an earlier global allow that matches the same command without one.
+func TestLoadEnvPermitCrossLayer(t *testing.T) {
+	t.Parallel()
+
+	global := writeGlobal(t, "version: 1\nallow:\n  - prefix: [make]\n")
+	root := writeProject(t, "version: 1\nallow:\n  - exact: [make, test]\n    permit_unsafe_envs: [PATH]\n")
+
+	s, err := Load(LoadOptions{GlobalPath: global, ProjectRoot: root})
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+
+	got := s.Ruleset().Evaluate(identitySubject([]string{"make", "test"}), map[string]string{"PATH": "/custom"})
+	if got.Decision != DecisionRun {
+		t.Errorf("decision = %v (bad envs %v), want run via the project permit", got.Decision, got.BadEnvs)
+	}
+}
+
 func TestLoadCapturesSnapshot(t *testing.T) {
 	t.Parallel()
 

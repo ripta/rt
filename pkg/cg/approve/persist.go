@@ -305,7 +305,8 @@ func buildRuleEntry(rule *Rule, isDeny bool) *yaml.Node {
 // command text and exact duplicates are dropped, keeping the first occurrence so
 // its comments and any message survive. Rule order does not affect matching,
 // which refuses on any deny match and runs on any allow match, so reordering is
-// safe.
+// safe. The env gate keeps this true by accepting any matching allow rule that
+// permits the override.
 func canonicalizeRuleSeqs(root *yaml.Node) {
 	for _, key := range []string{"deny", "allow"} {
 		if seq := findSeq(root, key); seq != nil {
