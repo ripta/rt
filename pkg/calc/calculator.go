@@ -402,8 +402,14 @@ func (c *Calculator) handleLoad(args []string) error {
 	}
 	defer f.Close()
 
+	// Result history is never cleared by user actions, so only user variables and history reset.
+	env := parser.NewEnv()
+	if c.env != nil {
+		env.CopyResults(c.env)
+	}
+
 	c.history = nil
-	c.env = parser.NewEnv()
+	c.env = env
 
 	scanner := bufio.NewScanner(f)
 	lineNum := 0

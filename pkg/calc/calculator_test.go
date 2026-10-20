@@ -2,7 +2,10 @@ package calc
 
 import (
 	"fmt"
+	"io"
 	"math"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -471,6 +474,74 @@ func TestREPLResultHistorySurvivesErrors(t *testing.T) {
 	}
 	if got := approxFloat(t, res); math.Abs(got-20) > 1e-9 {
 		t.Fatalf("$2 = %v, want 20", got)
+	}
+}
+
+func TestREPLResultAssignRejected(t *testing.T) {
+	c := &Calculator{DecimalPlaces: 30}
+
+	if err := c.processLine("$3 = 1", ModeREPL, 0); err == nil {
+		t.Fatalf("expected error assigning to undefined $3")
+	} else if !strings.Contains(err.Error(), "cannot assign to constant") {
+		t.Fatalf("error mismatch: got %v, want substring %q", err, "cannot assign to constant")
+	}
+
+	if _, err := c.Evaluate("$3"); err == nil || !strings.Contains(err.Error(), "no result for line 3") {
+		t.Fatalf("Evaluate($3) error = %v, want substring %q", err, "no result for line 3")
+	}
+}
+
+func TestLoadKeepsResultHistory(t *testing.T) {
+	c := &Calculator{DecimalPlaces: 30}
+
+	if err := c.processLine("5", ModeREPL, 0); err != nil {
+		t.Fatalf("processLine(5): %v", err)
+	}
+	if err := c.processLine("x = 9", ModeREPL, 0); err != nil {
+		t.Fatalf("processLine(x = 9): %v", err)
+	}
+
+	path := filepath.Join(t.TempDir(), "session.calc")
+	if err := os.WriteFile(path, []byte("y = 2\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	if err := c.handleLoad([]string{path}); err != nil {
+		t.Fatalf("handleLoad: %v", err)
+	}
+
+	res, err := c.Evaluate("$0")
+	if err != nil {
+		t.Fatalf("Evaluate($0) after load: %v", err)
+	}
+	if got := approxFloat(t, res); math.Abs(got-5) > 1e-9 {
+		t.Fatalf("$0 = %v, want 5", got)
+	}
+
+	if err := c.processLine("$0 = 1", ModeREPL, 0); err == nil {
+		t.Fatalf("expected $0 to stay immutable after load")
+	}
+
+	if _, err := c.Evaluate("x"); err == nil {
+		t.Fatalf("expected user variable x to be cleared by load")
+	}
+	if _, err := c.Evaluate("y"); err != nil {
+		t.Fatalf("Evaluate(y) from loaded file: %v", err)
+	}
+}
+
+func TestPositionalArgsDoNotStoreHistory(t *testing.T) {
+	cmd := NewCommand()
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"2 + 3", "$0"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatalf("expected $0 to be undefined after a positional expression")
+	}
+	if !strings.Contains(err.Error(), "no result for line 0") {
+		t.Fatalf("error mismatch: got %v, want substring %q", err, "no result for line 0")
 	}
 }
 
