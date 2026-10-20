@@ -103,8 +103,8 @@ func (c *Calculator) processLine(expr string, mode ExecutionMode, lineNum int) e
 		return err
 	}
 
-	if mode == ModeREPL {
-		c.env.SetConstant(fmt.Sprintf("$%d", c.count), res)
+	if mode == ModeREPL || mode == ModeSTDIN {
+		c.bindResult(res)
 	}
 
 	// ModeLoad adds to history after successful evaluation
@@ -118,6 +118,11 @@ func (c *Calculator) processLine(expr string, mode ExecutionMode, lineNum int) e
 	}
 
 	return nil
+}
+
+// bindResult binds res as the constant $N for the current line number.
+func (c *Calculator) bindResult(res *unified.Real) {
+	c.env.SetConstant(fmt.Sprintf("$%d", c.count), res)
 }
 
 // reportError reports an error using the appropriate method for the execution mode

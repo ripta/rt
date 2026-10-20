@@ -32,7 +32,9 @@ func NewCommand() *cobra.Command {
 						return err
 					}
 
+					c.bindResult(res)
 					c.DisplayResult(res)
+					c.count++
 				}
 				return nil
 			}

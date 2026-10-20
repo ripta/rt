@@ -408,19 +408,48 @@ func TestREPLCrossReference(t *testing.T) {
 	}
 }
 
-func TestSTDINDoesNotStoreHistory(t *testing.T) {
-	c := &Calculator{DecimalPlaces: 30}
+type stdinBindingTest struct {
+	name  string
+	lines []string
+	ref   string
+	want  string
+}
 
-	if err := c.processLine("42", ModeSTDIN, 0); err != nil {
-		t.Fatalf("processLine: %v", err)
-	}
+var stdinBindingTests = []stdinBindingTest{
+	{
+		name:  "first line binds $0",
+		lines: []string{"42", "$0 + 1"},
+		ref:   "$1",
+		want:  "43",
+	},
+	{
+		name:  "failed line still takes a number",
+		lines: []string{"1/0", "5", "$1 * 2"},
+		ref:   "$2",
+		want:  "10",
+	},
+}
 
-	_, err := c.Evaluate("$0")
-	if err == nil {
-		t.Fatalf("expected error for $0 in STDIN mode")
-	}
-	if !strings.Contains(err.Error(), "no result for line 0") {
-		t.Fatalf("error mismatch: got %v, want substring %q", err, "no result for line 0")
+func TestSTDINBindsResults(t *testing.T) {
+	for _, test := range stdinBindingTests {
+		t.Run(test.name, func(t *testing.T) {
+			c := &Calculator{DecimalPlaces: 30}
+
+			captureStdout(t, func() {
+				for _, line := range test.lines {
+					// Some lines fail on purpose. Only the resulting bindings matter.
+					_ = c.processLine(line, ModeSTDIN, 0)
+				}
+			})
+
+			res, err := c.Evaluate(test.ref)
+			if err != nil {
+				t.Fatalf("Evaluate(%s): %v", test.ref, err)
+			}
+			if got := constructive.Text(res.Constructive(), 0, 10); got != test.want {
+				t.Fatalf("%s mismatch: got %s, want %s", test.ref, got, test.want)
+			}
+		})
 	}
 }
 
@@ -531,19 +560,83 @@ func TestLoadKeepsResultHistory(t *testing.T) {
 	}
 }
 
-func TestPositionalArgsDoNotStoreHistory(t *testing.T) {
-	cmd := NewCommand()
-	cmd.SetOut(io.Discard)
-	cmd.SetErr(io.Discard)
-	cmd.SetArgs([]string{"2 + 3", "$0"})
+type positionalBindingTest struct {
+	name    string
+	args    []string
+	wantOut string
+	wantErr string
+}
 
-	err := cmd.Execute()
-	if err == nil {
-		t.Fatalf("expected $0 to be undefined after a positional expression")
+var positionalBindingTests = []positionalBindingTest{
+	{
+		name:    "later argument references earlier",
+		args:    []string{"2+3", "$0*2"},
+		wantOut: "5\n10\n",
+	},
+	{
+		name:    "reference to a later index fails",
+		args:    []string{"$1", "2"},
+		wantErr: "no result for line 1",
+	},
+	{
+		name:    "stops at the first error",
+		args:    []string{"1", "$5", "7"},
+		wantOut: "1\n",
+		wantErr: "no result for line 5",
+	},
+}
+
+func TestPositionalArgsBindResults(t *testing.T) {
+	for _, test := range positionalBindingTests {
+		t.Run(test.name, func(t *testing.T) {
+			cmd := NewCommand()
+			cmd.SetOut(io.Discard)
+			cmd.SetErr(io.Discard)
+			cmd.SetArgs(test.args)
+
+			var err error
+			out := captureStdout(t, func() { err = cmd.Execute() })
+			if out != test.wantOut {
+				t.Fatalf("stdout mismatch: got %q, want %q", out, test.wantOut)
+			}
+
+			if test.wantErr == "" {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), test.wantErr) {
+				t.Fatalf("error mismatch: got %v, want substring %q", err, test.wantErr)
+			}
+		})
 	}
-	if !strings.Contains(err.Error(), "no result for line 0") {
-		t.Fatalf("error mismatch: got %v, want substring %q", err, "no result for line 0")
+}
+
+// captureStdout returns what fn wrote to os.Stdout. Results are printed there, not to the
+// command's writer.
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
 	}
+
+	orig := os.Stdout
+	os.Stdout = w
+	defer func() { os.Stdout = orig }()
+
+	done := make(chan string)
+	go func() {
+		b, _ := io.ReadAll(r)
+		done <- string(b)
+	}()
+
+	fn()
+	w.Close()
+
+	return <-done
 }
 
 type loadCycleTest struct {
