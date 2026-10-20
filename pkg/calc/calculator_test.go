@@ -87,6 +87,11 @@ var handleMetaCommandTests = []handleMetaCommandTest{
 		cmd:     ".show bogus",
 		wantErr: true,
 	},
+	{
+		name:    ".e alias for .examples",
+		cmd:     ".e",
+		wantErr: false,
+	},
 }
 
 func TestHandleMetaCommand(t *testing.T) {
@@ -122,6 +127,17 @@ func TestHandleShowTopics(t *testing.T) {
 	}
 	if err := c.handleShow([]string{"bogus"}); err == nil {
 		t.Error("handleShow(bogus) = nil, want error")
+	}
+}
+
+func TestExamplesEvaluate(t *testing.T) {
+	t.Parallel()
+
+	c := &Calculator{DecimalPlaces: 30}
+	for _, ex := range examples {
+		if err := c.processLine(ex.Expr, ModeREPL, 0); err != nil {
+			t.Errorf("example %q: %v", ex.Expr, err)
+		}
 	}
 }
 
