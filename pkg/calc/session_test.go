@@ -2,6 +2,7 @@ package calc
 
 import (
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -183,6 +184,84 @@ func TestFormatMetaCommand(t *testing.T) {
 			t.Errorf("handleMetaCommand(%q) = nil, want error", cmd)
 		}
 	}
+}
+
+type loadFormatTest struct {
+	Name   string
+	Format string
+}
+
+var loadFormatTests = []loadFormatTest{
+	{Name: "version 2 is accepted", Format: ".format version=2 saved=2026-10-19T00:00:00Z"},
+}
+
+func TestLoadFormatLine(t *testing.T) {
+	for _, test := range loadFormatTests {
+		t.Run(test.Name, func(t *testing.T) {
+			content := strings.Join([]string{test.Format, ".set decimal_places 5", "2+3", "4*5"}, "\n") + "\n"
+			path := filepath.Join(t.TempDir(), "session.txt")
+			if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+				t.Fatalf("writing session file: %v", err)
+			}
+
+			c := &Calculator{DecimalPlaces: 30}
+
+			var loadErr error
+			stderr := captureStderr(t, func() {
+				captureStdout(t, func() {
+					loadErr = c.handleLoad([]string{path})
+				})
+			})
+
+			if loadErr != nil {
+				t.Fatalf("handleLoad() = %v, want nil", loadErr)
+			}
+
+			if stderr != "" {
+				t.Errorf("stderr = %q, want empty", stderr)
+			}
+
+			if c.DecimalPlaces != 5 {
+				t.Errorf("DecimalPlaces = %d, want 5 from the .set line", c.DecimalPlaces)
+			}
+
+			want := []string{"2+3", "4*5"}
+
+			var got []string
+			for _, entry := range c.history {
+				got = append(got, entry.Expr)
+			}
+
+			if strings.Join(got, "\n") != strings.Join(want, "\n") {
+				t.Errorf("history = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+// captureStderr runs fn and returns what it wrote to os.Stderr.
+func captureStderr(t *testing.T, fn func()) string {
+	t.Helper()
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+
+	orig := os.Stderr
+	os.Stderr = w
+	defer func() { os.Stderr = orig }()
+
+	done := make(chan string)
+	go func() {
+		b, _ := io.ReadAll(r)
+		done <- string(b)
+	}()
+
+	fn()
+	w.Close()
+
+	return <-done
 }
 
 // saveSession runs lines at the prompt, saves the session, and returns the saved file's lines.
