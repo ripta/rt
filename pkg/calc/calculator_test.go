@@ -96,6 +96,26 @@ var handleMetaCommandTests = []handleMetaCommandTest{
 		cmd:     ".e",
 		wantErr: false,
 	},
+	{
+		name:    ".next moves forward",
+		cmd:     ".next 5",
+		wantErr: false,
+	},
+	{
+		name:    ".n alias for .next",
+		cmd:     ".n 5",
+		wantErr: false,
+	},
+	{
+		name:    ".next to the current line",
+		cmd:     ".next 0",
+		wantErr: true,
+	},
+	{
+		name:    ".next without a number",
+		cmd:     ".next",
+		wantErr: true,
+	},
 }
 
 func TestHandleMetaCommand(t *testing.T) {
