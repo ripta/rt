@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/elk-language/go-prompt"
 	"github.com/ripta/reals/pkg/constructive"
@@ -192,6 +193,10 @@ func init() {
 	metaCommands = map[string]metaCommandFunc{
 		".help": func(c *Calculator, args []string) error {
 			c.handleHelp()
+			return nil
+		},
+		".examples": func(c *Calculator, args []string) error {
+			c.handleExamples()
 			return nil
 		},
 		".set": func(c *Calculator, args []string) error {
@@ -496,6 +501,7 @@ func (c *Calculator) handleHelp() {
 	fmt.Println("  .toggle <setting>       - Toggle a boolean setting")
 	fmt.Println("  .save [path]            - Save session (default: ~/.local/state/rt/calc/session.txt)")
 	fmt.Println("  .load [path]            - Load session (default: ~/.local/state/rt/calc/session.txt)")
+	fmt.Println("  .examples               - Show example expressions")
 	fmt.Println("  .help                   - Show this help message")
 	fmt.Println()
 	fmt.Println("Commands accept any unambiguous prefix, e.g., .se for .set, .sh for .show)")
@@ -503,6 +509,63 @@ func (c *Calculator) handleHelp() {
 	fmt.Println("Available settings:")
 	for name, setting := range settingsRegistry {
 		fmt.Printf("  %-20s - %s\n", name, setting.Description)
+	}
+}
+
+type example struct {
+	Group string
+	Expr  string
+	Note  string
+}
+
+// examples are listed in order, and later entries may depend on earlier ones: `PI * r ** 2`
+// uses the `r` assigned before it, and `$0` refers to the first result. Tests evaluate the
+// whole list in one REPL session, so every entry must stay valid syntax.
+var examples = []example{
+	{"Arithmetic", "1 + 2 * 3", "precedence: * and / before + and -"},
+	{"Arithmetic", "(1 + 2) * 3", "parentheses group"},
+	{"Arithmetic", "22 / 7", "exact rationals, shown to the configured decimal places"},
+	{"Arithmetic", "17 % 5", "modulo"},
+	{"Arithmetic", "2 ** 128", "exponentiation, arbitrary precision"},
+	{"Arithmetic", "1 << 8", "bit shifts: << and >>"},
+	{"Arithmetic", "1_000_000 * 3", "underscores separate digits"},
+	{"Arithmetic", "√2", "square root operator"},
+
+	{"Constants", "PI * 2", "also E, PHI, SQRT2, LN2"},
+
+	{"Functions", "sqrt(2)", "C-style calls; see .show functions"},
+	{"Functions", "log(8, 2)", "multiple arguments separated by commas"},
+	{"Functions", "max(3, 7, 5)", "variadic"},
+	{"Functions", "sin(deg2rad(30))", "trig uses radians; nest calls to convert"},
+
+	{"Variables", "r = 3", "assign a name"},
+	{"Variables", "PI * r ** 2", "use it later"},
+	{"Variables", "$0 + 1", "$N is the result of line N"},
+
+	{"Comments", `"radius" 3 * 2`, "a quoted string annotates the value after it"},
+}
+
+// handleExamples prints example expressions grouped by topic.
+func (c *Calculator) handleExamples() {
+	width := 0
+	for _, ex := range examples {
+		if n := utf8.RuneCountInString(ex.Expr); n > width {
+			width = n
+		}
+	}
+
+	group := ""
+	for _, ex := range examples {
+		if ex.Group != group {
+			if group != "" {
+				fmt.Println()
+			}
+			group = ex.Group
+			fmt.Printf("%s:\n", group)
+		}
+
+		pad := width - utf8.RuneCountInString(ex.Expr)
+		fmt.Printf("  %s%s  # %s\n", ex.Expr, strings.Repeat(" ", pad), ex.Note)
 	}
 }
 

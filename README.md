@@ -79,7 +79,8 @@ calc:000/ Construction: Multiply(Inverse(Named("1", Int(1))), Multiply(Int(22), 
 3.142857142857142857142857142857
 ```
 
-Sessions can be saved and loaded with `.save` and `.load`.
+Sessions can be saved and loaded with `.save` and `.load`. Run `.examples` in
+the REPL for a tour of the expression syntax.
 
 Functions are called with C-style syntax, e.g. `sin(0)`, `log(8, 2)`, or
 `atan2(1, 1)`. The library, also listed in the REPL with `.show functions`:
