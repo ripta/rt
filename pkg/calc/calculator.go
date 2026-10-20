@@ -506,7 +506,7 @@ func (c *Calculator) handleHelp() {
 	fmt.Println("  .show functions         - List available functions")
 	fmt.Println("  .toggle <setting>       - Toggle a boolean setting")
 	fmt.Println("  .save [path]            - Save session (default: ~/.local/state/rt/calc/session.txt)")
-	fmt.Println("  .load [path]            - Load session (default: ~/.local/state/rt/calc/session.txt)")
+	fmt.Println("  .load [path]            - Load session, keeping $N results (default: ~/.local/state/rt/calc/session.txt)")
 	fmt.Println("  .examples               - Show example expressions")
 	fmt.Println("  .help                   - Show this help message")
 	fmt.Println()
