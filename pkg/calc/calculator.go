@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime/debug"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -23,6 +24,7 @@ var (
 	ErrInvalidMetaCommand = errors.New("invalid meta-command")
 	ErrInvalidMetaValue   = errors.New("invalid value")
 	ErrRecursiveLoad      = errors.New("recursive .load")
+	ErrInvalidFormat      = errors.New("invalid .format")
 )
 
 // ExecutionMode represents the context in which an expression is being evaluated
@@ -46,10 +48,19 @@ type Calculator struct {
 
 	count   int
 	env     *parser.Env
-	history []string
+	history []historyEntry
+
+	// now supplies the timestamp .save writes. A nil now means time.Now.
+	now func() time.Time
 
 	// loading holds the files of the .load calls in progress, outermost first.
 	loading []loadingFile
+}
+
+// historyEntry is an expression that ran, with the session line number it ran on.
+type historyEntry struct {
+	Expr string
+	Line int
 }
 
 type loadingFile struct {
@@ -94,7 +105,7 @@ func (c *Calculator) processLine(expr string, mode ExecutionMode, lineNum int) e
 
 	// ModeREPL and ModeSTDIN adds to history before evaluation
 	if mode == ModeREPL || mode == ModeSTDIN {
-		c.history = append(c.history, expr)
+		c.history = append(c.history, historyEntry{Expr: expr, Line: c.count})
 	}
 
 	res, err := c.Evaluate(expr)
@@ -109,7 +120,7 @@ func (c *Calculator) processLine(expr string, mode ExecutionMode, lineNum int) e
 
 	// ModeLoad adds to history after successful evaluation
 	if mode == ModeLoad {
-		c.history = append(c.history, expr)
+		c.history = append(c.history, historyEntry{Expr: expr, Line: c.count})
 	}
 
 	// Display results (except in Load mode)
@@ -228,6 +239,10 @@ func init() {
 		".load": func(c *Calculator, args []string) error {
 			return c.handleLoad(args)
 		},
+		".format": func(c *Calculator, args []string) error {
+			_, err := parseFormat(args)
+			return err
+		},
 	}
 }
 
@@ -312,6 +327,51 @@ func (c *Calculator) handleToggle(args []string) error {
 	return nil
 }
 
+const (
+	// currentFormatVersion is the session file format .save writes. A file with no .format is version 1.
+	currentFormatVersion = 2
+	minFormatVersion     = 1
+)
+
+// sessionFormat holds what a .format line declares.
+type sessionFormat struct {
+	Version int
+}
+
+// parseFormat parses the key=value arguments of .format. Unknown keys are ignored, so new metadata
+// can be added without a version bump.
+func parseFormat(args []string) (sessionFormat, error) {
+	var format sessionFormat
+
+	for _, arg := range args {
+		key, value, ok := strings.Cut(arg, "=")
+		if !ok {
+			return format, fmt.Errorf("%w: expected key=value, got %q", ErrInvalidFormat, arg)
+		}
+
+		if key != "version" {
+			continue
+		}
+
+		v, err := strconv.Atoi(value)
+		if err != nil || v < minFormatVersion {
+			return format, fmt.Errorf("%w: malformed version %q", ErrInvalidFormat, value)
+		}
+
+		if v > currentFormatVersion {
+			return format, fmt.Errorf("%w: version %d is newer than the supported version %d", ErrInvalidFormat, v, currentFormatVersion)
+		}
+
+		format.Version = v
+	}
+
+	if format.Version == 0 {
+		return format, fmt.Errorf("%w: missing version", ErrInvalidFormat)
+	}
+
+	return format, nil
+}
+
 const defaultFilename = "session.txt"
 
 // getSessionPath resolves the session file path based on user input.
@@ -370,11 +430,17 @@ func (c *Calculator) handleSave(args []string) error {
 	w := bufio.NewWriter(f)
 	defer w.Flush()
 
-	fmt.Fprintf(w, "# Calculator Session\n")
-	fmt.Fprintf(w, "# Saved: %s\n\n", time.Now().Format("2006-01-02 15:04:05"))
+	fmt.Fprintf(w, ".format version=%d saved=%s\n", currentFormatVersion, c.timestamp().UTC().Format(time.RFC3339))
 
-	// Write settings as .set commands
-	for name, setting := range settingsRegistry {
+	names := make([]string, 0, len(settingsRegistry))
+	for name := range settingsRegistry {
+		names = append(names, name)
+	}
+
+	sort.Strings(names)
+
+	for _, name := range names {
+		setting := settingsRegistry[name]
 		switch setting.Type {
 		case SettingTypeBool:
 			value := setting.GetBool(c)
@@ -389,13 +455,27 @@ func (c *Calculator) handleSave(args []string) error {
 		fmt.Fprintln(w)
 	}
 
-	// Write expression history
-	for _, expr := range c.history {
-		fmt.Fprintln(w, expr)
+	// The header lines are deliberately not counted, so the first entry is compared against line 0.
+	want := 0
+	for _, entry := range c.history {
+		if entry.Line != want {
+			fmt.Fprintf(w, ".next %d\n", entry.Line)
+		}
+
+		fmt.Fprintln(w, entry.Expr)
+		want = entry.Line + 1
 	}
 
 	fmt.Printf("Session saved to %s\n", filename)
 	return nil
+}
+
+func (c *Calculator) timestamp() time.Time {
+	if c.now != nil {
+		return c.now()
+	}
+
+	return time.Now()
 }
 
 // handleLoad loads a session from a file after first clearing current state.
@@ -544,6 +624,7 @@ func (c *Calculator) handleHelp() {
 	fmt.Println("  .toggle <setting>       - Toggle a boolean setting")
 	fmt.Println("  .save [path]            - Save session (default: ~/.local/state/rt/calc/session.txt)")
 	fmt.Println("  .load [path]            - Load session, keeping $N results (default: ~/.local/state/rt/calc/session.txt)")
+	fmt.Println("  .format version=<n>     - Declare the session file format version, as the first line of a saved file")
 	fmt.Println("  .examples               - Show example expressions")
 	fmt.Println("  .help                   - Show this help message")
 	fmt.Println()
