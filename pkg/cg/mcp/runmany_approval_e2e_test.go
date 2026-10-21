@@ -97,7 +97,7 @@ func TestRunManyBatchesOneHundredCommandsInOneRound(t *testing.T) {
 			listed := 0
 			positions := make(map[string]bool, len(messages))
 			for _, m := range messages {
-				positions[strings.SplitN(m, "\n", 2)[0]] = true
+				positions[strings.SplitN(m, ":", 2)[0]] = true
 
 				n := len(listedCommands(m))
 				if n > maxFormCommands {
@@ -208,7 +208,7 @@ func TestApprovalPositionText(t *testing.T) {
 
 				messages := script.messages()
 				for _, want := range test.WantPositions {
-					if !slicesAnyPrefix(messages, want+"\n\nAllow this command?") {
+					if !slicesAnyPrefix(messages, want+": allow this command in ") {
 						t.Errorf("no form started with %q in %q", want, messages)
 					}
 				}

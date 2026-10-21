@@ -48,7 +48,15 @@ var approvalMessageTests = []approvalMessageTest{
 		Cwd:   "/work",
 		Pos:   1,
 		Total: 1,
-		Want:  "Allow this command?\n\n  echo 'a b'\n\nworking directory: /work",
+		Want:  "Allow this command in /work?\necho 'a b'",
+	},
+	{
+		Name:  "one command with a position",
+		Argvs: [][]string{{"echo", "a"}},
+		Cwd:   "/work",
+		Pos:   1,
+		Total: 2,
+		Want:  "Approval 1 of 2: allow this command in /work?\necho a",
 	},
 	{
 		Name:  "several commands with a position",
@@ -56,15 +64,92 @@ var approvalMessageTests = []approvalMessageTest{
 		Cwd:   "/work",
 		Pos:   2,
 		Total: 3,
-		Want:  "Approval 2 of 3\n\nAllow these 2 commands?\n\n  go test ./a\n  go test ./b\n\nworking directory: /work",
+		Want:  "Approval 2 of 3: allow 2 commands in /work?\ngo test ./a\ngo test ./b",
 	},
 	{
 		Name:  "no working directory names the server's",
 		Argvs: [][]string{{"echo"}},
 		Pos:   1,
 		Total: 1,
-		Want:  "Allow this command?\n\n  echo\n\nworking directory: (server cwd)",
+		Want:  "Allow this command in (server cwd)?\necho",
 	},
+}
+
+type approvalControlTest struct {
+	Name  string
+	Argvs [][]string
+	Cwd   string
+
+	WantContains []string
+}
+
+var approvalControlTests = []approvalControlTest{
+	{
+		Name:         "a newline in an argument",
+		Argvs:        [][]string{{"sh", "-c", "true\nrm -rf x"}, {"echo", "b"}},
+		Cwd:          "/work",
+		WantContains: []string{`sh -c $'true\nrm -rf x'`},
+	},
+	{
+		Name:         "an escape in an argument",
+		Argvs:        [][]string{{"printf", "\x1b[2J\x7f\u0085"}, {"echo", "b"}},
+		Cwd:          "/work",
+		WantContains: []string{`printf $'\x1b[2J\x7f\u0085'`},
+	},
+	{
+		Name:         "a newline in the working directory",
+		Argvs:        [][]string{{"echo", "a"}, {"echo", "b"}},
+		Cwd:          "/work\nrm -rf x",
+		WantContains: []string{`in $'/work\nrm -rf x'?`},
+	},
+	{
+		Name:         "quotes and backslashes around a control character",
+		Argvs:        [][]string{{"echo", "it's\\\t"}, {"echo", "b"}},
+		Cwd:          "/work",
+		WantContains: []string{`echo $'it\'s\\\t'`},
+	},
+}
+
+func TestApprovalMessageKeepsControlCharactersOnOneLine(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range approvalControlTests {
+		t.Run(test.Name, func(t *testing.T) {
+			t.Parallel()
+
+			msg := approvalMessage(test.Argvs, test.Cwd, 1, 2)
+			if got := countLines(msg); got != visibleMessageLines {
+				t.Errorf("form has %d lines, want %d:\n%q", got, visibleMessageLines, msg)
+			}
+			if strings.ContainsAny(msg, "\x1b\x7f\r\t") || strings.Contains(msg, "\u0085") {
+				t.Errorf("form carries a raw control character: %q", msg)
+			}
+			for _, want := range test.WantContains {
+				if !strings.Contains(msg, want) {
+					t.Errorf("form missing %q:\n%q", want, msg)
+				}
+			}
+		})
+	}
+}
+
+// TestApprovalMessageFitsVisibleLines pins the layout to the client's visible-line cap. A fuller
+// form would hide its last commands from the person approving them.
+func TestApprovalMessageFitsVisibleLines(t *testing.T) {
+	t.Parallel()
+
+	argvs := make([][]string, maxFormCommands)
+	for i := range argvs {
+		argvs[i] = []string{"echo", "a"}
+	}
+
+	msg := approvalMessage(argvs, "/work", 1, 2)
+	if got := countLines(msg); got != visibleMessageLines {
+		t.Errorf("a full form has %d lines, want %d:\n%s", got, visibleMessageLines, msg)
+	}
+	if strings.Contains(msg, "\n\n") {
+		t.Errorf("a form has a blank line, which spends a visible line:\n%s", msg)
+	}
 }
 
 func TestApprovalMessage(t *testing.T) {

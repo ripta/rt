@@ -192,18 +192,20 @@ func TestElicitProbeApprovalForm(t *testing.T) {
 		if got := len(listedCommands(m)); got != 4 {
 			t.Errorf("form lists %d commands, want 4:\n%s", got, m)
 		}
-		if !strings.Contains(m, "Allow these 4 commands?") {
-			t.Errorf("form lacks the plural wording:\n%s", m)
+		if !strings.Contains(m, ": allow 4 commands in /Users/example/projects/service?\n") {
+			t.Errorf("form lacks the header:\n%s", m)
 		}
-		if !strings.Contains(m, "working directory: /"+strings.Repeat("0123456789", 12)) {
-			t.Errorf("form lacks the wide line:\n%s", m)
+		for _, line := range strings.Split(m, "\n") {
+			if len(line) > 80 {
+				t.Errorf("line is %d columns, want the default form to fit in 80:\n%s", len(line), m)
+			}
 		}
 	}
 
-	positions := []string{messages[0][:strings.Index(messages[0], "\n")], messages[1][:strings.Index(messages[1], "\n")]}
-	slices.Sort(positions)
-	if want := []string{"Approval 1 of 2", "Approval 2 of 2"}; !slices.Equal(positions, want) {
-		t.Errorf("leads = %q, want %q", positions, want)
+	leads := []string{strings.SplitN(messages[0], ":", 2)[0], strings.SplitN(messages[1], ":", 2)[0]}
+	slices.Sort(leads)
+	if want := []string{"Approval 1 of 2", "Approval 2 of 2"}; !slices.Equal(leads, want) {
+		t.Errorf("leads = %q, want %q", leads, want)
 	}
 
 	for _, wire := range []string{`[/usr/local/go/bin/go, test]`, `Remember this rule`, `.cg.yaml`} {
@@ -213,6 +215,45 @@ func TestElicitProbeApprovalForm(t *testing.T) {
 	}
 }
 
+func TestElicitProbeApprovalFormWideVariants(t *testing.T) {
+	var mu sync.Mutex
+	var message string
+
+	handler := func(_ context.Context, req *mcpsdk.ElicitRequest) (*mcpsdk.ElicitResult, error) {
+		mu.Lock()
+		message = req.Params.Message
+		mu.Unlock()
+
+		return &mcpsdk.ElicitResult{Action: "accept", Content: map[string]any{"remember": false}}, nil
+	}
+
+	t.Run("wide command", func(t *testing.T) {
+		params := &mcpsdk.CallToolParams{Name: "cg_elicit_test", Arguments: map[string]any{"case": approvalFormCase, "commands": 2, "wide_command": true}}
+		callElicitProbe(t, "", params, handler)
+
+		lines := strings.Split(message, "\n")
+		if len(lines) != visibleMessageLines {
+			t.Fatalf("message has %d lines, want %d:\n%s", len(lines), visibleMessageLines, message)
+		}
+		if len(lines[1]) <= 80 {
+			t.Errorf("first command is %d columns, want more than 80", len(lines[1]))
+		}
+		if len(lines[2]) > 80 {
+			t.Errorf("second command is %d columns, want it to fit in 80", len(lines[2]))
+		}
+	})
+
+	t.Run("long cwd", func(t *testing.T) {
+		params := &mcpsdk.CallToolParams{Name: "cg_elicit_test", Arguments: map[string]any{"case": approvalFormCase, "commands": 2, "long_cwd": true}}
+		callElicitProbe(t, "", params, handler)
+
+		header, _, _ := strings.Cut(message, "\n")
+		if len(header) <= 80 || !strings.Contains(header, probeRuler) {
+			t.Errorf("header = %q, want it wider than 80 columns with the ruler", header)
+		}
+	})
+}
+
 func TestElicitProbeApprovalFormRejectsBadCounts(t *testing.T) {
 	params := &mcpsdk.CallToolParams{Name: "cg_elicit_test", Arguments: map[string]any{"case": approvalFormCase, "commands": maxProbeCommands + 1}}
 	out := callElicitProbe(t, "", params, func(context.Context, *mcpsdk.ElicitRequest) (*mcpsdk.ElicitResult, error) {
@@ -220,7 +261,7 @@ func TestElicitProbeApprovalFormRejectsBadCounts(t *testing.T) {
 		return &mcpsdk.ElicitResult{Action: "decline"}, nil
 	})
 
-	if want := "commands must be between 1 and 20, got 21"; out.Error != want {
+	if want := "commands must be between 1 and 10, got 11"; out.Error != want {
 		t.Errorf("Error = %q, want %q", out.Error, want)
 	}
 }

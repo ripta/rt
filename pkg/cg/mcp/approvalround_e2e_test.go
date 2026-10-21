@@ -303,7 +303,7 @@ func TestApprovalEndToEndGroupedRound(t *testing.T) {
 	if !ok {
 		t.Fatalf("approval-1 is %T, want *ElicitParams", first.InputRequests["approval-1"])
 	}
-	if !strings.Contains(shared.Message, "Approval 1 of 2\n\nAllow these 2 commands?\n\n  echo a\n  echo b\n") {
+	if want := "Approval 1 of 2: allow 2 commands in (server cwd)?\necho a\necho b"; shared.Message != want {
 		t.Errorf("approval-1 message = %q, want it to list both echo commands", shared.Message)
 	}
 

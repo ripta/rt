@@ -768,17 +768,15 @@ func argvLines(argvs [][]string) []string {
 	return lines
 }
 
-// listedCommands reads the commands an approval form's message lists, which are the lines indented
-// by two spaces.
+// listedCommands reads the commands an approval form's message lists, which are every line after
+// the header.
 func listedCommands(message string) []string {
-	var out []string
-	for _, line := range strings.Split(message, "\n") {
-		if cmd, ok := strings.CutPrefix(line, "  "); ok {
-			out = append(out, cmd)
-		}
+	_, rest, found := strings.Cut(message, "\n")
+	if !found {
+		return nil
 	}
 
-	return out
+	return strings.Split(rest, "\n")
 }
 
 type groupTest struct {
@@ -791,9 +789,14 @@ type groupTest struct {
 
 var groupTests = []groupTest{
 	{
-		Name:      "five commands under one prefix share one form",
+		Name:      "five commands under one prefix split into forms of at most the limit",
 		Argvs:     echoArgvs(5),
-		WantForms: [][]string{argvLines(echoArgvs(5))},
+		WantForms: slices.Collect(slices.Chunk(argvLines(echoArgvs(5)), maxFormCommands)),
+	},
+	{
+		Name:      "commands up to the limit under one prefix share one form",
+		Argvs:     echoArgvs(maxFormCommands),
+		WantForms: [][]string{argvLines(echoArgvs(maxFormCommands))},
 	},
 	{
 		Name:  "two prefixes give two forms in first-appearance order",

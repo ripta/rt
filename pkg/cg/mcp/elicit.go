@@ -32,7 +32,10 @@ type elicitInput struct {
 	Message  string `json:"message,omitempty" jsonschema:"prompt to show the user; a per-case default is used when empty"`
 	Requests int    `json:"requests,omitempty" jsonschema:"elicitations sent together in each round (1-10, default 1; the approval-form case sends at least 2)"`
 	Rounds   int    `json:"rounds,omitempty" jsonschema:"input-required rounds before the call completes (1-10, default 1); more than one needs protocol 2026-07-28 or later"`
-	Commands int    `json:"commands,omitempty" jsonschema:"commands listed on each approval-form request (1-20, default is the gate's per-form limit)"`
+	Commands int    `json:"commands,omitempty" jsonschema:"commands listed on each approval-form request (1-10, default is the gate's per-form limit)"`
+
+	WideCommand bool `json:"wide_command,omitempty" jsonschema:"approval-form only: make the first command wider than any terminal"`
+	LongCwd     bool `json:"long_cwd,omitempty" jsonschema:"approval-form only: make the working directory in the header wider than any terminal"`
 }
 
 // elicitOutput reports whether elicitation is supported and, when it is, every
@@ -67,7 +70,7 @@ type elicitState struct {
 func registerElicitTest(s *mcpsdk.Server, g *gate) {
 	mcpsdk.AddTool(s, &mcpsdk.Tool{
 		Name:        "cg_elicit_test",
-		Description: "Diagnostic: send MCP elicitation forms to the client to verify support and inspect how each field type renders and round-trips. Use the case argument to pick a field type, requests to send several forms at once, and rounds to chain several input-required rounds. The approval-form case renders the approval gate's own form for a given number of commands, to find how many fit on screen.",
+		Description: "Diagnostic: send MCP elicitation forms to the client to verify support and inspect how each field type renders and round-trips. Use the case argument to pick a field type, requests to send several forms at once, and rounds to chain several input-required rounds. The approval-form case renders the approval gate's own form for a given number of commands, to check how much of its message the client shows.",
 	}, func(ctx context.Context, req *mcpsdk.CallToolRequest, in elicitInput) (*mcpsdk.CallToolResult, elicitOutput, error) {
 		return handleElicitTest(ctx, req, g, in)
 	})
@@ -89,7 +92,7 @@ func handleElicitTest(_ context.Context, req *mcpsdk.CallToolRequest, g *gate, i
 
 	var form approvalProbe
 	if kase == approvalFormCase {
-		form, err = newApprovalProbe(in.Commands, probeProjectPath(g))
+		form, err = newApprovalProbe(in.Commands, in.WideCommand, in.LongCwd, probeProjectPath(g))
 		if err != nil {
 			out.Error = err.Error()
 			return nil, out, nil
@@ -229,9 +232,14 @@ func schemaOutput(schema any) map[string]any {
 // approvalFormCase is the probe case that sends the approval gate's own form.
 const approvalFormCase = "approval-form"
 
-// maxProbeCommands bounds the commands one approval-form request lists. It sits well above
-// maxFormCommands so the probe can find where the buttons leave the screen.
-const maxProbeCommands = 20
+// maxProbeCommands bounds the commands one approval-form request lists. It sits above
+// maxFormCommands so the probe can show the client's "more lines" marker for a form that lists
+// more commands than fit.
+const maxProbeCommands = 10
+
+// probeRuler is a line of digits wider than any terminal. Where the client cuts or wraps it shows
+// the width it renders at.
+var probeRuler = strings.Repeat("0123456789", 12)
 
 // approvalProbe is the content of the approval-form case: the commands a form lists and the rule
 // and project file it offers.
@@ -242,12 +250,13 @@ type approvalProbe struct {
 	Path       string
 }
 
-// newApprovalProbe builds realistic content for commands listed commands. Each command is close to
-// the width a dialog wraps at, the rule is two tokens from a canonical executable path as a real
-// go command suggests, and the project file is the gate's own. The working directory is wider than
-// any terminal, with a ruler of digits, so the person running the probe can read the dialog's wrap
-// width off the wrapped line.
-func newApprovalProbe(commands int, path string) (approvalProbe, error) {
+// newApprovalProbe builds realistic content for commands listed commands. Each command fits in
+// 80 columns, the rule is two tokens from a canonical executable path as a real go command
+// suggests, and the project file is the gate's own.
+//
+// wideCommand makes the first command wider than any terminal. If the client wraps it into the
+// lines it hides, the second command falls out of view. longCwd does the same to the header line.
+func newApprovalProbe(commands int, wideCommand, longCwd bool, path string) (approvalProbe, error) {
 	if commands == 0 {
 		commands = maxFormCommands
 	}
@@ -262,9 +271,18 @@ func newApprovalProbe(commands int, path string) (approvalProbe, error) {
 		argvs[i] = []string{"go", "test", "-count=1", "-run", fmt.Sprintf("TestCase%02d", i+1), fmt.Sprintf("./internal/service/component%02d/...", i+1)}
 	}
 
+	if wideCommand {
+		argvs[0] = []string{"go", "test", "-count=1", "-run", "TestCase01", "./" + probeRuler}
+	}
+
+	cwd := "/Users/example/projects/service"
+	if longCwd {
+		cwd = "/" + probeRuler
+	}
+
 	return approvalProbe{
 		Argvs:      argvs,
-		Cwd:        "/" + strings.Repeat("0123456789", 12),
+		Cwd:        cwd,
 		Suggestion: approve.SuggestPrefix(argvs[0], executable),
 		Path:       path,
 	}, nil

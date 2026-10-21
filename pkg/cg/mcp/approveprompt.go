@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"unicode"
 
 	jsonschema "github.com/google/jsonschema-go/jsonschema"
 	"github.com/pmezard/go-difflib/difflib"
@@ -26,39 +27,109 @@ const (
 	maxDiffLines = 10
 	maxDiffBytes = 4000
 
-	// maxFormCommands is the most commands one approval form lists. The dialog does not scroll,
-	// so a taller form pushes its buttons off screen. The value is the largest count whose
-	// buttons stay visible at 80x24 in the cg_elicit_test approval-form probe, so rerun the probe
-	// at that size before changing it.
-	maxFormCommands = 6
+	// visibleMessageLines is how many lines of a form's message the client shows. Claude Code's
+	// input dialog prints the first three, then "(+N more lines)", and offers no way to expand
+	// it. The cap does not change with terminal size.
+	visibleMessageLines = 3
+
+	// maxFormCommands is the most commands one approval form lists. The message is one header line
+	// plus one line per command, and a command past the visible lines is hidden from the person
+	// approving it. Rerun the cg_elicit_test approval-form probe if the client's cap changes.
+	maxFormCommands = visibleMessageLines - 1
 )
 
-// approvalMessage renders the human-facing prompt body: every command the form covers as it will
-// run, one per line, and the working directory they run in.
+// approvalMessage renders the human-facing prompt body: a header with the count and the working
+// directory, then every command the form covers as it will run, one per line.
 //
-// A call with several approval forms leads each one with its position, so every form stands
-// alone. A lone form carries none.
+// The client shows only the first visibleMessageLines lines, so the header takes one and the
+// commands take the rest, with no blank lines. A call with several approval forms leads the header
+// with its position, so every form stands alone. A lone form carries none.
 func approvalMessage(argvs [][]string, cwd string, pos, total int) string {
 	if cwd == "" {
 		cwd = "(server cwd)"
 	}
+	cwd = visibleText(cwd)
+
+	what := "this command"
+	if len(argvs) != 1 {
+		what = fmt.Sprintf("%d commands", len(argvs))
+	}
 
 	var b strings.Builder
 	if total > 1 {
-		fmt.Fprintf(&b, "Approval %d of %d\n\n", pos, total)
-	}
-
-	if len(argvs) == 1 {
-		b.WriteString("Allow this command?\n\n")
+		fmt.Fprintf(&b, "Approval %d of %d: allow %s in %s?", pos, total, what, cwd)
 	} else {
-		fmt.Fprintf(&b, "Allow these %d commands?\n\n", len(argvs))
+		fmt.Fprintf(&b, "Allow %s in %s?", what, cwd)
 	}
 
 	for _, argv := range argvs {
-		fmt.Fprintf(&b, "  %s\n", model.EscapeArgs(argv))
+		fmt.Fprintf(&b, "\n%s", visibleArgs(argv))
 	}
 
-	fmt.Fprintf(&b, "\nworking directory: %s", cwd)
+	return b.String()
+}
+
+// visibleArgs renders an argv as a shell command on exactly one line. An argument with a control
+// character is written in ANSI-C quoting, so a newline cannot push the rest of the form out of the
+// client's visible lines and an escape sequence cannot reach the terminal.
+func visibleArgs(argv []string) string {
+	quoted := make([]string, len(argv))
+	for i, arg := range argv {
+		if hasControl(arg) {
+			quoted[i] = ansiCQuote(arg)
+		} else {
+			quoted[i] = model.EscapeArgs([]string{arg})
+		}
+	}
+
+	return strings.Join(quoted, " ")
+}
+
+// visibleText renders free text, such as a working directory, on one line. Text with a control
+// character is written in ANSI-C quoting and anything else is left as it is.
+func visibleText(s string) string {
+	if hasControl(s) {
+		return ansiCQuote(s)
+	}
+
+	return s
+}
+
+// hasControl reports whether s holds a character that could break a line or drive the terminal.
+// That is a C0 or C1 control, DEL, or a Unicode line or paragraph separator.
+func hasControl(s string) bool {
+	return strings.ContainsFunc(s, func(r rune) bool {
+		return unicode.IsControl(r) || r == ' ' || r == ' '
+	})
+}
+
+// ansiCQuote quotes s as $'...', which bash and zsh read back to the same bytes.
+func ansiCQuote(s string) string {
+	var b strings.Builder
+	b.WriteString("$'")
+
+	for _, r := range s {
+		switch {
+		case r == '\n':
+			b.WriteString(`\n`)
+		case r == '\r':
+			b.WriteString(`\r`)
+		case r == '\t':
+			b.WriteString(`\t`)
+		case r == '\\':
+			b.WriteString(`\\`)
+		case r == '\'':
+			b.WriteString(`\'`)
+		case r < 0x20 || r == 0x7f:
+			fmt.Fprintf(&b, `\x%02x`, r)
+		case unicode.IsControl(r) || r == ' ' || r == ' ':
+			fmt.Fprintf(&b, `\u%04x`, r)
+		default:
+			b.WriteRune(r)
+		}
+	}
+
+	b.WriteString("'")
 
 	return b.String()
 }
