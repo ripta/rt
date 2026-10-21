@@ -25,24 +25,42 @@ const (
 	// count summary.
 	maxDiffLines = 10
 	maxDiffBytes = 4000
+
+	// maxFormCommands is the most commands one approval form lists. The dialog does not scroll,
+	// so a taller form pushes its buttons off screen. The value is the largest count whose
+	// buttons stay visible at 80x24 in the cg_elicit_test approval-form probe, so rerun the probe
+	// at that size before changing it.
+	maxFormCommands = 6
 )
 
-// approvalMessage renders the human-facing prompt body: the command as it will run and the working
-// directory it runs in.
+// approvalMessage renders the human-facing prompt body: every command the form covers as it will
+// run, one per line, and the working directory they run in.
 //
 // A call with several approval forms leads each one with its position, so every form stands
 // alone. A lone form carries none.
-func approvalMessage(argv []string, cwd string, pos, total int) string {
+func approvalMessage(argvs [][]string, cwd string, pos, total int) string {
 	if cwd == "" {
 		cwd = "(server cwd)"
 	}
 
-	var lead string
+	var b strings.Builder
 	if total > 1 {
-		lead = fmt.Sprintf("Approval %d of %d\n\n", pos, total)
+		fmt.Fprintf(&b, "Approval %d of %d\n\n", pos, total)
 	}
 
-	return fmt.Sprintf("%sAllow this command?\n\n  %s\n\nworking directory: %s", lead, model.EscapeArgs(argv), cwd)
+	if len(argvs) == 1 {
+		b.WriteString("Allow this command?\n\n")
+	} else {
+		fmt.Fprintf(&b, "Allow these %d commands?\n\n", len(argvs))
+	}
+
+	for _, argv := range argvs {
+		fmt.Fprintf(&b, "  %s\n", model.EscapeArgs(argv))
+	}
+
+	fmt.Fprintf(&b, "\nworking directory: %s", cwd)
+
+	return b.String()
 }
 
 // approvalSchema builds the elicitation form: an editable rule field pre-filled
@@ -67,7 +85,7 @@ func approvalSchema(suggestion []string, path string) *jsonschema.Schema {
 			},
 			"remember": {
 				Type:        "boolean",
-				Title:       "Remember this command",
+				Title:       "Remember this rule",
 				Description: fmt.Sprintf("save an allow rule to %s so it is not asked again", path),
 				Default:     json.RawMessage("false"),
 			},

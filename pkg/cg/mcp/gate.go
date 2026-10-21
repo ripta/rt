@@ -102,7 +102,10 @@ type gateOutcome struct {
 //
 // A retry first redeems its pending entry, which deletes it, so a nonce works once even when the
 // rules changed in between. The live ruleset is then evaluated again. Deny and restrict win over
-// an accepted form, and an allow runs without reading its answer.
+// an accepted form, and an allow runs without its answer gating it.
+//
+// A retry reads its forms even when no command needs a prompt any more. A form whose commands are
+// all allowed now can still carry a remember to save.
 func (g *gate) check(call approvalCall) (gateOutcome, error) {
 	if g == nil || g.blindlyAllow {
 		return gateOutcome{}, nil
@@ -128,10 +131,10 @@ func (g *gate) check(call approvalCall) (gateOutcome, error) {
 		}
 	}
 
-	if len(needs) == 0 {
+	if len(needs) == 0 && entry == nil {
 		return gateOutcome{}, nil
 	}
-	if !call.CanPrompt {
+	if len(needs) > 0 && !call.CanPrompt {
 		return gateOutcome{}, g.failClosedError(call.Tool)
 	}
 	if entry == nil {

@@ -41,6 +41,10 @@ type pendingCommand struct {
 	// refuses a command that now needs a prompt but was not asked about, because there is no
 	// answer to read for it.
 	Prompted bool
+
+	// Form is the id of the approval form that covered this command, empty when it was not
+	// prompted. Several commands share a form, and the retry reads their answer through it.
+	Form string
 }
 
 // pendingEntry records a call that is waiting on the user. Tool, Argvs, Cwd, Env, and Args are
@@ -191,6 +195,7 @@ func cloneCommands(cmds []pendingCommand) []pendingCommand {
 	out := make([]pendingCommand, len(cmds))
 	for i, c := range cmds {
 		out[i].Prompted = c.Prompted
+		out[i].Form = c.Form
 		out[i].Suggestion = slices.Clone(c.Suggestion)
 
 		if c.Resolution != nil {

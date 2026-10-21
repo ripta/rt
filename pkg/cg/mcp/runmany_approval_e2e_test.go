@@ -10,8 +10,9 @@ import (
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// commandScript answers each approval form by the command it shows. A command with no entry is
-// declined. OnShow runs for every form before it is answered.
+// commandScript answers each approval form by the commands it lists. The first listed command with
+// an entry decides the answer, and a form with none is declined. OnShow runs for every form before
+// it is answered.
 type commandScript struct {
 	Answers map[string]*mcpsdk.ElicitResult
 	OnShow  func(message string)
@@ -29,8 +30,8 @@ func (c *commandScript) handle(_ context.Context, req *mcpsdk.ElicitRequest) (*m
 		c.OnShow(req.Params.Message)
 	}
 
-	for command, res := range c.Answers {
-		if strings.Contains(req.Params.Message, "\n  "+command+"\n") {
+	for _, command := range listedCommands(req.Params.Message) {
+		if res, ok := c.Answers[command]; ok {
 			return res, nil
 		}
 	}
@@ -52,6 +53,11 @@ func echoCommands(names ...string) [][]string {
 	}
 
 	return commands
+}
+
+// mixedCommands is three commands that suggest three different rules, so each gets its own form.
+func mixedCommands() [][]string {
+	return [][]string{{"echo", "a"}, {"printf", "b"}, {"true", "c"}}
 }
 
 func TestRunManyBatchesOneHundredCommandsInOneRound(t *testing.T) {
@@ -82,17 +88,28 @@ func TestRunManyBatchesOneHundredCommandsInOneRound(t *testing.T) {
 				t.Errorf("succeeded = %v, want %d", out["succeeded"], maxPoolCommands)
 			}
 
+			wantForms := (maxPoolCommands + maxFormCommands - 1) / maxFormCommands
 			messages := script.messages()
-			if len(messages) != maxPoolCommands {
-				t.Fatalf("forms shown = %d, want %d in a single round", len(messages), maxPoolCommands)
+			if len(messages) != wantForms {
+				t.Fatalf("forms shown = %d, want %d in a single round", len(messages), wantForms)
 			}
 
+			listed := 0
 			positions := make(map[string]bool, len(messages))
 			for _, m := range messages {
 				positions[strings.SplitN(m, "\n", 2)[0]] = true
+
+				n := len(listedCommands(m))
+				if n > maxFormCommands {
+					t.Errorf("a form lists %d commands, want at most %d", n, maxFormCommands)
+				}
+				listed += n
 			}
-			for i := 1; i <= maxPoolCommands; i++ {
-				if want := fmt.Sprintf("Approval %d of %d", i, maxPoolCommands); !positions[want] {
+			if listed != maxPoolCommands {
+				t.Errorf("forms list %d commands, want %d", listed, maxPoolCommands)
+			}
+			for i := 1; i <= wantForms; i++ {
+				if want := fmt.Sprintf("Approval %d of %d", i, wantForms); !positions[want] {
 					t.Errorf("no form started with %q", want)
 				}
 			}
@@ -116,17 +133,17 @@ var positionTests = []positionTest{
 	{
 		Name:          "run_many with several forms",
 		Tool:          "cg_run_many",
-		Args:          map[string]any{"commands": echoCommands("a", "b", "c")},
+		Args:          map[string]any{"commands": mixedCommands()},
 		Project:       "version: 1\n",
-		Approved:      []string{"echo a", "echo b", "echo c"},
+		Approved:      []string{"echo a", "printf b", "true c"},
 		WantPositions: []string{"Approval 1 of 3", "Approval 2 of 3", "Approval 3 of 3"},
 	},
 	{
-		Name:          "positions count only the commands that need a form",
+		Name:          "positions count only the forms",
 		Tool:          "cg_run_many",
-		Args:          map[string]any{"commands": echoCommands("a", "b", "c")},
-		Project:       "version: 1\nallow:\n  - prefix: [echo, b]\n",
-		Approved:      []string{"echo a", "echo c"},
+		Args:          map[string]any{"commands": mixedCommands()},
+		Project:       "version: 1\nallow:\n  - prefix: [printf, b]\n",
+		Approved:      []string{"echo a", "true c"},
 		WantPositions: []string{"Approval 1 of 2", "Approval 2 of 2"},
 	},
 	{
@@ -157,10 +174,10 @@ var positionTests = []positionTest{
 	{
 		Name:          "the divergence form does not raise the count of a multi-form call",
 		Tool:          "cg_run_many",
-		Args:          map[string]any{"commands": echoCommands("a", "b")},
+		Args:          map[string]any{"commands": [][]string{{"echo", "a"}, {"printf", "b"}}},
 		Project:       baseRules,
 		Edit:          editRules,
-		Approved:      []string{"echo a", "echo b"},
+		Approved:      []string{"echo a", "printf b"},
 		WantPositions: []string{"Approval 1 of 2", "Approval 2 of 2"},
 	},
 }
@@ -229,29 +246,29 @@ var poolDeclineTests = []poolDeclineTest{
 	{
 		Name: "one decline refuses the pool with the single wording",
 		Answers: map[string]*mcpsdk.ElicitResult{
-			"echo a": accept(map[string]any{"remember": false}),
-			"echo b": decline(),
-			"echo c": accept(map[string]any{"remember": false}),
+			"echo a":   accept(map[string]any{"remember": false}),
+			"printf b": decline(),
+			"true c":   accept(map[string]any{"remember": false}),
 		},
-		WantRefusal: "cg_run_many refused: command was declined at the approval prompt\n  echo b",
+		WantRefusal: "cg_run_many refused: command was declined at the approval prompt\n  printf b",
 	},
 	{
 		Name: "several declines name every command in command order",
 		Answers: map[string]*mcpsdk.ElicitResult{
-			"echo a": decline(),
-			"echo b": accept(map[string]any{"remember": false}),
-			"echo c": cancel(),
+			"echo a":   decline(),
+			"printf b": accept(map[string]any{"remember": false}),
+			"true c":   cancel(),
 		},
-		WantRefusal: "cg_run_many refused: 2 commands were declined at the approval prompt\n  echo a\n  echo c",
+		WantRefusal: "cg_run_many refused: 2 commands were declined at the approval prompt\n  echo a\n  true c",
 	},
 	{
 		Name: "an accepted remember is persisted despite a decline",
 		Answers: map[string]*mcpsdk.ElicitResult{
-			"echo a": accept(map[string]any{"remember": true, "rule": "[echo, a]"}),
-			"echo b": decline(),
-			"echo c": accept(map[string]any{"remember": false}),
+			"echo a":   accept(map[string]any{"remember": true, "rule": "[echo, a]"}),
+			"printf b": decline(),
+			"true c":   accept(map[string]any{"remember": false}),
 		},
-		WantRefusal: "cg_run_many refused: command was declined at the approval prompt\n  echo b",
+		WantRefusal: "cg_run_many refused: command was declined at the approval prompt\n  printf b",
 		WantFile:    []string{"prefix: [echo, a]"},
 	},
 }
@@ -267,7 +284,7 @@ func TestRunManyDeclineRefusesPool(t *testing.T) {
 				script := &commandScript{Answers: test.Answers}
 				cs := connectGate(t, g, version, script.handle)
 
-				out, refusal, err := callGated(t, cs, "cg_run_many", map[string]any{"commands": echoCommands("a", "b", "c")})
+				out, refusal, err := callGated(t, cs, "cg_run_many", map[string]any{"commands": mixedCommands()})
 				if err != nil {
 					t.Fatalf("CallTool: %v", err)
 				}
@@ -305,8 +322,8 @@ func TestRunManyDeclineCarriesRememberWarning(t *testing.T) {
 
 			script := &commandScript{
 				Answers: map[string]*mcpsdk.ElicitResult{
-					"echo a": accept(map[string]any{"remember": true, "rule": "[echo, a]"}),
-					"echo b": decline(),
+					"echo a":   accept(map[string]any{"remember": true, "rule": "[echo, a]"}),
+					"printf b": decline(),
 				},
 			}
 
@@ -317,12 +334,12 @@ func TestRunManyDeclineCarriesRememberWarning(t *testing.T) {
 
 			cs := connectGate(t, g, version, script.handle)
 
-			_, refusal, err := callGated(t, cs, "cg_run_many", map[string]any{"commands": echoCommands("a", "b")})
+			_, refusal, err := callGated(t, cs, "cg_run_many", map[string]any{"commands": [][]string{{"echo", "a"}, {"printf", "b"}}})
 			if err != nil {
 				t.Fatalf("CallTool: %v", err)
 			}
 
-			want := "cg_run_many refused: command was declined at the approval prompt\n  echo b\nskipping remember: "
+			want := "cg_run_many refused: command was declined at the approval prompt\n  printf b\nskipping remember: "
 			if !strings.HasPrefix(refusal, want) || !strings.Contains(refusal, "changed on disk") {
 				t.Errorf("refusal = %q, want it to start with %q and name the changed file", refusal, want)
 			}

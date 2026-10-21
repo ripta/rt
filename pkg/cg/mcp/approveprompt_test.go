@@ -32,6 +32,64 @@ func TestApprovalSchemaFieldOrder(t *testing.T) {
 	}
 }
 
+type approvalMessageTest struct {
+	Name  string
+	Argvs [][]string
+	Cwd   string
+	Pos   int
+	Total int
+	Want  string
+}
+
+var approvalMessageTests = []approvalMessageTest{
+	{
+		Name:  "one command with no position",
+		Argvs: [][]string{{"echo", "a b"}},
+		Cwd:   "/work",
+		Pos:   1,
+		Total: 1,
+		Want:  "Allow this command?\n\n  echo 'a b'\n\nworking directory: /work",
+	},
+	{
+		Name:  "several commands with a position",
+		Argvs: [][]string{{"go", "test", "./a"}, {"go", "test", "./b"}},
+		Cwd:   "/work",
+		Pos:   2,
+		Total: 3,
+		Want:  "Approval 2 of 3\n\nAllow these 2 commands?\n\n  go test ./a\n  go test ./b\n\nworking directory: /work",
+	},
+	{
+		Name:  "no working directory names the server's",
+		Argvs: [][]string{{"echo"}},
+		Pos:   1,
+		Total: 1,
+		Want:  "Allow this command?\n\n  echo\n\nworking directory: (server cwd)",
+	},
+}
+
+func TestApprovalMessage(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range approvalMessageTests {
+		t.Run(test.Name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := approvalMessage(test.Argvs, test.Cwd, test.Pos, test.Total); got != test.Want {
+				t.Errorf("approvalMessage = %q, want %q", got, test.Want)
+			}
+		})
+	}
+}
+
+func TestApprovalSchemaRememberTitle(t *testing.T) {
+	t.Parallel()
+
+	schema := approvalSchema([]string{"go", "test"}, "/tmp/.cg.yaml")
+	if got := schema.Properties["remember"].Title; got != "Remember this rule" {
+		t.Errorf("remember title = %q, want %q", got, "Remember this rule")
+	}
+}
+
 // renderDivergenceTest drives the tiered divergence rendering: a small change
 // stays a unified diff, a taller one collapses to changed lines, and an even
 // larger one collapses to a count summary.

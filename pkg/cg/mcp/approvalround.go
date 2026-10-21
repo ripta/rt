@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -19,17 +20,54 @@ import (
 // object, and Go marshals map keys sorted.
 const divergenceID = "divergence"
 
-// approvalID names the input request for command i of n. The index is zero-padded to the width of
-// n so that lexical order is command order. Without the padding, "approval-10" would show before
+// approvalID names the input request for form i of n. The index is zero-padded to the width of n
+// so that lexical order is form order. Without the padding, "approval-10" would show before
 // "approval-2".
 func approvalID(i, n int) string {
 	return fmt.Sprintf("approval-%0*d", len(strconv.Itoa(n)), i+1)
 }
 
-// request ends a first call that needs approval. It builds one approval form per command that
-// needs a prompt, plus one trailing form when the project rules file has changed on disk since it
-// was loaded, and stores what the user was shown under a fresh nonce. Nothing runs and nothing is
-// written until the client retries with the answers.
+// approvalForm is one approval prompt: the commands it lists, all of which share a suggested rule.
+type approvalForm struct {
+	Suggestion []string
+	Commands   []int
+}
+
+// planForms groups the commands that need a prompt by their suggested rule. Groups come in the
+// order their first command appears, commands keep call order inside a group, and a group longer
+// than maxFormCommands splits into consecutive forms under the same rule.
+func planForms(call approvalCall, needs []int) []approvalForm {
+	var groups []approvalForm
+	index := make(map[string]int)
+
+	for _, i := range needs {
+		suggestion := approve.SuggestPrefix(call.Argvs[i], call.Resolutions[i].RulePath())
+		key := strings.Join(suggestion, "\x00")
+
+		at, ok := index[key]
+		if !ok {
+			at = len(groups)
+			index[key] = at
+			groups = append(groups, approvalForm{Suggestion: suggestion})
+		}
+
+		groups[at].Commands = append(groups[at].Commands, i)
+	}
+
+	var forms []approvalForm
+	for _, group := range groups {
+		for chunk := range slices.Chunk(group.Commands, maxFormCommands) {
+			forms = append(forms, approvalForm{Suggestion: group.Suggestion, Commands: chunk})
+		}
+	}
+
+	return forms
+}
+
+// request ends a first call that needs approval. It builds one approval form per suggested rule
+// among the commands that need a prompt, plus one trailing form when the project rules file has
+// changed on disk since it was loaded, and stores what the user was shown under a fresh nonce.
+// Nothing runs and nothing is written until the client retries with the answers.
 //
 // A project file that cannot be read is treated as unchanged. The retry reads it again, and a
 // remember that cannot read it either is skipped with a warning.
@@ -45,15 +83,22 @@ func (g *gate) request(call approvalCall, needs []int) (gateOutcome, error) {
 		commands[i].Resolution = call.Resolutions[i]
 	}
 
-	forms := make(mcpsdk.InputRequestMap, len(needs)+1)
-	for pos, i := range needs {
-		suggestion := approve.SuggestPrefix(call.Argvs[i], call.Resolutions[i].RulePath())
-		commands[i].Prompted = true
-		commands[i].Suggestion = suggestion
+	plan := planForms(call, needs)
+	forms := make(mcpsdk.InputRequestMap, len(plan)+1)
+	for pos, form := range plan {
+		id := approvalID(pos, len(plan))
 
-		forms[approvalID(i, len(call.Argvs))] = &mcpsdk.ElicitParams{
-			Message:         approvalMessage(call.Argvs[i], call.Cwd, pos+1, len(needs)),
-			RequestedSchema: approvalSchema(suggestion, g.store.Project.Path),
+		argvs := make([][]string, len(form.Commands))
+		for j, i := range form.Commands {
+			argvs[j] = call.Argvs[i]
+			commands[i].Prompted = true
+			commands[i].Suggestion = form.Suggestion
+			commands[i].Form = id
+		}
+
+		forms[id] = &mcpsdk.ElicitParams{
+			Message:         approvalMessage(argvs, call.Cwd, pos+1, len(plan)),
+			RequestedSchema: approvalSchema(form.Suggestion, g.store.Project.Path),
 		}
 	}
 
@@ -89,16 +134,19 @@ func (g *gate) request(call approvalCall, needs []int) (gateOutcome, error) {
 // that was not prompted, or that now resolves to a different executable, means the user answered
 // against a state that no longer holds. They are prompted again on the next call.
 //
-// Past that check, a decline, cancel, missing answer, or malformed rule refuses the call, but only
-// after every accepted form's remember has been persisted, so a user who approved one command with
-// remember checked does not lose that rule to a problem with another. The first answer error is
-// the one reported. Refusal always comes before any spawn.
+// Past that check, each form is read once through the ids the pending entry recorded. A decline,
+// cancel, missing answer, or malformed rule on a form with commands that still need a prompt
+// refuses the call, but only after every accepted form's remember has been persisted, so a user
+// who approved one form with remember checked does not lose that rule to a problem with another.
+// The first answer error is the one reported. Refusal always comes before any spawn.
+//
+// A form whose commands are all allowed now gates nothing. Its answer is read only for the
+// remember, and a problem with it becomes a warning instead of a refusal.
 func (g *gate) answer(call approvalCall, entry *pendingEntry, needs []int) (gateOutcome, error) {
-	var declined [][]string
-	var rules [][]string
-	var answerErr error
-
+	needed := make([]bool, len(call.Argvs))
 	for _, i := range needs {
+		needed[i] = true
+
 		cmd := entry.Commands[i]
 		if !cmd.Prompted {
 			return gateOutcome{}, &pendingRefusal{msg: fmt.Sprintf("%s refused: the rules changed and this command was not part of the approval that was requested; %s", call.Tool, pendingAdvice)}
@@ -108,10 +156,32 @@ func (g *gate) answer(call approvalCall, entry *pendingEntry, needs []int) (gate
 		}
 	}
 
-	for _, i := range needs {
-		cmd := entry.Commands[i]
+	var declined []int
+	var rules []rememberRule
+	var notes []string
+	var answerErr error
 
-		res, err := elicitAnswer(call.Responses, approvalID(i, len(call.Argvs)))
+	formIDs, members := entryForms(entry)
+	for _, id := range formIDs {
+		asking := slices.DeleteFunc(slices.Clone(members[id]), func(i int) bool { return !needed[i] })
+		suggestion := entry.Commands[members[id][0]].Suggestion
+
+		res, err := elicitAnswer(call.Responses, id)
+		if len(asking) == 0 {
+			if err != nil || res.Action != actionAccept || !remember(res.Content) {
+				continue
+			}
+
+			tokens, err := parseRuleField(res.Content, suggestion)
+			if err != nil {
+				notes = append(notes, fmt.Sprintf("skipping remember: %v", err))
+				continue
+			}
+
+			rules = addRememberRule(rules, tokens, false)
+			continue
+		}
+
 		if err != nil {
 			if answerErr == nil {
 				answerErr = err
@@ -119,13 +189,13 @@ func (g *gate) answer(call approvalCall, entry *pendingEntry, needs []int) (gate
 			continue
 		}
 
-		// A declined or cancelled prompt refuses the command this once and persists nothing.
+		// A declined or cancelled prompt refuses its commands this once and persists nothing.
 		// Elicitation only returns form content on accept, so the remember checkbox cannot ride
 		// along with a decline to record a deny rule. We deliberately do not add an in-form
 		// "always accept / always decline" enum to work around that: the prompt already carries
 		// Accept and Decline buttons, and duplicating that choice inside the form is clunky.
 		if res.Action != actionAccept {
-			declined = append(declined, call.Argvs[i])
+			declined = append(declined, asking...)
 			continue
 		}
 
@@ -133,21 +203,24 @@ func (g *gate) answer(call approvalCall, entry *pendingEntry, needs []int) (gate
 			continue
 		}
 
-		tokens, err := parseRuleField(res.Content, cmd.Suggestion)
+		tokens, err := parseRuleField(res.Content, suggestion)
 		if err != nil {
 			if answerErr == nil {
 				answerErr = err
 			}
 			continue
 		}
-		if !slices.ContainsFunc(rules, func(r []string) bool { return slices.Equal(r, tokens) }) {
-			rules = append(rules, tokens)
-		}
+
+		rules = addRememberRule(rules, tokens, true)
 	}
 
 	// The refusals below still carry the remember warning. The rules from the accepted forms were
 	// already written or skipped, and the user would otherwise never learn which.
-	warning := g.persistRemembered(call, entry, rules)
+	if persisted := g.persistRemembered(call, entry, rules); persisted != "" {
+		notes = append(notes, persisted)
+	}
+
+	warning := strings.Join(notes, "; ")
 	if answerErr != nil {
 		if warning != "" {
 			return gateOutcome{}, fmt.Errorf("%s refused: %w\n%s", call.Tool, answerErr, warning)
@@ -156,10 +229,54 @@ func (g *gate) answer(call approvalCall, entry *pendingEntry, needs []int) (gate
 		return gateOutcome{}, fmt.Errorf("%s refused: %w", call.Tool, answerErr)
 	}
 	if len(declined) > 0 {
-		return gateOutcome{}, declinedError(call.Tool, declined, len(call.Argvs) > 1, warning)
+		slices.Sort(declined)
+
+		argvs := make([][]string, len(declined))
+		for j, i := range declined {
+			argvs[j] = call.Argvs[i]
+		}
+
+		return gateOutcome{}, declinedError(call.Tool, argvs, len(call.Argvs) > 1, warning)
 	}
 
 	return gateOutcome{Warning: warning}, nil
+}
+
+// entryForms lists the approval form ids of a pending entry in form order, with the commands each
+// one covered. Ids are zero-padded, so sorting them lexically sorts them numerically.
+func entryForms(entry *pendingEntry) ([]string, map[string][]int) {
+	members := make(map[string][]int)
+	for i, cmd := range entry.Commands {
+		if cmd.Form != "" {
+			members[cmd.Form] = append(members[cmd.Form], i)
+		}
+	}
+
+	ids := slices.Sorted(maps.Keys(members))
+
+	return ids, members
+}
+
+// rememberRule is a rule a user asked to save. Retryable reports whether any form that asked for
+// it still held a command needing a prompt. Calling the tool again offers such a rule afresh. For
+// any other rule the commands no longer prompt, so a new call would never offer it.
+type rememberRule struct {
+	Tokens    []string
+	Retryable bool
+}
+
+// addRememberRule adds a rule once. Several forms of one group carry the same rule, and saving it
+// twice would only duplicate the entry.
+func addRememberRule(rules []rememberRule, tokens []string, retryable bool) []rememberRule {
+	for i := range rules {
+		if slices.Equal(rules[i].Tokens, tokens) {
+			rules[i].Retryable = rules[i].Retryable || retryable
+
+			return rules
+		}
+	}
+
+	return append(rules, rememberRule{Tokens: tokens, Retryable: retryable})
 }
 
 // persistRemembered writes the rules remembered in one round with a single divergence answer.
@@ -170,21 +287,32 @@ func (g *gate) answer(call approvalCall, entry *pendingEntry, needs []int) (gate
 //
 // The file on disk must still be what the first round saw. Otherwise the user's choice describes
 // a file that no longer exists, and an unreviewed change is never adopted.
-func (g *gate) persistRemembered(call approvalCall, entry *pendingEntry, rules [][]string) string {
+//
+// When the first round showed no divergence form, the file need only match the store's live
+// snapshot. A rule that cg itself wrote between the two calls moves that snapshot, and skipping
+// for it would drop a remember the user asked for. A round that showed a diff keeps the stricter
+// check, since the user's choice describes that diff.
+func (g *gate) persistRemembered(call approvalCall, entry *pendingEntry, rules []rememberRule) string {
 	if len(rules) == 0 {
 		return ""
 	}
 
+	path := g.store.Project.Path
 	if entry.Unreadable {
-		return fmt.Sprintf("skipping remember: %s could not be read when the approval was requested; %s", g.store.Project.Path, pendingAdvice)
+		return skippedRemember(path, rules, "could not be read when the approval was requested")
 	}
 
 	changed, current, err := g.store.CheckProjectDivergence()
 	if err != nil {
 		return fmt.Sprintf("skipping remember: %v", err)
 	}
-	if changed != entry.Diverged || !bytes.Equal(current, entry.DivergenceSnapshot) {
-		return fmt.Sprintf("skipping remember: %s changed on disk since the approval was requested; %s", g.store.Project.Path, pendingAdvice)
+
+	stale := changed
+	if entry.Diverged {
+		stale = !changed || !bytes.Equal(current, entry.DivergenceSnapshot)
+	}
+	if stale {
+		return skippedRemember(path, rules, "changed on disk since the approval was requested")
 	}
 
 	strategy := approve.WriteDirect
@@ -197,20 +325,43 @@ func (g *gate) persistRemembered(call approvalCall, entry *pendingEntry, rules [
 	}
 
 	var failures []string
-	for _, tokens := range rules {
-		if err := g.store.AppendProjectAllowPrefix(tokens, strategy); err != nil {
-			failures = append(failures, rememberFailure(g.store.Project.Path, err))
+	for _, rule := range rules {
+		if err := g.store.AppendProjectAllowPrefix(rule.Tokens, strategy); err != nil {
+			failures = append(failures, rememberFailure(path, rule, err))
 		}
 	}
 
 	return strings.Join(failures, "; ")
 }
 
+// skippedRemember words a skip that applies to every rule of the round. reason finishes the
+// sentence that begins with the project file's path.
+func skippedRemember(path string, rules []rememberRule, reason string) string {
+	var out []string
+	if slices.ContainsFunc(rules, func(r rememberRule) bool { return r.Retryable }) {
+		out = append(out, fmt.Sprintf("skipping remember: %s %s; %s", path, reason, pendingAdvice))
+	}
+
+	for _, rule := range rules {
+		if !rule.Retryable {
+			out = append(out, unsavedRule(path, rule, reason))
+		}
+	}
+
+	return strings.Join(out, "; ")
+}
+
+// unsavedRule words a skipped rule whose commands no longer prompt. It names the rule and the
+// file and leaves out the advice to call again, because a new call would not offer the rule.
+func unsavedRule(path string, rule rememberRule, reason string) string {
+	return fmt.Sprintf("skipping remember: rule %s was not saved because %s %s", renderFlowSeq(rule.Tokens), path, reason)
+}
+
 // rememberFailure words a failed rule write. A file that changed between the divergence check and
 // the write reads like the other skipped remembers.
-func rememberFailure(path string, err error) string {
+func rememberFailure(path string, rule rememberRule, err error) string {
 	if errors.Is(err, approve.ErrProjectChanged) {
-		return fmt.Sprintf("skipping remember: %s changed on disk since the approval was requested; %s", path, pendingAdvice)
+		return skippedRemember(path, []rememberRule{rule}, "changed on disk since the approval was requested")
 	}
 
 	return fmt.Sprintf("remember write failed: %v", err)
