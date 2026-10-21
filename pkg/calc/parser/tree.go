@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"math/big"
@@ -15,7 +16,7 @@ import (
 )
 
 type Node interface {
-	Eval(*Env) (*unified.Real, error)
+	Eval(context.Context, *Env) (*unified.Real, error)
 }
 
 type binding struct {
@@ -143,7 +144,7 @@ type NumberNode struct {
 	Value *unified.Real
 }
 
-func (n *NumberNode) Eval(_ *Env) (*unified.Real, error) {
+func (n *NumberNode) Eval(_ context.Context, _ *Env) (*unified.Real, error) {
 	return n.Value, nil
 }
 
@@ -153,13 +154,13 @@ type BinaryNode struct {
 	Right Node
 }
 
-func (n *BinaryNode) Eval(env *Env) (*unified.Real, error) {
-	l, err := n.Left.Eval(env)
+func (n *BinaryNode) Eval(ctx context.Context, env *Env) (*unified.Real, error) {
+	l, err := n.Left.Eval(ctx, env)
 	if err != nil {
 		return nil, err
 	}
 
-	r, err := n.Right.Eval(env)
+	r, err := n.Right.Eval(ctx, env)
 	if err != nil {
 		return nil, err
 	}
@@ -181,23 +182,23 @@ func (n *BinaryNode) Eval(env *Env) (*unified.Real, error) {
 		return l.Divide(r), nil
 
 	case tokens.OP_POW:
-		return power(l, r, env.precision)
+		return power(ctx, l, r, env.precision)
 
 	case tokens.OP_PERCENT:
 		if r.IsZero() {
 			return nil, fmt.Errorf("modulo by zero")
 		}
-		return modulo(l, r, env.precision)
+		return modulo(ctx, l, r, env.precision)
 
 	case tokens.OP_SHL:
-		shiftCount, err := extractInteger(r, n.Op, env.precision)
+		shiftCount, err := extractInteger(ctx, r, n.Op, env.precision)
 		if err != nil {
 			return nil, err
 		}
 		return l.ShiftLeft(shiftCount), nil
 
 	case tokens.OP_SHR:
-		shiftCount, err := extractInteger(r, n.Op, env.precision)
+		shiftCount, err := extractInteger(ctx, r, n.Op, env.precision)
 		if err != nil {
 			return nil, err
 		}
@@ -213,8 +214,8 @@ type UnaryNode struct {
 	Expr Node
 }
 
-func (n *UnaryNode) Eval(env *Env) (*unified.Real, error) {
-	val, err := n.Expr.Eval(env)
+func (n *UnaryNode) Eval(ctx context.Context, env *Env) (*unified.Real, error) {
+	val, err := n.Expr.Eval(ctx, env)
 	if err != nil {
 		return nil, err
 	}
@@ -236,7 +237,7 @@ type IdentNode struct {
 	Name tokens.Token
 }
 
-func (n *IdentNode) Eval(env *Env) (*unified.Real, error) {
+func (n *IdentNode) Eval(ctx context.Context, env *Env) (*unified.Real, error) {
 	if env == nil {
 		return nil, fmt.Errorf("%s: undefined identifier %q", n.Name.Pos, n.Name.Value)
 	}
@@ -257,7 +258,7 @@ type CallNode struct {
 	Args []Node
 }
 
-func (n *CallNode) Eval(env *Env) (*unified.Real, error) {
+func (n *CallNode) Eval(ctx context.Context, env *Env) (*unified.Real, error) {
 	fn, ok := functions[n.Func.Value]
 	if !ok {
 		return nil, fmt.Errorf("%s: unknown function %q", n.Func.Pos, n.Func.Value)
@@ -269,16 +270,16 @@ func (n *CallNode) Eval(env *Env) (*unified.Real, error) {
 
 	args := make([]*unified.Real, len(n.Args))
 	for i, a := range n.Args {
-		val, err := a.Eval(env)
+		val, err := a.Eval(ctx, env)
 		if err != nil {
 			return nil, err
 		}
 		args[i] = val
 	}
 
-	result, err := fn.fn(env, args)
+	result, err := fn.fn(ctx, env, args)
 	if err != nil {
-		return nil, fmt.Errorf("%s: %w", n.Func.Pos, domainError(n.Func.Value, args, env.precision, err))
+		return nil, fmt.Errorf("%s: %w", n.Func.Pos, domainError(ctx, n.Func.Value, args, env.precision, err))
 	}
 	return result, nil
 }
@@ -288,12 +289,12 @@ type AssignNode struct {
 	Value Node
 }
 
-func (n *AssignNode) Eval(env *Env) (*unified.Real, error) {
+func (n *AssignNode) Eval(ctx context.Context, env *Env) (*unified.Real, error) {
 	if env == nil {
 		env = NewEnv()
 	}
 
-	val, err := n.Value.Eval(env)
+	val, err := n.Value.Eval(ctx, env)
 	if err != nil {
 		return nil, err
 	}
@@ -310,29 +311,29 @@ type CommentNode struct {
 	Expr Node
 }
 
-func (n *CommentNode) Eval(env *Env) (*unified.Real, error) {
+func (n *CommentNode) Eval(ctx context.Context, env *Env) (*unified.Real, error) {
 	if env.trace && env.traceOut != nil {
 		fmt.Fprintf(env.traceOut, "# %s\n", n.Text)
 	}
-	return n.Expr.Eval(env)
+	return n.Expr.Eval(ctx, env)
 }
 
 // modulo computes a % b = a - b * floor(a/b) for real numbers
-func modulo(a, b *unified.Real, precision int) (*unified.Real, error) {
+func modulo(ctx context.Context, a, b *unified.Real, precision int) (*unified.Real, error) {
 	// scale = 2^(-precision)
 	scale := new(big.Int).Exp(big.NewInt(2), big.NewInt(int64(-precision)), nil)
 
 	// Approximate a
-	aApproxInt := constructive.Approximate(a.Constructive(), precision)
-	if aApproxInt == nil {
-		return nil, fmt.Errorf("failed to approximate dividend for modulo")
+	aApproxInt, err := constructive.Approximate(ctx, a.Constructive(), precision)
+	if err != nil {
+		return nil, fmt.Errorf("failed to approximate dividend for modulo: %w", err)
 	}
 	aApproxRat := new(big.Rat).SetFrac(aApproxInt, scale)
 
 	// Approximate b
-	bApproxInt := constructive.Approximate(b.Constructive(), precision)
-	if bApproxInt == nil {
-		return nil, fmt.Errorf("failed to approximate divisor for modulo")
+	bApproxInt, err := constructive.Approximate(ctx, b.Constructive(), precision)
+	if err != nil {
+		return nil, fmt.Errorf("failed to approximate divisor for modulo: %w", err)
 	}
 	bApproxRat := new(big.Rat).SetFrac(bApproxInt, scale)
 
@@ -358,14 +359,14 @@ func modulo(a, b *unified.Real, precision int) (*unified.Real, error) {
 
 // extractInteger validates that a Real number is an integer and extracts it as an int.
 // Returns an error if the number is not an integer or is out of range.
-func extractInteger(r *unified.Real, op tokens.Token, precision int) (int, error) {
+func extractInteger(ctx context.Context, r *unified.Real, op tokens.Token, precision int) (int, error) {
 	// scale = 2^(-precision)
 	scale := new(big.Int).Exp(big.NewInt(2), big.NewInt(int64(-precision)), nil)
 
 	// Approximate r
-	approxInt := constructive.Approximate(r.Constructive(), precision)
-	if approxInt == nil {
-		return 0, fmt.Errorf("%s: failed to approximate shift count", op.Pos)
+	approxInt, err := constructive.Approximate(ctx, r.Constructive(), precision)
+	if err != nil {
+		return 0, fmt.Errorf("%s: failed to approximate shift count: %w", op.Pos, err)
 	}
 
 	// Check if denominator is 1 (i.e., it's an integer)
@@ -383,21 +384,21 @@ func extractInteger(r *unified.Real, op tokens.Token, precision int) (int, error
 	return int(num.Int64()), nil
 }
 
-func power(l, r *unified.Real, precision int) (*unified.Real, error) {
+func power(ctx context.Context, l, r *unified.Real, precision int) (*unified.Real, error) {
 	// Approximate both operands to check for special cases
 	scale := new(big.Int).Exp(big.NewInt(2), big.NewInt(int64(-precision)), nil)
 
 	// Approximate left (base
-	lApprox := constructive.Approximate(l.Constructive(), precision)
-	if lApprox == nil {
-		return nil, fmt.Errorf("failed to approximate base")
+	lApprox, err := constructive.Approximate(ctx, l.Constructive(), precision)
+	if err != nil {
+		return nil, fmt.Errorf("failed to approximate base: %w", err)
 	}
 	lRat := new(big.Rat).SetFrac(lApprox, scale)
 
 	// Approximate right (exponent)
-	rApprox := constructive.Approximate(r.Constructive(), precision)
-	if rApprox == nil {
-		return nil, fmt.Errorf("failed to approximate exponent")
+	rApprox, err := constructive.Approximate(ctx, r.Constructive(), precision)
+	if err != nil {
+		return nil, fmt.Errorf("failed to approximate exponent: %w", err)
 	}
 	rRat := new(big.Rat).SetFrac(rApprox, scale)
 

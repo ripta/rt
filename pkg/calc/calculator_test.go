@@ -1,6 +1,7 @@
 package calc
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -466,7 +467,11 @@ func TestSTDINBindsResults(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Evaluate(%s): %v", test.ref, err)
 			}
-			if got := constructive.Text(res.Constructive(), 0, 10); got != test.want {
+			got, err := constructive.Text(context.Background(), res.Constructive(), 0, 10)
+			if err != nil {
+				t.Fatalf("Text(%s): %v", test.ref, err)
+			}
+			if got != test.want {
 				t.Fatalf("%s mismatch: got %s, want %s", test.ref, got, test.want)
 			}
 		})
@@ -597,6 +602,12 @@ var positionalBindingTests = []positionalBindingTest{
 		name:    "reference to a later index fails",
 		args:    []string{"$1", "2"},
 		wantErr: "no result for line 1",
+	},
+	{
+		name:    "stops at a result that cannot render",
+		args:    []string{"1", "√(-4)", "7"},
+		wantOut: "1\n",
+		wantErr: "formatting result:",
 	},
 	{
 		name:    "stops at the first error",
@@ -779,8 +790,107 @@ func TestLoadRecursiveError(t *testing.T) {
 func approxFloat(t *testing.T, res *unified.Real) float64 {
 	t.Helper()
 	cons := res.Constructive()
-	text := constructive.Text(cons, 30, 10)
+	text, err := constructive.Text(context.Background(), cons, 30, 10)
+	if err != nil {
+		t.Fatalf("Text: %v", err)
+	}
 	var f float64
 	fmt.Sscanf(text, "%f", &f)
 	return f
+}
+
+type renderFailureTest struct {
+	name        string
+	lines       []string
+	wantErrLine int
+	wantCount   int
+	wantBound   map[string]string
+	wantUnbound []string
+}
+
+var renderFailureTests = []renderFailureTest{
+	{
+		name:        "failed render leaves its number unbound",
+		lines:       []string{"1", "√(-4)", "3"},
+		wantErrLine: 1,
+		wantCount:   3,
+		wantBound:   map[string]string{"$0": "1", "$2": "3"},
+		wantUnbound: []string{"$1"},
+	},
+	{
+		name:        "failed render on the first line",
+		lines:       []string{"√(-4)", "$0"},
+		wantErrLine: 0,
+		wantCount:   2,
+		wantUnbound: []string{"$0", "$1"},
+	},
+}
+
+func TestProcessLineRenderFailure(t *testing.T) {
+	for _, test := range renderFailureTests {
+		t.Run(test.name, func(t *testing.T) {
+			c := &Calculator{DecimalPlaces: 30}
+
+			var errs []error
+			stderr := captureStderr(t, func() {
+				captureStdout(t, func() {
+					for _, line := range test.lines {
+						errs = append(errs, c.processLine(line, ModeREPL, 0))
+					}
+				})
+			})
+
+			if err := errs[test.wantErrLine]; err == nil || !strings.Contains(err.Error(), "formatting result:") {
+				t.Fatalf("line %d error = %v, want substring %q", test.wantErrLine, err, "formatting result:")
+			}
+			if !strings.Contains(stderr, "formatting result:") {
+				t.Fatalf("stderr = %q, want substring %q", stderr, "formatting result:")
+			}
+
+			if c.count != test.wantCount {
+				t.Fatalf("count = %d, want %d", c.count, test.wantCount)
+			}
+			if len(c.history) != len(test.lines) {
+				t.Fatalf("history length = %d, want %d", len(c.history), len(test.lines))
+			}
+
+			for ref, want := range test.wantBound {
+				res, err := c.Evaluate(ref)
+				if err != nil {
+					t.Fatalf("Evaluate(%s): %v", ref, err)
+				}
+				got, err := constructive.Text(context.Background(), res.Constructive(), 0, 10)
+				if err != nil {
+					t.Fatalf("Text(%s): %v", ref, err)
+				}
+				if got != want {
+					t.Fatalf("%s = %s, want %s", ref, got, want)
+				}
+			}
+
+			for _, ref := range test.wantUnbound {
+				if _, err := c.Evaluate(ref); err == nil || !strings.Contains(err.Error(), "no result for line") {
+					t.Fatalf("Evaluate(%s) error = %v, want an unbound result", ref, err)
+				}
+			}
+		})
+	}
+}
+
+func TestDisplayResultRenderFailure(t *testing.T) {
+	c := &Calculator{DecimalPlaces: 30}
+
+	res, err := c.Evaluate("√(-4)")
+	if err != nil {
+		t.Fatalf("Evaluate: %v", err)
+	}
+
+	var got error
+	out := captureStdout(t, func() { got = c.DisplayResult(context.Background(), res) })
+	if got == nil || !strings.Contains(got.Error(), "formatting result:") {
+		t.Fatalf("DisplayResult error = %v, want substring %q", got, "formatting result:")
+	}
+	if out != "" {
+		t.Fatalf("stdout = %q, want nothing printed", out)
+	}
 }

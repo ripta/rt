@@ -2,6 +2,7 @@ package parser
 
 import (
 	"bytes"
+	"context"
 	"strings"
 	"testing"
 )
@@ -84,7 +85,7 @@ func TestCommentTrace(t *testing.T) {
 				t.Fatalf("parse error: %v", err)
 			}
 
-			result, err := node.Eval(env)
+			result, err := node.Eval(context.Background(), env)
 			if err != nil {
 				t.Fatalf("eval error: %v", err)
 			}
