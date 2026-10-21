@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime/debug"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -22,6 +23,10 @@ import (
 var (
 	ErrInvalidMetaCommand = errors.New("invalid meta-command")
 	ErrInvalidMetaValue   = errors.New("invalid value")
+	ErrRecursiveLoad      = errors.New("recursive .load")
+	ErrInvalidFormat      = errors.New("invalid .format")
+	ErrInvalidNext        = errors.New("invalid .next")
+	ErrLoadStopped        = errors.New("load stopped")
 )
 
 // ExecutionMode represents the context in which an expression is being evaluated
@@ -45,7 +50,94 @@ type Calculator struct {
 
 	count   int
 	env     *parser.Env
-	history []string
+	history []historyEntry
+
+	// now supplies the timestamp .save writes. A nil now means time.Now.
+	now func() time.Time
+
+	// loading holds the files of the .load calls in progress, outermost first.
+	loading []loadingFile
+}
+
+// historyEntry is an expression that ran, with the session line number it ran on.
+type historyEntry struct {
+	Expr string
+	Line int
+}
+
+type loadingFile struct {
+	name      string
+	info      os.FileInfo
+	numbering *loadNumbering
+}
+
+// loadNumbering is the numbering context of one .load. A nested .load gets its own, so each file's
+// line numbers stay independent of the files that load it.
+type loadNumbering struct {
+	// version is the format version the file declares. A file with no .format is version 1.
+	version int
+
+	// headerOpen is true until the first line that is not a .format or .set line.
+	headerOpen bool
+
+	// line is the file number of the next line to process.
+	line int
+
+	// sessions maps the file number of each expression that bound a result to its session number.
+	sessions map[int]int
+
+	// first and last are the lowest and highest session numbers this load bound, when bound is true.
+	first, last int
+	bound       bool
+}
+
+func newLoadNumbering() *loadNumbering {
+	return &loadNumbering{
+		version:    minFormatVersion,
+		headerOpen: true,
+		sessions:   make(map[int]int),
+	}
+}
+
+// session returns the session number that file line n was bound to. Version 1 files carry no line
+// numbers, so none of their references map.
+func (n *loadNumbering) session(line int) (int, bool) {
+	if n.version < 2 {
+		return 0, false
+	}
+
+	s, ok := n.sessions[line]
+	return s, ok
+}
+
+func (n *loadNumbering) record(session int) {
+	if !n.bound {
+		n.first = session
+		n.bound = true
+	}
+
+	n.last = session
+}
+
+func (n *loadNumbering) summary() string {
+	switch {
+	case !n.bound:
+		return "no results bound"
+	case n.first == n.last:
+		return fmt.Sprintf("result $%d", n.first)
+	default:
+		return fmt.Sprintf("results $%d-$%d", n.first, n.last)
+	}
+}
+
+// isStructural reports whether err leaves the numbering of the lines after it unknown. A nested
+// load that stopped is not structural for the file that loaded it.
+func isStructural(err error) bool {
+	if errors.Is(err, ErrLoadStopped) {
+		return false
+	}
+
+	return errors.Is(err, ErrInvalidFormat) || errors.Is(err, ErrInvalidNext)
 }
 
 func (c *Calculator) Evaluate(expr string) (*unified.Real, error) {
@@ -64,6 +156,10 @@ func (c *Calculator) Evaluate(expr string) (*unified.Real, error) {
 // mode determines error reporting style and whether results are displayed.
 // lineNum is used for error messages in ModeLoad (ignored otherwise).
 func (c *Calculator) processLine(expr string, mode ExecutionMode, lineNum int) error {
+	if mode == ModeLoad {
+		return c.processLoadedLine(expr, lineNum)
+	}
+
 	defer func() {
 		c.count++
 	}()
@@ -83,10 +179,7 @@ func (c *Calculator) processLine(expr string, mode ExecutionMode, lineNum int) e
 		return err
 	}
 
-	// ModeREPL and ModeSTDIN adds to history before evaluation
-	if mode == ModeREPL || mode == ModeSTDIN {
-		c.history = append(c.history, expr)
-	}
+	c.history = append(c.history, historyEntry{Expr: expr, Line: c.count})
 
 	res, err := c.Evaluate(expr)
 	if err != nil {
@@ -94,21 +187,79 @@ func (c *Calculator) processLine(expr string, mode ExecutionMode, lineNum int) e
 		return err
 	}
 
-	if mode == ModeREPL {
-		c.env.SetConstant(fmt.Sprintf("$%d", c.count), res)
-	}
-
-	// ModeLoad adds to history after successful evaluation
-	if mode == ModeLoad {
-		c.history = append(c.history, expr)
-	}
-
-	// Display results (except in Load mode)
-	if mode != ModeLoad {
-		c.DisplayResult(res)
-	}
+	c.bindResult(res)
+	c.DisplayResult(res)
 
 	return nil
+}
+
+// processLoadedLine processes one non-blank line of a file being loaded. The header's .format and
+// .set lines take no number. Every later line takes the next file number and the next session
+// number, so loaded lines are numbered as they would be if typed at the prompt.
+func (c *Calculator) processLoadedLine(expr string, lineNum int) error {
+	num := c.loading[len(c.loading)-1].numbering
+	expr = strings.TrimSpace(expr)
+
+	if num.headerOpen && isHeaderLine(expr) {
+		err := c.handleMetaCommand(expr)
+		if err != nil && !isStructural(err) {
+			c.reportError(err, ModeLoad, lineNum)
+		}
+
+		return err
+	}
+
+	num.headerOpen = false
+
+	// A .next handler sets the line to one below its target, and this increment lands on it.
+	defer func() {
+		num.line++
+		c.count++
+	}()
+
+	if strings.HasPrefix(expr, ".") {
+		err := c.handleMetaCommand(expr)
+		if err != nil && !isStructural(err) {
+			c.reportError(err, ModeLoad, lineNum)
+		}
+
+		return err
+	}
+
+	rewritten, err := rewriteResultRefs(expr, num)
+
+	var res *unified.Real
+	if err == nil {
+		res, err = c.Evaluate(rewritten)
+	}
+
+	if err != nil {
+		c.reportError(err, ModeLoad, lineNum)
+		return err
+	}
+
+	c.bindResult(res)
+	c.history = append(c.history, historyEntry{Expr: rewritten, Line: c.count})
+
+	num.sessions[num.line] = c.count
+	num.record(c.count)
+
+	return nil
+}
+
+// isHeaderLine reports whether expr is a .format or .set meta-command.
+func isHeaderLine(expr string) bool {
+	if !strings.HasPrefix(expr, ".") {
+		return false
+	}
+
+	name, err := findByPrefix(strings.Fields(expr)[0], metaCommandNames)
+	return err == nil && (name == ".format" || name == ".set")
+}
+
+// bindResult binds res as the constant $N for the current line number.
+func (c *Calculator) bindResult(res *unified.Real) {
+	c.env.SetConstant(fmt.Sprintf("$%d", c.count), res)
 }
 
 // reportError reports an error using the appropriate method for the execution mode
@@ -189,6 +340,9 @@ type metaCommandFunc func(*Calculator, []string) error
 // metaCommands is the list of available meta-commands
 var metaCommands map[string]metaCommandFunc
 
+// metaCommandNames maps each meta-command name to itself, so a prefix can be resolved to a name.
+var metaCommandNames map[string]string
+
 func init() {
 	metaCommands = map[string]metaCommandFunc{
 		".help": func(c *Calculator, args []string) error {
@@ -214,6 +368,17 @@ func init() {
 		".load": func(c *Calculator, args []string) error {
 			return c.handleLoad(args)
 		},
+		".format": func(c *Calculator, args []string) error {
+			return c.handleFormat(args)
+		},
+		".next": func(c *Calculator, args []string) error {
+			return c.handleNext(args)
+		},
+	}
+
+	metaCommandNames = make(map[string]string, len(metaCommands))
+	for name := range metaCommands {
+		metaCommandNames[name] = name
 	}
 }
 
@@ -298,6 +463,92 @@ func (c *Calculator) handleToggle(args []string) error {
 	return nil
 }
 
+const (
+	// currentFormatVersion is the session file format .save writes. A file with no .format is version 1.
+	currentFormatVersion = 2
+	minFormatVersion     = 1
+)
+
+// sessionFormat holds what a .format line declares.
+type sessionFormat struct {
+	Version int
+}
+
+// parseFormat parses the key=value arguments of .format. Unknown keys are ignored, so new metadata
+// can be added without a version bump.
+func parseFormat(args []string) (sessionFormat, error) {
+	var format sessionFormat
+
+	for _, arg := range args {
+		key, value, ok := strings.Cut(arg, "=")
+		if !ok {
+			return format, fmt.Errorf("%w: expected key=value, got %q", ErrInvalidFormat, arg)
+		}
+
+		if key != "version" {
+			continue
+		}
+
+		v, err := strconv.Atoi(value)
+		if err != nil || v < minFormatVersion {
+			return format, fmt.Errorf("%w: malformed version %q", ErrInvalidFormat, value)
+		}
+
+		if v > currentFormatVersion {
+			return format, fmt.Errorf("%w: version %d is newer than the supported version %d", ErrInvalidFormat, v, currentFormatVersion)
+		}
+
+		format.Version = v
+	}
+
+	if format.Version == 0 {
+		return format, fmt.Errorf("%w: missing version", ErrInvalidFormat)
+	}
+
+	return format, nil
+}
+
+// handleFormat validates a .format line. In a file being loaded, it also sets the version the
+// file's lines are read with.
+func (c *Calculator) handleFormat(args []string) error {
+	format, err := parseFormat(args)
+	if err != nil {
+		return err
+	}
+
+	if len(c.loading) > 0 {
+		c.loading[len(c.loading)-1].numbering.version = format.Version
+	}
+
+	return nil
+}
+
+// handleNext sets the number of the next line in the current input: the session at the prompt, or
+// the file being loaded. Numbers only move forward.
+func (c *Calculator) handleNext(args []string) error {
+	if len(args) != 1 {
+		return fmt.Errorf("%w: usage: .next <n>", ErrInvalidNext)
+	}
+
+	n, err := strconv.Atoi(args[0])
+	if err != nil {
+		return fmt.Errorf("%w: expected a line number, got %q", ErrInvalidNext, args[0])
+	}
+
+	current := &c.count
+	if len(c.loading) > 0 {
+		current = &c.loading[len(c.loading)-1].numbering.line
+	}
+
+	if n <= *current {
+		return fmt.Errorf("%w: line %d is not after the current line %d", ErrInvalidNext, n, *current)
+	}
+
+	// The caller advances the line once more after this command, so stop one short.
+	*current = n - 1
+	return nil
+}
+
 const defaultFilename = "session.txt"
 
 // getSessionPath resolves the session file path based on user input.
@@ -356,11 +607,17 @@ func (c *Calculator) handleSave(args []string) error {
 	w := bufio.NewWriter(f)
 	defer w.Flush()
 
-	fmt.Fprintf(w, "# Calculator Session\n")
-	fmt.Fprintf(w, "# Saved: %s\n\n", time.Now().Format("2006-01-02 15:04:05"))
+	fmt.Fprintf(w, ".format version=%d saved=%s\n", currentFormatVersion, c.timestamp().UTC().Format(time.RFC3339))
 
-	// Write settings as .set commands
-	for name, setting := range settingsRegistry {
+	names := make([]string, 0, len(settingsRegistry))
+	for name := range settingsRegistry {
+		names = append(names, name)
+	}
+
+	sort.Strings(names)
+
+	for _, name := range names {
+		setting := settingsRegistry[name]
 		switch setting.Type {
 		case SettingTypeBool:
 			value := setting.GetBool(c)
@@ -375,13 +632,27 @@ func (c *Calculator) handleSave(args []string) error {
 		fmt.Fprintln(w)
 	}
 
-	// Write expression history
-	for _, expr := range c.history {
-		fmt.Fprintln(w, expr)
+	// The header lines are deliberately not counted, so the first entry is compared against line 0.
+	want := 0
+	for _, entry := range c.history {
+		if entry.Line != want {
+			fmt.Fprintf(w, ".next %d\n", entry.Line)
+		}
+
+		fmt.Fprintln(w, entry.Expr)
+		want = entry.Line + 1
 	}
 
 	fmt.Printf("Session saved to %s\n", filename)
 	return nil
+}
+
+func (c *Calculator) timestamp() time.Time {
+	if c.now != nil {
+		return c.now()
+	}
+
+	return time.Now()
 }
 
 // handleLoad loads a session from a file after first clearing current state.
@@ -402,8 +673,49 @@ func (c *Calculator) handleLoad(args []string) error {
 	}
 	defer f.Close()
 
-	c.history = nil
-	c.env = parser.NewEnv()
+	info, err := f.Stat()
+	if err != nil {
+		return fmt.Errorf("failed to stat file: %w", err)
+	}
+
+	// Compare by file identity, so a symlink or another path to the same file is still caught.
+	for i, lf := range c.loading {
+		if os.SameFile(lf.info, info) {
+			var chain []string
+			for _, outer := range c.loading[i:] {
+				chain = append(chain, outer.name)
+			}
+
+			chain = append(chain, filename)
+			return fmt.Errorf("%w: %s", ErrRecursiveLoad, strings.Join(chain, " -> "))
+		}
+	}
+
+	num := newLoadNumbering()
+
+	c.loading = append(c.loading, loadingFile{name: filename, info: info, numbering: num})
+	defer func() {
+		c.loading = c.loading[:len(c.loading)-1]
+	}()
+
+	// Result history is never cleared by user actions, so only user variables and history reset. A
+	// nested load is part of the load that ran it, which already reset both.
+	if len(c.loading) == 1 {
+		env := parser.NewEnv()
+		if c.env != nil {
+			env.CopyResults(c.env)
+		}
+
+		c.history = nil
+		c.env = env
+	}
+
+	// The .load line keeps its own number and the loaded lines follow it. The line that ran this
+	// command advances once more when it returns, so hand that one back.
+	c.count++
+	defer func() {
+		c.count--
+	}()
 
 	scanner := bufio.NewScanner(f)
 	lineNum := 0
@@ -416,15 +728,18 @@ func (c *Calculator) handleLoad(args []string) error {
 			continue
 		}
 
-		// Errors are reported as warnings but don't stop loading
-		c.processLine(line, ModeLoad, lineNum)
+		// Expression errors are reported as warnings and don't stop loading. A structural error
+		// leaves the numbering of every later line unknown.
+		if err := c.processLine(line, ModeLoad, lineNum); isStructural(err) {
+			return fmt.Errorf("%w at line %d of %s, keeping %s: %w", ErrLoadStopped, lineNum, filename, num.summary(), err)
+		}
 	}
 
 	if err := scanner.Err(); err != nil {
 		return fmt.Errorf("error reading file: %w", err)
 	}
 
-	fmt.Printf("Loaded from %s\n", filename)
+	fmt.Printf("Loaded from %s: %s\n", filename, num.summary())
 	return nil
 }
 
@@ -500,7 +815,9 @@ func (c *Calculator) handleHelp() {
 	fmt.Println("  .show functions         - List available functions")
 	fmt.Println("  .toggle <setting>       - Toggle a boolean setting")
 	fmt.Println("  .save [path]            - Save session (default: ~/.local/state/rt/calc/session.txt)")
-	fmt.Println("  .load [path]            - Load session (default: ~/.local/state/rt/calc/session.txt)")
+	fmt.Println("  .load [path]            - Load session, keeping $N results (default: ~/.local/state/rt/calc/session.txt)")
+	fmt.Println("  .next <n>               - Set the number of the next line, which must be after the current one")
+	fmt.Println("  .format version=<n>     - Declare the session file format version, as the first line of a saved file")
 	fmt.Println("  .examples               - Show example expressions")
 	fmt.Println("  .help                   - Show this help message")
 	fmt.Println()

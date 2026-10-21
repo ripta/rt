@@ -925,3 +925,42 @@ func TestResultHistoryImmutable(t *testing.T) {
 		t.Fatalf("error mismatch: got %v, want substring %q", err, "cannot assign to constant")
 	}
 }
+
+type resultAssignTest struct {
+	Name    string
+	Define  bool
+	Source  string
+	WantErr string
+}
+
+var resultAssignTests = []resultAssignTest{
+	{Name: "undefined result", Source: "$5 = 3", WantErr: "cannot assign to constant"},
+	{Name: "defined result", Define: true, Source: "$5 = 3", WantErr: "cannot assign to constant"},
+}
+
+func TestResultAssignRejected(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range resultAssignTests {
+		t.Run(test.Name, func(t *testing.T) {
+			t.Parallel()
+
+			env := NewEnv()
+			if test.Define {
+				env.SetConstant("$5", makeReal(7))
+			}
+
+			_, err := parseAndEval(t, test.Source, env)
+			if err == nil {
+				t.Fatalf("expected error assigning to %s", test.Source)
+			}
+			if !strings.Contains(err.Error(), test.WantErr) {
+				t.Fatalf("error mismatch: got %v, want substring %q", err, test.WantErr)
+			}
+
+			if _, ok := env.Get("$5"); ok != test.Define {
+				t.Fatalf("$5 defined = %v after failed assignment, want %v", ok, test.Define)
+			}
+		})
+	}
+}

@@ -1,8 +1,12 @@
 package calc
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"math"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -91,6 +95,26 @@ var handleMetaCommandTests = []handleMetaCommandTest{
 		name:    ".e alias for .examples",
 		cmd:     ".e",
 		wantErr: false,
+	},
+	{
+		name:    ".next moves forward",
+		cmd:     ".next 5",
+		wantErr: false,
+	},
+	{
+		name:    ".n alias for .next",
+		cmd:     ".n 5",
+		wantErr: false,
+	},
+	{
+		name:    ".next to the current line",
+		cmd:     ".next 0",
+		wantErr: true,
+	},
+	{
+		name:    ".next without a number",
+		cmd:     ".next",
+		wantErr: true,
 	},
 }
 
@@ -404,19 +428,48 @@ func TestREPLCrossReference(t *testing.T) {
 	}
 }
 
-func TestSTDINDoesNotStoreHistory(t *testing.T) {
-	c := &Calculator{DecimalPlaces: 30}
+type stdinBindingTest struct {
+	name  string
+	lines []string
+	ref   string
+	want  string
+}
 
-	if err := c.processLine("42", ModeSTDIN, 0); err != nil {
-		t.Fatalf("processLine: %v", err)
-	}
+var stdinBindingTests = []stdinBindingTest{
+	{
+		name:  "first line binds $0",
+		lines: []string{"42", "$0 + 1"},
+		ref:   "$1",
+		want:  "43",
+	},
+	{
+		name:  "failed line still takes a number",
+		lines: []string{"1/0", "5", "$1 * 2"},
+		ref:   "$2",
+		want:  "10",
+	},
+}
 
-	_, err := c.Evaluate("$0")
-	if err == nil {
-		t.Fatalf("expected error for $0 in STDIN mode")
-	}
-	if !strings.Contains(err.Error(), "no result for line 0") {
-		t.Fatalf("error mismatch: got %v, want substring %q", err, "no result for line 0")
+func TestSTDINBindsResults(t *testing.T) {
+	for _, test := range stdinBindingTests {
+		t.Run(test.name, func(t *testing.T) {
+			c := &Calculator{DecimalPlaces: 30}
+
+			captureStdout(t, func() {
+				for _, line := range test.lines {
+					// Some lines fail on purpose. Only the resulting bindings matter.
+					_ = c.processLine(line, ModeSTDIN, 0)
+				}
+			})
+
+			res, err := c.Evaluate(test.ref)
+			if err != nil {
+				t.Fatalf("Evaluate(%s): %v", test.ref, err)
+			}
+			if got := constructive.Text(res.Constructive(), 0, 10); got != test.want {
+				t.Fatalf("%s mismatch: got %s, want %s", test.ref, got, test.want)
+			}
+		})
 	}
 }
 
@@ -471,6 +524,255 @@ func TestREPLResultHistorySurvivesErrors(t *testing.T) {
 	}
 	if got := approxFloat(t, res); math.Abs(got-20) > 1e-9 {
 		t.Fatalf("$2 = %v, want 20", got)
+	}
+}
+
+func TestREPLResultAssignRejected(t *testing.T) {
+	c := &Calculator{DecimalPlaces: 30}
+
+	if err := c.processLine("$3 = 1", ModeREPL, 0); err == nil {
+		t.Fatalf("expected error assigning to undefined $3")
+	} else if !strings.Contains(err.Error(), "cannot assign to constant") {
+		t.Fatalf("error mismatch: got %v, want substring %q", err, "cannot assign to constant")
+	}
+
+	if _, err := c.Evaluate("$3"); err == nil || !strings.Contains(err.Error(), "no result for line 3") {
+		t.Fatalf("Evaluate($3) error = %v, want substring %q", err, "no result for line 3")
+	}
+}
+
+func TestLoadKeepsResultHistory(t *testing.T) {
+	c := &Calculator{DecimalPlaces: 30}
+
+	if err := c.processLine("5", ModeREPL, 0); err != nil {
+		t.Fatalf("processLine(5): %v", err)
+	}
+	if err := c.processLine("x = 9", ModeREPL, 0); err != nil {
+		t.Fatalf("processLine(x = 9): %v", err)
+	}
+
+	path := filepath.Join(t.TempDir(), "session.calc")
+	if err := os.WriteFile(path, []byte("y = 2\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	if err := c.handleLoad([]string{path}); err != nil {
+		t.Fatalf("handleLoad: %v", err)
+	}
+
+	res, err := c.Evaluate("$0")
+	if err != nil {
+		t.Fatalf("Evaluate($0) after load: %v", err)
+	}
+	if got := approxFloat(t, res); math.Abs(got-5) > 1e-9 {
+		t.Fatalf("$0 = %v, want 5", got)
+	}
+
+	if err := c.processLine("$0 = 1", ModeREPL, 0); err == nil {
+		t.Fatalf("expected $0 to stay immutable after load")
+	}
+
+	if _, err := c.Evaluate("x"); err == nil {
+		t.Fatalf("expected user variable x to be cleared by load")
+	}
+	if _, err := c.Evaluate("y"); err != nil {
+		t.Fatalf("Evaluate(y) from loaded file: %v", err)
+	}
+}
+
+type positionalBindingTest struct {
+	name    string
+	args    []string
+	wantOut string
+	wantErr string
+}
+
+var positionalBindingTests = []positionalBindingTest{
+	{
+		name:    "later argument references earlier",
+		args:    []string{"2+3", "$0*2"},
+		wantOut: "5\n10\n",
+	},
+	{
+		name:    "reference to a later index fails",
+		args:    []string{"$1", "2"},
+		wantErr: "no result for line 1",
+	},
+	{
+		name:    "stops at the first error",
+		args:    []string{"1", "$5", "7"},
+		wantOut: "1\n",
+		wantErr: "no result for line 5",
+	},
+}
+
+func TestPositionalArgsBindResults(t *testing.T) {
+	for _, test := range positionalBindingTests {
+		t.Run(test.name, func(t *testing.T) {
+			cmd := NewCommand()
+			cmd.SetOut(io.Discard)
+			cmd.SetErr(io.Discard)
+			cmd.SetArgs(test.args)
+
+			var err error
+			out := captureStdout(t, func() { err = cmd.Execute() })
+			if out != test.wantOut {
+				t.Fatalf("stdout mismatch: got %q, want %q", out, test.wantOut)
+			}
+
+			if test.wantErr == "" {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), test.wantErr) {
+				t.Fatalf("error mismatch: got %v, want substring %q", err, test.wantErr)
+			}
+		})
+	}
+}
+
+// captureStdout returns what fn wrote to os.Stdout. Results are printed there, not to the
+// command's writer.
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+
+	orig := os.Stdout
+	os.Stdout = w
+	defer func() { os.Stdout = orig }()
+
+	done := make(chan string)
+	go func() {
+		b, _ := io.ReadAll(r)
+		done <- string(b)
+	}()
+
+	fn()
+	w.Close()
+
+	return <-done
+}
+
+type loadCycleTest struct {
+	name string
+
+	// files maps a file name to its contents. "{dir}" in the contents expands to the test's
+	// temp dir, so a file can .load another by absolute path.
+	files    map[string]string
+	symlinks map[string]string
+	start    string
+	wantVars []string
+
+	// wantCount pins how many lines ran, which an unguarded recursion would blow past before
+	// running out of file descriptors.
+	wantCount int
+}
+
+var loadCycleTests = []loadCycleTest{
+	{
+		name:      "self",
+		files:     map[string]string{"a.calc": ".load {dir}/a.calc\nx = 1\n"},
+		start:     "a.calc",
+		wantVars:  []string{"x"},
+		wantCount: 2,
+	},
+	{
+		name: "two files",
+		files: map[string]string{
+			"a.calc": ".load {dir}/b.calc\nx = 1\n",
+			"b.calc": ".load {dir}/a.calc\ny = 2\n",
+		},
+		start:     "a.calc",
+		wantVars:  []string{"x", "y"},
+		wantCount: 4,
+	},
+	{
+		name:      "through symlink",
+		files:     map[string]string{"a.calc": ".load {dir}/link.calc\nx = 1\n"},
+		symlinks:  map[string]string{"link.calc": "a.calc"},
+		start:     "a.calc",
+		wantVars:  []string{"x"},
+		wantCount: 2,
+	},
+}
+
+func TestLoadStopsCycles(t *testing.T) {
+	for _, test := range loadCycleTests {
+		t.Run(test.name, func(t *testing.T) {
+			dir := t.TempDir()
+
+			for name, contents := range test.files {
+				contents = strings.ReplaceAll(contents, "{dir}", dir)
+				if err := os.WriteFile(filepath.Join(dir, name), []byte(contents), 0o600); err != nil {
+					t.Fatalf("WriteFile(%s): %v", name, err)
+				}
+			}
+
+			for name, target := range test.symlinks {
+				if err := os.Symlink(filepath.Join(dir, target), filepath.Join(dir, name)); err != nil {
+					t.Fatalf("Symlink(%s): %v", name, err)
+				}
+			}
+
+			c := &Calculator{DecimalPlaces: 30}
+			if err := c.handleLoad([]string{filepath.Join(dir, test.start)}); err != nil {
+				t.Fatalf("handleLoad: %v", err)
+			}
+
+			if len(c.loading) != 0 {
+				t.Fatalf("loading stack not unwound: %v", c.loading)
+			}
+			if c.count != test.wantCount {
+				t.Fatalf("ran %d lines, want %d", c.count, test.wantCount)
+			}
+
+			for _, name := range test.wantVars {
+				if _, err := c.Evaluate(name); err != nil {
+					t.Fatalf("Evaluate(%s): %v", name, err)
+				}
+			}
+		})
+	}
+}
+
+func TestLoadRecursiveError(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "a.calc")
+	link := filepath.Join(dir, "link.calc")
+
+	if err := os.WriteFile(path, []byte("x = 1\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	if err := os.Symlink(path, link); err != nil {
+		t.Fatalf("Symlink: %v", err)
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("Stat: %v", err)
+	}
+
+	c := &Calculator{DecimalPlaces: 30}
+	c.loading = []loadingFile{{name: path, info: info}}
+
+	err = c.handleLoad([]string{link})
+	if !errors.Is(err, ErrRecursiveLoad) {
+		t.Fatalf("handleLoad error = %v, want %v", err, ErrRecursiveLoad)
+	}
+
+	want := path + " -> " + link
+	if !strings.Contains(err.Error(), want) {
+		t.Fatalf("error %q does not name the cycle %q", err, want)
+	}
+
+	if len(c.loading) != 1 {
+		t.Fatalf("rejected load changed the loading stack: %v", c.loading)
 	}
 }
 

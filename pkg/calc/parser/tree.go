@@ -77,7 +77,13 @@ func (e *Env) Get(name string) (*unified.Real, bool) {
 	return nil, false
 }
 
+// Set binds a mutable variable. Names starting with "$" are result history, which only
+// SetConstant may write, so assigning to one fails whether or not it is defined yet.
 func (e *Env) Set(name string, val *unified.Real) error {
+	if strings.HasPrefix(name, "$") {
+		return fmt.Errorf("cannot assign to constant %q", name)
+	}
+
 	if binding, ok := e.vars[name]; ok && !binding.mutable {
 		return fmt.Errorf("cannot assign to constant %q", name)
 	}
@@ -93,6 +99,15 @@ func (e *Env) SetConstant(name string, val *unified.Real) {
 	e.vars[name] = &binding{
 		value:   val,
 		mutable: false,
+	}
+}
+
+// CopyResults copies every "$"-prefixed result binding from src into e. The copies stay immutable.
+func (e *Env) CopyResults(src *Env) {
+	for name, b := range src.vars {
+		if strings.HasPrefix(name, "$") {
+			e.SetConstant(name, b.value)
+		}
 	}
 }
 
