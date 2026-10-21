@@ -34,12 +34,7 @@ func (g *gate) ruleWarnings() []string {
 		return nil
 	}
 
-	var out []string
-	for _, w := range g.store.Warnings() {
-		out = append(out, w.Message)
-	}
-
-	return out
+	return approve.WarningMessages(g.store.Warnings())
 }
 
 // pending returns the store of calls waiting on the user, creating it on first use so a gate

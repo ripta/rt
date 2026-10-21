@@ -157,7 +157,7 @@ func (opts *checkOptions) run(cmd *cobra.Command, args []string) error {
 
 	aggregate := aggregateDecision(verdicts)
 
-	warnings := warningMessages(store.Warnings())
+	warnings := approve.WarningMessages(store.Warnings())
 
 	if opts.Output == "json" {
 		var payload any
@@ -268,7 +268,7 @@ func checkResultFrom(argv []string, v approve.Verdict) checkResult {
 
 // ruleInfoFor describes a rule for the JSON output.
 func ruleInfoFor(r *approve.Rule) ruleInfo {
-	return ruleInfo{Kind: ruleKindString(r.Kind()), Pattern: describeRulePattern(r), Message: r.Message}
+	return ruleInfo{Kind: r.Kind().String(), Pattern: r.Pattern(), Message: r.Message}
 }
 
 // chainInfoFrom describes one chain layer for the JSON output.
@@ -313,7 +313,7 @@ func writeCheckText(w io.Writer, argv []string, v approve.Verdict, projectPath s
 		if v.Rule.Kind() == approve.KindWrapper {
 			kind = "wrapper "
 		}
-		fmt.Fprintf(w, "  rule: %s %s%s\n", ruleSectionFor(v), kind, describeRulePattern(v.Rule))
+		fmt.Fprintf(w, "  rule: %s %s%s\n", ruleSectionFor(v), kind, v.Rule.Pattern())
 		if v.Rule.Message != "" {
 			fmt.Fprintf(w, "  message: %s\n", v.Rule.Message)
 		}
@@ -353,7 +353,7 @@ func writeChainText(w io.Writer, v approve.Verdict) {
 		if len(cl.Wrappers) > 0 {
 			patterns := make([]string, len(cl.Wrappers))
 			for j, r := range cl.Wrappers {
-				patterns[j] = describeRulePattern(r)
+				patterns[j] = r.Pattern()
 			}
 			fmt.Fprintf(w, "        peeled by wrapper %s\n", strings.Join(patterns, " or "))
 		}
@@ -377,14 +377,14 @@ func writeChainText(w io.Writer, v approve.Verdict) {
 	}
 
 	for _, sk := range v.Skipped {
-		fmt.Fprintf(w, "  wrapper %s did not peel at offset %d: %s\n", describeRulePattern(sk.Rule), sk.Offset, sk.Reason)
+		fmt.Fprintf(w, "  wrapper %s did not peel at offset %d: %s\n", sk.Rule.Pattern(), sk.Offset, sk.Reason)
 	}
 }
 
 // chainRuleLabel names a chain layer's rule with the list it came from: a wrapper
 // rule, or an allow, deny, or restrict rule by the step that settled the layer.
 func chainRuleLabel(cl approve.ChainLayer) string {
-	pattern := describeRulePattern(cl.Rule)
+	pattern := cl.Rule.Pattern()
 
 	switch {
 	case cl.Rule.Kind() == approve.KindWrapper:
@@ -434,27 +434,5 @@ func ruleSectionFor(v approve.Verdict) string {
 		return "allow"
 	default:
 		return "deny"
-	}
-}
-
-// ruleKindString renders a RuleKind for display.
-func ruleKindString(k approve.RuleKind) string { return k.String() }
-
-// describeRulePattern renders the pattern side of a rule for display: the argv
-// tokens for exact/prefix/wrapper, the raw pattern string for glob/regex.
-func describeRulePattern(r *approve.Rule) string {
-	switch r.Kind() {
-	case approve.KindExact:
-		return "[" + strings.Join(r.Exact, ", ") + "]"
-	case approve.KindPrefix:
-		return "[" + strings.Join(r.Prefix, ", ") + "]"
-	case approve.KindWrapper:
-		return "[" + strings.Join(r.Wrapper, ", ") + "]"
-	case approve.KindGlob:
-		return fmt.Sprintf("%q", r.Glob)
-	case approve.KindRegex:
-		return fmt.Sprintf("%q", r.Regex)
-	default:
-		return ""
 	}
 }

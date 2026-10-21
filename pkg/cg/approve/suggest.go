@@ -1,8 +1,6 @@
 package approve
 
 import (
-	"strings"
-
 	"github.com/ripta/rt/pkg/cg/model"
 )
 
@@ -49,12 +47,10 @@ func (rs *Ruleset) Suggest(argv []string, res *model.Resolution) Suggestion {
 
 		heads = true
 
-		if !tokenRuleMatches(rule, canonical, resolved, basename) || len(argv) <= len(rule.cmpArgv) {
+		if !tokenRuleMatches(rule, canonical, resolved, basename) || !innerStartsWithDash(argv, len(rule.cmpArgv)) {
 			continue
 		}
-		if !strings.HasPrefix(argv[len(rule.cmpArgv)], "-") {
-			continue
-		}
+
 		if near == nil || len(rule.cmpArgv) > len(near.cmpArgv) {
 			near = rule
 		}

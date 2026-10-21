@@ -117,7 +117,7 @@ func lintLayerResultFrom(d approve.LayerDiagnosis) lintLayerResult {
 		Path:     d.Path,
 		Present:  d.Present,
 		Issues:   unwrapIssues(d.Err),
-		Warnings: warningMessages(d.Warnings),
+		Warnings: approve.WarningMessages(d.Warnings),
 	}
 }
 
@@ -128,7 +128,7 @@ func lintMergedResultFrom(global, project approve.LayerDiagnosis) lintMergedResu
 		return lintMergedResult{Skipped: true, Note: lintMergedSkipNote}
 	}
 
-	return lintMergedResult{Warnings: warningMessages(warnings)}
+	return lintMergedResult{Warnings: approve.WarningMessages(warnings)}
 }
 
 // writeLintMergedText renders the merged pass: its warnings, or why it was
@@ -145,16 +145,6 @@ func writeLintMergedText(w io.Writer, r lintMergedResult) {
 	default:
 		fmt.Fprintln(w, "merged: (ok)")
 	}
-}
-
-// warningMessages reduces warnings to their text for the output formats.
-func warningMessages(warnings []approve.Warning) []string {
-	var out []string
-	for _, w := range warnings {
-		out = append(out, w.Message)
-	}
-
-	return out
 }
 
 // writeLintText renders one layer's lint result as a short human-readable

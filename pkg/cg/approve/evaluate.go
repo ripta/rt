@@ -280,6 +280,12 @@ func (e *evaluation) resolveInner(argv []string) *model.Resolution {
 	return &model.Resolution{Argv: argv}
 }
 
+// innerStartsWithDash reports whether the inner command, which begins at argv[n], starts with '-'.
+// Such a command would be read as a flag of the wrapper, so a wrapper rule never peels it.
+func innerStartsWithDash(argv []string, n int) bool {
+	return n < len(argv) && strings.HasPrefix(argv[n], "-")
+}
+
 // findPeels collects the wrapper rules that match a layer. A match whose inner
 // command starts with '-' is recorded as skipped and does not peel, so the guard
 // applies before the length comparison and a guarded long rule cannot hide a
@@ -292,7 +298,7 @@ func (e *evaluation) findPeels(l *layer) {
 		}
 
 		n := len(rule.cmpArgv)
-		if strings.HasPrefix(l.argv[n], "-") {
+		if innerStartsWithDash(l.argv, n) {
 			l.skips = append(l.skips, Skip{Offset: l.offset, Rule: rule, Reason: SkipDash})
 			continue
 		}

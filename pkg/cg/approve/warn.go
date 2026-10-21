@@ -203,18 +203,40 @@ func compareTokens(rule *Rule) []string {
 
 // describeRule renders a rule as its kind and pattern, such as `wrapper [nice, -n, 19]`.
 func describeRule(rule *Rule) string {
-	switch rule.kind {
-	case KindExact:
-		return "exact [" + strings.Join(rule.Exact, ", ") + "]"
-	case KindPrefix:
-		return "prefix [" + strings.Join(rule.Prefix, ", ") + "]"
-	case KindWrapper:
-		return "wrapper [" + strings.Join(rule.Wrapper, ", ") + "]"
-	case KindGlob:
-		return fmt.Sprintf("glob %q", rule.Glob)
-	case KindRegex:
-		return fmt.Sprintf("regex %q", rule.Regex)
+	pattern := rule.Pattern()
+	if pattern == "" {
+		return "rule"
 	}
 
-	return "rule"
+	return rule.kind.String() + " " + pattern
+}
+
+// Pattern renders the pattern side of a rule: the argv tokens for exact, prefix, and wrapper
+// rules, and the quoted pattern string for glob and regex rules.
+func (r *Rule) Pattern() string {
+	switch r.kind {
+	case KindExact:
+		return "[" + strings.Join(r.Exact, ", ") + "]"
+	case KindPrefix:
+		return "[" + strings.Join(r.Prefix, ", ") + "]"
+	case KindWrapper:
+		return "[" + strings.Join(r.Wrapper, ", ") + "]"
+	case KindGlob:
+		return fmt.Sprintf("%q", r.Glob)
+	case KindRegex:
+		return fmt.Sprintf("%q", r.Regex)
+	}
+
+	return ""
+}
+
+// WarningMessages reduces warnings to their text, for the output formats that show only the text.
+// It returns nil for no warnings.
+func WarningMessages(warnings []Warning) []string {
+	var out []string
+	for _, w := range warnings {
+		out = append(out, w.Message)
+	}
+
+	return out
 }

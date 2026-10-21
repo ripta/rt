@@ -68,24 +68,24 @@ func (k RuleKind) String() string {
 }
 
 // Rule is one allow, deny, or restrict entry. Exactly one of Exact/Prefix/Wrapper/Glob/Regex is
-// populated after validation; kind records which.
-// Message is valid on deny and restrict rules and PermitUnsafeEnvs only on allow
-// rules.
+// populated after validation, and kind records which.
+//
+// Message is valid on deny and restrict rules. PermitUnsafeEnvs is valid only on allow rules.
 //
 // For prefix, exact, and wrapper rules the match form is inferred from the shape of the first
-// token: a bare program name matches the invoked basename, while an
-// absolute or project-relative path matches the canonical or resolved
-// executable path.
-// AsBasename is meaningful only on glob and regex rules, where there is no token
-// to read; it selects the basename quoted join over the canonical one. The loader rejects
-// as_basename on prefix, exact, and wrapper rules, where the token shape already settles the form.
+// token. A bare program name matches the invoked basename. An absolute or project-relative path
+// matches the canonical or resolved executable path.
 //
-// wantBasename, cmpArgv, and baseArgv are derived at load by compileMatch:
-// wantBasename selects the basename form for matching, cmpArgv holds the
-// prefix/exact/wrapper comparison tokens with a relative first token resolved
-// against the project root, and baseArgv is cmpArgv with its first token reduced
-// to a basename. baseArgv is set only for a path-form rule, where it lets a deny
-// match an inner layer of a wrapper chain by program name.
+// AsBasename is meaningful only on glob and regex rules, where there is no token to read. It
+// selects the basename quoted join over the canonical one. The loader rejects as_basename on
+// prefix, exact, and wrapper rules, where the token shape already settles the form.
+//
+// wantBasename, cmpArgv, and baseArgv are derived at load by compileMatch. wantBasename selects
+// the basename form for matching. cmpArgv holds the prefix, exact, or wrapper comparison tokens,
+// with a relative first token resolved against the project root.
+//
+// baseArgv is cmpArgv with its first token reduced to a basename. It is set only for a path-form
+// rule, where it lets a deny match an inner layer of a wrapper chain by program name.
 type Rule struct {
 	Exact   []string `yaml:"exact,omitempty"`
 	Prefix  []string `yaml:"prefix,omitempty"`
