@@ -19,17 +19,29 @@ type lintOptions struct {
 
 // lintResult is the `cg lint --output json` payload.
 type lintResult struct {
-	Global  lintLayerResult `json:"global"`
-	Project lintLayerResult `json:"project"`
+	Global  lintLayerResult  `json:"global"`
+	Project lintLayerResult  `json:"project"`
+	Merged  lintMergedResult `json:"merged"`
 }
 
 // lintLayerResult is one layer's lint outcome: whether the file exists, and
 // every problem found in it, flattened out of the layer's joined error.
 type lintLayerResult struct {
-	Path    string   `json:"path"`
-	Present bool     `json:"present"`
-	Issues  []string `json:"issues,omitempty"`
+	Path     string   `json:"path"`
+	Present  bool     `json:"present"`
+	Issues   []string `json:"issues,omitempty"`
+	Warnings []string `json:"warnings,omitempty"`
 }
+
+// lintMergedResult is the outcome of the pass over the merged ruleset. The pass is
+// skipped, with the reason in Note, when either layer failed to parse.
+type lintMergedResult struct {
+	Skipped  bool     `json:"skipped,omitempty"`
+	Note     string   `json:"note,omitempty"`
+	Warnings []string `json:"warnings,omitempty"`
+}
+
+const lintMergedSkipNote = "skipped: a layer failed to parse"
 
 // NewLintCommand returns the `cg lint` subcommand. It validates the global and
 // project approval rules files without evaluating any command against them,
@@ -43,7 +55,10 @@ func NewLintCommand() *cobra.Command {
 			"errors, without evaluating any command against them.\n\n" +
 			"Exit codes: 0 both files are valid (or absent), 1 one or more files have\n" +
 			"errors, 2 the invocation itself was invalid (bad flags, or the rules files\n" +
-			"could not be located).",
+			"could not be located).\n\n" +
+			"Warnings are reported apart from errors and do not change the exit code. A\n" +
+			"second pass checks the merged rules for problems that span both files, and is\n" +
+			"skipped when either file has errors.",
 
 		Args:          cobra.NoArgs,
 		SilenceErrors: true,
@@ -73,7 +88,11 @@ func (opts *lintOptions) run(cmd *cobra.Command, _ []string) error {
 		return &model.ExitError{Code: 2}
 	}
 
-	res := lintResult{Global: lintLayerResultFrom(global), Project: lintLayerResultFrom(project)}
+	res := lintResult{
+		Global:  lintLayerResultFrom(global),
+		Project: lintLayerResultFrom(project),
+		Merged:  lintMergedResultFrom(global, project),
+	}
 
 	if opts.Output == "json" {
 		if err := writeJSON(cmd.OutOrStdout(), res); err != nil {
@@ -82,6 +101,7 @@ func (opts *lintOptions) run(cmd *cobra.Command, _ []string) error {
 	} else {
 		writeLintText(cmd.OutOrStdout(), "global", res.Global)
 		writeLintText(cmd.OutOrStdout(), "project", res.Project)
+		writeLintMergedText(cmd.OutOrStdout(), res.Merged)
 	}
 
 	if len(res.Global.Issues) > 0 || len(res.Project.Issues) > 0 {
@@ -93,17 +113,51 @@ func (opts *lintOptions) run(cmd *cobra.Command, _ []string) error {
 
 // lintLayerResultFrom flattens a layer's diagnosis into its JSON/text shape.
 func lintLayerResultFrom(d approve.LayerDiagnosis) lintLayerResult {
-	return lintLayerResult{Path: d.Path, Present: d.Present, Issues: unwrapIssues(d.Err)}
+	return lintLayerResult{
+		Path:     d.Path,
+		Present:  d.Present,
+		Issues:   unwrapIssues(d.Err),
+		Warnings: approve.WarningMessages(d.Warnings),
+	}
+}
+
+// lintMergedResultFrom runs the merged pass over both layers.
+func lintMergedResultFrom(global, project approve.LayerDiagnosis) lintMergedResult {
+	warnings, ok := approve.MergedWarnings(global, project)
+	if !ok {
+		return lintMergedResult{Skipped: true, Note: lintMergedSkipNote}
+	}
+
+	return lintMergedResult{Warnings: approve.WarningMessages(warnings)}
+}
+
+// writeLintMergedText renders the merged pass: its warnings, or why it was
+// skipped.
+func writeLintMergedText(w io.Writer, r lintMergedResult) {
+	switch {
+	case r.Skipped:
+		fmt.Fprintf(w, "merged: %s\n", r.Note)
+	case len(r.Warnings) > 0:
+		fmt.Fprintln(w, "merged:")
+		for _, warning := range r.Warnings {
+			fmt.Fprintf(w, "  warning: %s\n", warning)
+		}
+	default:
+		fmt.Fprintln(w, "merged: (ok)")
+	}
 }
 
 // writeLintText renders one layer's lint result as a short human-readable
 // report.
 func writeLintText(w io.Writer, label string, r lintLayerResult) {
 	switch {
-	case len(r.Issues) > 0:
+	case len(r.Issues) > 0 || len(r.Warnings) > 0:
 		fmt.Fprintf(w, "%s: %s\n", label, r.Path)
 		for _, issue := range r.Issues {
 			fmt.Fprintf(w, "  - %s\n", issue)
+		}
+		for _, warning := range r.Warnings {
+			fmt.Fprintf(w, "  warning: %s\n", warning)
 		}
 	case !r.Present:
 		fmt.Fprintf(w, "%s: %s (absent)\n", label, r.Path)

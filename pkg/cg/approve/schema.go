@@ -9,13 +9,14 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// ruleKindKeys are the four mutually exclusive rule-kind keys. Exactly one must
+// ruleKindKeys are the five mutually exclusive rule-kind keys. Exactly one must
 // appear in each allow/deny/restrict entry.
 var ruleKindKeys = map[string]RuleKind{
-	"exact":  KindExact,
-	"prefix": KindPrefix,
-	"glob":   KindGlob,
-	"regex":  KindRegex,
+	"exact":   KindExact,
+	"prefix":  KindPrefix,
+	"wrapper": KindWrapper,
+	"glob":    KindGlob,
+	"regex":   KindRegex,
 }
 
 // ruleSection identifies which top-level sequence a rule belongs to. It drives
@@ -151,11 +152,43 @@ func validateRule(entry *yaml.Node, rule *Rule, section ruleSection) error {
 	if hasPermit && section != sectionAllow {
 		return fmt.Errorf("line %d: %w", line, ErrPermitNotOnAllow)
 	}
-	if hasAsBasename && (kinds[0] == KindExact || kinds[0] == KindPrefix) {
+	if kinds[0] == KindWrapper && section != sectionAllow {
+		return fmt.Errorf("line %d: %w", line, ErrWrapperNotOnAllow)
+	}
+	if hasAsBasename && (kinds[0] == KindExact || kinds[0] == KindPrefix || kinds[0] == KindWrapper) {
 		return fmt.Errorf("line %d: %w", line, ErrAsBasenameOnTokens)
 	}
 
 	rule.kind = kinds[0]
+	if section == sectionAllow && dashFirstToken(rule) {
+		return fmt.Errorf("line %d: %w", line, ErrDashFirstToken)
+	}
+
+	return nil
+}
+
+// dashFirstToken reports whether an exact, prefix, or wrapper rule starts with a
+// token that begins with '-'. Such an allow rule is the bypass itself: beside a
+// wrapper rule, a command whose first token is the wrapper's flag would be judged
+// as if the flag were a program.
+func dashFirstToken(rule *Rule) bool {
+	tokens := tokensOf(rule)
+
+	return len(tokens) > 0 && strings.HasPrefix(tokens[0], "-")
+}
+
+// tokensOf returns the token list of an exact, prefix, or wrapper rule, and nil
+// for the pattern kinds.
+func tokensOf(rule *Rule) []string {
+	switch rule.kind {
+	case KindExact:
+		return rule.Exact
+	case KindPrefix:
+		return rule.Prefix
+	case KindWrapper:
+		return rule.Wrapper
+	}
+
 	return nil
 }
 

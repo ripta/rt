@@ -163,7 +163,7 @@ func TestEvaluate(t *testing.T) {
 				compileMatch(&rs.Allow[i], "")
 			}
 
-			got := rs.Evaluate(identitySubject(tt.argv), tt.env)
+			got := rs.Evaluate(identitySubject(tt.argv), tt.env, nil)
 			if got.Decision != tt.want {
 				t.Fatalf("Evaluate() decision = %v, want %v", got.Decision, tt.want)
 			}
@@ -189,7 +189,7 @@ func TestEvaluateEmptyArgv(t *testing.T) {
 	t.Parallel()
 
 	rs := &Ruleset{Mode: ModeEnforce}
-	got := rs.Evaluate(Subject{}, nil)
+	got := rs.Evaluate(Subject{}, nil, nil)
 	if got.Decision != DecisionRefuse {
 		t.Errorf("Evaluate(empty) = %v, want refuse", got.Decision)
 	}

@@ -80,6 +80,10 @@ type roundTest struct {
 	WantWarning    string
 	WantFile       []string
 	AbsentFile     []string
+
+	// WantNoAdvice asserts the warning does not tell the user to call the tool again, which fits
+	// only a rule whose commands still need a prompt.
+	WantNoAdvice bool
 }
 
 var echoHi = []string{"echo", "hi"}
@@ -149,7 +153,7 @@ var roundTests = []roundTest{
 		WantErr:   "call the tool again",
 	},
 	{
-		Name:         "an allow rule added between the calls runs without reading the answer",
+		Name:         "an allow rule added between the calls runs whatever the answer says",
 		Project:      "version: 1\n",
 		AllowBetween: []string{"echo"},
 		Argvs:        [][]string{echoHi},
@@ -297,6 +301,110 @@ var roundTests = []roundTest{
 		WantFile:  []string{"prefix: [echo]"},
 	},
 	{
+		Name:    "a declined group names every command it covers in call order",
+		Project: "version: 1\n",
+		Argvs:   [][]string{{"echo", "a"}, {"printf", "x"}, {"echo", "b"}},
+		Answers: mcpsdk.InputResponseMap{
+			"approval-1": decline(),
+			"approval-2": accept(map[string]any{}),
+		},
+
+		WantForms: 2,
+		WantErr:   "2 commands were declined at the approval prompt\n  echo a\n  echo b",
+	},
+	{
+		Name:         "a command allowed between the calls runs while the rest of its form uses the answer",
+		Project:      "version: 1\n",
+		AllowBetween: []string{"echo", "a"},
+		Argvs:        [][]string{{"echo", "a"}, {"echo", "b"}},
+		Answers:      mcpsdk.InputResponseMap{"approval-1": decline()},
+
+		WantForms: 1,
+		WantErr:   "command was declined at the approval prompt\n  echo b",
+	},
+	{
+		Name:         "a form whose commands are all allowed saves a widened rule",
+		Project:      "version: 1\n",
+		AllowBetween: []string{"echo", "hi"},
+		Argvs:        [][]string{echoHi},
+		Answers:      mcpsdk.InputResponseMap{"approval-1": accept(map[string]any{"remember": true, "rule": "[echo]"})},
+
+		WantForms: 1,
+		WantFile:  []string{"prefix: [echo, hi]", "prefix: [echo]"},
+	},
+	{
+		Name:         "a declined form whose commands are all allowed refuses nothing and saves nothing",
+		Project:      "version: 1\n",
+		AllowBetween: []string{"echo", "hi"},
+		Argvs:        [][]string{echoHi},
+		Answers:      mcpsdk.InputResponseMap{"approval-1": decline()},
+
+		WantForms:  1,
+		AbsentFile: []string{"prefix: [echo]\n"},
+	},
+	{
+		Name:         "a missing answer on a form whose commands are all allowed refuses nothing",
+		Project:      "version: 1\n",
+		AllowBetween: []string{"echo", "hi"},
+		Argvs:        [][]string{echoHi},
+		Answers:      mcpsdk.InputResponseMap{},
+
+		WantForms: 1,
+	},
+	{
+		Name:         "a malformed rule on a form whose commands are all allowed warns",
+		Project:      "version: 1\n",
+		AllowBetween: []string{"echo", "hi"},
+		Argvs:        [][]string{echoHi},
+		Answers:      mcpsdk.InputResponseMap{"approval-1": accept(map[string]any{"remember": true, "rule": "not a list"})},
+
+		WantForms:   1,
+		WantWarning: "rule must be a YAML list",
+	},
+	{
+		Name:         "a rule cg wrote between the calls does not skip the remember of an undiverged entry",
+		Project:      "version: 1\n",
+		AllowBetween: []string{"printf"},
+		Argvs:        [][]string{echoHi},
+		Answers:      mcpsdk.InputResponseMap{"approval-1": accept(map[string]any{"remember": true, "rule": "[echo]"})},
+
+		WantForms: 1,
+		WantFile:  []string{"prefix: [printf]", "prefix: [echo]"},
+	},
+	{
+		Name:         "a diverged entry skips after a cg write",
+		Project:      baseRules,
+		EditFirst:    editRules,
+		AllowBetween: []string{"printf"},
+		Argvs:        [][]string{echoHi},
+		Answers: mcpsdk.InputResponseMap{
+			"approval-1": accept(map[string]any{"remember": true, "rule": "[echo]"}),
+			"divergence": accept(map[string]any{"choice": divergeOverwrite}),
+		},
+
+		WantForms:   1,
+		WantDiverge: true,
+		WantWarning: "changed on disk since the approval was requested; " + pendingAdvice,
+		AbsentFile:  []string{"prefix: [echo]"},
+	},
+	{
+		Name:         "a skipped remember on a form whose commands ran does not say to call again",
+		Project:      baseRules,
+		EditFirst:    editRules,
+		AllowBetween: []string{"echo", "hi"},
+		Argvs:        [][]string{echoHi},
+		Answers: mcpsdk.InputResponseMap{
+			"approval-1": accept(map[string]any{"remember": true, "rule": "[echo]"}),
+			"divergence": accept(map[string]any{"choice": divergeOverwrite}),
+		},
+
+		WantForms:    1,
+		WantDiverge:  true,
+		WantWarning:  "rule [echo] was not saved because ",
+		WantNoAdvice: true,
+		AbsentFile:   []string{"prefix: [echo]\n"},
+	},
+	{
 		Name:    "a bad rule field still persists another form's remember",
 		Project: "version: 1\n",
 		Argvs:   [][]string{echoHi, {"printf", "x"}},
@@ -390,7 +498,11 @@ func TestApprovalRound(t *testing.T) {
 			}
 
 			if test.AllowBetween != nil {
-				if err := g.store.AppendProjectAllowPrefix(test.AllowBetween, approve.WriteDirect); err != nil {
+				strategy := approve.WriteDirect
+				if test.EditFirst != "" {
+					strategy = approve.WriteOverwrite
+				}
+				if err := g.store.AppendProjectAllowPrefix(test.AllowBetween, strategy); err != nil {
 					t.Fatalf("adding the allow rule: %v", err)
 				}
 			}
@@ -417,6 +529,9 @@ func TestApprovalRound(t *testing.T) {
 			}
 			if !strings.Contains(second.Warning, test.WantWarning) {
 				t.Errorf("Warning = %q, want it to contain %q", second.Warning, test.WantWarning)
+			}
+			if test.WantNoAdvice && strings.Contains(second.Warning, pendingAdvice) {
+				t.Errorf("Warning = %q, want no advice to call the tool again", second.Warning)
 			}
 
 			file, _ := readProjectIfPresent(root)
@@ -605,7 +720,7 @@ func TestApprovalRoundFormOrder(t *testing.T) {
 
 	argvs := make([][]string, 12)
 	for i := range argvs {
-		argvs[i] = []string{"echo", string(rune('a' + i))}
+		argvs[i] = []string{"go", string(rune('a' + i))}
 	}
 
 	first, err := g.check(testCall(argvs...))
@@ -632,6 +747,155 @@ func TestApprovalRoundFormOrder(t *testing.T) {
 	}
 	if ids[11] != "approval-12" {
 		t.Errorf("ids[11] = %q, want approval-12 so that sorted order is command order", ids[11])
+	}
+}
+
+func echoArgvs(n int) [][]string {
+	argvs := make([][]string, n)
+	for i := range argvs {
+		argvs[i] = []string{"echo", fmt.Sprintf("c%02d", i)}
+	}
+
+	return argvs
+}
+
+func argvLines(argvs [][]string) []string {
+	lines := make([]string, len(argvs))
+	for i, argv := range argvs {
+		lines[i] = model.EscapeArgs(argv)
+	}
+
+	return lines
+}
+
+// listedCommands reads the commands an approval form's message lists, which are every line after
+// the header.
+func listedCommands(message string) []string {
+	_, rest, found := strings.Cut(message, "\n")
+	if !found {
+		return nil
+	}
+
+	return strings.Split(rest, "\n")
+}
+
+type groupTest struct {
+	Name  string
+	Argvs [][]string
+
+	// WantForms lists the commands of each form in form order.
+	WantForms [][]string
+}
+
+var groupTests = []groupTest{
+	{
+		Name:      "five commands under one prefix split into forms of at most the limit",
+		Argvs:     echoArgvs(5),
+		WantForms: slices.Collect(slices.Chunk(argvLines(echoArgvs(5)), maxFormCommands)),
+	},
+	{
+		Name:      "commands up to the limit under one prefix share one form",
+		Argvs:     echoArgvs(maxFormCommands),
+		WantForms: [][]string{argvLines(echoArgvs(maxFormCommands))},
+	},
+	{
+		Name:  "two prefixes give two forms in first-appearance order",
+		Argvs: [][]string{{"printf", "x"}, {"echo", "a"}, {"printf", "y"}, {"echo", "b"}},
+		WantForms: [][]string{
+			{"printf x", "printf y"},
+			{"echo a", "echo b"},
+		},
+	},
+	{
+		Name:  "one command more than the limit gives a full form and a form of one",
+		Argvs: echoArgvs(maxFormCommands + 1),
+		WantForms: [][]string{
+			argvLines(echoArgvs(maxFormCommands)),
+			argvLines(echoArgvs(maxFormCommands + 1)[maxFormCommands:]),
+		},
+	},
+}
+
+func TestApprovalRoundGroupsCommandsByRule(t *testing.T) {
+	for _, test := range groupTests {
+		t.Run(test.Name, func(t *testing.T) {
+			t.Setenv("TMPDIR", t.TempDir())
+
+			g := newTestGate(t, "version: 1\n", false)
+			first, err := g.check(testCall(test.Argvs...))
+			if err != nil || first.Pending == nil {
+				t.Fatalf("first call = %+v, %v; want input requests", first, err)
+			}
+
+			ids := make([]string, 0, len(first.Pending.InputRequests))
+			for id := range first.Pending.InputRequests {
+				ids = append(ids, id)
+			}
+			slices.Sort(ids)
+
+			if len(ids) != len(test.WantForms) {
+				t.Fatalf("forms = %v, want %d", ids, len(test.WantForms))
+			}
+
+			for i, id := range ids {
+				form, ok := first.Pending.InputRequests[id].(*mcpsdk.ElicitParams)
+				if !ok {
+					t.Fatalf("form %s is %T, want *ElicitParams", id, first.Pending.InputRequests[id])
+				}
+
+				if got := listedCommands(form.Message); !slices.Equal(got, test.WantForms[i]) {
+					t.Errorf("form %s lists %q, want %q", id, got, test.WantForms[i])
+				}
+			}
+		})
+	}
+}
+
+func TestApprovalRoundRememberOnChunksWritesOneRule(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+
+	root := t.TempDir()
+	g := newTestGateAt(t, root, "version: 1\n", false)
+
+	call := testCall(echoArgvs(maxFormCommands + 1)...)
+	first, err := g.check(call)
+	if err != nil || first.Pending == nil {
+		t.Fatalf("first call = %+v, %v; want input requests", first, err)
+	}
+	if got := len(first.Pending.InputRequests); got != 2 {
+		t.Fatalf("forms = %d, want 2", got)
+	}
+
+	remembered := accept(map[string]any{"remember": true, "rule": "[echo]"})
+	_, err = g.check(retryCall(call, first.Pending, mcpsdk.InputResponseMap{"approval-1": remembered, "approval-2": remembered}))
+	if err != nil {
+		t.Fatalf("retry: %v", err)
+	}
+
+	file, _ := readProjectIfPresent(root)
+	if got := strings.Count(file, "prefix: [echo]"); got != 1 {
+		t.Errorf("rule written %d times, want once:\n%s", got, file)
+	}
+}
+
+func TestApprovalRoundFormsRecordedPerCommand(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+
+	g := newTestGate(t, "version: 1\n", false)
+	call := testCall([]string{"echo", "a"}, []string{"printf", "x"}, []string{"echo", "b"})
+	first, err := g.check(call)
+	if err != nil || first.Pending == nil {
+		t.Fatalf("first call = %+v, %v; want input requests", first, err)
+	}
+
+	entry, err := g.pending().take(first.Pending.RequestState, call.Tool, call.Argvs, call.Cwd, call.Env, call.Args)
+	if err != nil {
+		t.Fatalf("take: %v", err)
+	}
+
+	got := []string{entry.Commands[0].Form, entry.Commands[1].Form, entry.Commands[2].Form}
+	if want := []string{"approval-1", "approval-2", "approval-1"}; !slices.Equal(got, want) {
+		t.Errorf("forms = %q, want %q", got, want)
 	}
 }
 
@@ -739,7 +1003,6 @@ func TestApprovalRoundStaleResolutionRefusesWholeAndPersistsNothing(t *testing.T
 	moved := retryCall(call, first.Pending, mcpsdk.InputResponseMap{
 		"approval-1": accept(map[string]any{"remember": true, "rule": "[echo]"}),
 		"approval-2": accept(map[string]any{"remember": true, "rule": "[printf, x]"}),
-		"approval-3": accept(map[string]any{}),
 	})
 	moved.Resolutions = slices.Clone(call.Resolutions)
 	moved.Resolutions[2] = &model.Resolution{Argv: call.Argvs[2], Resolved: "/elsewhere/printf", Canonical: "/elsewhere/printf"}
@@ -759,13 +1022,21 @@ func TestApprovalRoundStaleResolutionRefusesWholeAndPersistsNothing(t *testing.T
 }
 
 func TestRememberFailureProjectChanged(t *testing.T) {
-	got := rememberFailure("/p/.cg.yaml", fmt.Errorf("appending: %w", approve.ErrProjectChanged))
+	retryable := rememberRule{Tokens: []string{"echo"}, Retryable: true}
+	got := rememberFailure("/p/.cg.yaml", retryable, fmt.Errorf("appending: %w", approve.ErrProjectChanged))
 	want := "skipping remember: /p/.cg.yaml changed on disk since the approval was requested; " + pendingAdvice
 	if got != want {
 		t.Errorf("rememberFailure = %q, want %q", got, want)
 	}
 
-	if got := rememberFailure("/p", errors.New("boom")); got != "remember write failed: boom" {
+	stuck := rememberRule{Tokens: []string{"echo", "hi"}}
+	got = rememberFailure("/p/.cg.yaml", stuck, fmt.Errorf("appending: %w", approve.ErrProjectChanged))
+	want = "skipping remember: rule [echo, hi] was not saved because /p/.cg.yaml changed on disk since the approval was requested"
+	if got != want {
+		t.Errorf("rememberFailure = %q, want %q", got, want)
+	}
+
+	if got := rememberFailure("/p", retryable, errors.New("boom")); got != "remember write failed: boom" {
 		t.Errorf("rememberFailure = %q", got)
 	}
 }

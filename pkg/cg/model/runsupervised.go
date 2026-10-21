@@ -46,7 +46,11 @@ func (e *StartFailure) Unwrap() error { return e.Err }
 // runs. SessionID names the cg mcp server that spawned the run, threaded the
 // same way; empty for runs not spawned by a server.
 type SuperviseOptions struct {
-	Resolved  *Resolution
+	Resolved *Resolution
+
+	// InnerExec pins offsets of args to the paths the child receives there. See SuperviseSpec.
+	InnerExec map[int]string
+
 	Cwd       string
 	Env       map[string]string
 	Pool      string
@@ -117,7 +121,7 @@ func RunSupervised(args []string, opts SuperviseOptions) (*CaptureRun, error) {
 		return failStart(fmt.Errorf("starting supervisor: %w", err))
 	}
 
-	spec := SuperviseSpec{Argv: args, Cwd: cwd, Env: opts.Env, Pool: opts.Pool, SessionID: opts.SessionID, Parallelism: opts.Parallelism}
+	spec := SuperviseSpec{Argv: args, InnerExec: opts.InnerExec, Cwd: cwd, Env: opts.Env, Pool: opts.Pool, SessionID: opts.SessionID, Parallelism: opts.Parallelism}
 	if resolved != nil {
 		spec.Resolved = resolved.Resolved
 		spec.Canonical = resolved.Canonical

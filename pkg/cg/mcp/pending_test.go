@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ripta/rt/pkg/cg/approve"
 	"github.com/ripta/rt/pkg/cg/model"
 )
 
@@ -319,12 +320,12 @@ func richEntry() pendingEntry {
 	e.Commands = []pendingCommand{
 		{
 			Resolution: &model.Resolution{Argv: []string{"git", "status"}, Resolved: "/usr/bin/git", Canonical: "/usr/bin/git"},
-			Suggestion: []string{"/usr/bin/git", "status"},
+			Suggestion: approve.Suggestion{Kind: approve.KindPrefix, Tokens: []string{"/usr/bin/git", "status"}},
 			Prompted:   true,
 		},
 		{
 			Resolution: &model.Resolution{Argv: []string{"go", "test", "./..."}, Resolved: "/usr/bin/go"},
-			Suggestion: []string{"/usr/bin/go", "test"},
+			Suggestion: approve.Suggestion{Kind: approve.KindPrefix, Tokens: []string{"/usr/bin/go", "test"}},
 		},
 	}
 	e.DivergenceSnapshot = []byte("rules: []\n")
@@ -344,7 +345,7 @@ func TestPendingStoredCopyIsIsolated(t *testing.T) {
 
 	e.Argvs[0][0] = "rm"
 	e.Env["A"] = "changed"
-	e.Commands[0].Suggestion[0] = "rm"
+	e.Commands[0].Suggestion.Tokens[0] = "rm"
 	e.Commands[0].Resolution.Argv[0] = "rm"
 	e.Commands[0].Resolution.Resolved = "/bin/rm"
 	e.Commands[1] = pendingCommand{}

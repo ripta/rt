@@ -97,8 +97,25 @@ func (s *Store) CheckProjectDivergence() (changed bool, current []byte, err erro
 // matching command does not re-prompt this session. The write is atomic and
 // serialized; the in-memory project layer is refreshed from the bytes written.
 func (s *Store) AppendProjectAllowPrefix(tokens []string, strategy WriteStrategy) error {
+	return s.appendProjectAllow(Rule{Prefix: slices.Clone(tokens), kind: KindPrefix}, strategy)
+}
+
+// AppendProjectAllowExact appends an exact allow rule the same way
+// AppendProjectAllowPrefix appends a prefix rule. It serves a prompt that
+// pre-fills the whole argv, where editing the rule narrows it.
+func (s *Store) AppendProjectAllowExact(tokens []string, strategy WriteStrategy) error {
+	return s.appendProjectAllow(Rule{Exact: slices.Clone(tokens), kind: KindExact}, strategy)
+}
+
+// appendProjectAllow writes a remembered exact or prefix rule. It refuses a rule
+// the loader would reject, so remember never writes a file that stops loading.
+func (s *Store) appendProjectAllow(rule Rule, strategy WriteStrategy) error {
+	tokens := tokensOf(&rule)
 	if len(tokens) == 0 {
-		return fmt.Errorf("prefix rule must have at least one token")
+		return fmt.Errorf("%s rule must have at least one token", rule.kind)
+	}
+	if dashFirstToken(&rule) {
+		return fmt.Errorf("refusing to remember %s: %w", describeRule(&rule), ErrDashFirstToken)
 	}
 
 	s.mu.Lock()
@@ -114,7 +131,7 @@ func (s *Store) AppendProjectAllowPrefix(tokens []string, strategy WriteStrategy
 		return fmt.Errorf("project document has no root mapping")
 	}
 	allowSeq := ensureSeq(root, "allow")
-	allowSeq.Content = append(allowSeq.Content, buildPrefixEntry(tokens))
+	allowSeq.Content = append(allowSeq.Content, buildRuleEntry(&rule, false))
 	canonicalizeRuleSeqs(root)
 
 	data, err := renderDocument(doc)
@@ -134,7 +151,7 @@ func (s *Store) AppendProjectAllowPrefix(tokens []string, strategy WriteStrategy
 	s.Project.Snapshot = data
 	s.Project.Present = true
 
-	s.appendLiveAllow(tokens)
+	s.appendLiveAllow(rule)
 
 	return nil
 }
@@ -211,13 +228,12 @@ func mergeAbsent(seq *yaml.Node, mem, disk []Rule, isDeny bool) {
 	}
 }
 
-// appendLiveAllow swaps a new ruleset with tokens appended to Allow into the
+// appendLiveAllow swaps a new ruleset with rule appended to Allow into the
 // atomic pointer. The deny slice is shared because it is never mutated; the
 // allow slice is copied so the live snapshot the matcher reads stays immutable.
 // The rule is compiled against the store's project root so the live rule matches
 // the same commands the reloaded file would, including a relative first token.
-func (s *Store) appendLiveAllow(tokens []string) {
-	rule := Rule{Prefix: slices.Clone(tokens), kind: KindPrefix}
+func (s *Store) appendLiveAllow(rule Rule) {
 	compileMatch(&rule, s.projectRoot)
 	cur := s.rules.Load()
 	next := &Ruleset{
@@ -253,6 +269,8 @@ func ruleEqual(a, b *Rule) bool {
 		return slices.Equal(a.Exact, b.Exact)
 	case KindPrefix:
 		return slices.Equal(a.Prefix, b.Prefix)
+	case KindWrapper:
+		return slices.Equal(a.Wrapper, b.Wrapper)
 	case KindGlob:
 		return a.Glob == b.Glob
 	case KindRegex:
@@ -260,13 +278,6 @@ func ruleEqual(a, b *Rule) bool {
 	}
 
 	return false
-}
-
-// buildPrefixEntry builds the mapping node for a prefix allow rule. The first
-// token's shape settles how the rule matches on reload, so no as_basename flag is
-// written.
-func buildPrefixEntry(tokens []string) *yaml.Node {
-	return buildRuleEntry(&Rule{Prefix: tokens, kind: KindPrefix}, false)
 }
 
 // buildRuleEntry builds the YAML mapping node for a rule: its single kind key,
@@ -281,6 +292,8 @@ func buildRuleEntry(rule *Rule, isDeny bool) *yaml.Node {
 		entry.Content = append(entry.Content, strScalar("exact"), flowSeq(rule.Exact))
 	case KindPrefix:
 		entry.Content = append(entry.Content, strScalar("prefix"), flowSeq(rule.Prefix))
+	case KindWrapper:
+		entry.Content = append(entry.Content, strScalar("wrapper"), flowSeq(rule.Wrapper))
 	case KindGlob:
 		entry.Content = append(entry.Content, strScalar("glob"), strScalar(rule.Glob))
 	case KindRegex:
@@ -388,6 +401,8 @@ func ruleKeys(n *yaml.Node) (sortKey, ident string, ok bool) {
 		return strings.Join(r.Exact, " "), "exact\x00" + strings.Join(r.Exact, "\x00"), true
 	case len(r.Prefix) > 0:
 		return strings.Join(r.Prefix, " "), "prefix\x00" + strings.Join(r.Prefix, "\x00"), true
+	case len(r.Wrapper) > 0:
+		return strings.Join(r.Wrapper, " "), "wrapper\x00" + strings.Join(r.Wrapper, "\x00"), true
 	case r.Glob != "":
 		return r.Glob, "glob\x00" + r.Glob, true
 	case r.Regex != "":

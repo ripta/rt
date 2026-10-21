@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -15,7 +16,7 @@ func TestCollectInfoUptimeAndBuild(t *testing.T) {
 	started := time.Date(2026, 6, 16, 12, 0, 0, 0, time.UTC)
 	now := started.Add(1500 * time.Millisecond)
 
-	out, err := collectInfo("v1.2.3", started, "SESS", now)
+	out, err := collectInfo("v1.2.3", started, "SESS", now, nil)
 	if err != nil {
 		t.Fatalf("collectInfo: %v", err)
 	}
@@ -40,7 +41,7 @@ func TestCollectInfoCaptureRoot(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("TMPDIR", tmp)
 
-	out, err := collectInfo("v1.2.3", time.Now(), "SESS", time.Now())
+	out, err := collectInfo("v1.2.3", time.Now(), "SESS", time.Now(), nil)
 	if err != nil {
 		t.Fatalf("collectInfo: %v", err)
 	}
@@ -161,5 +162,50 @@ func TestAllowedEnvOmitsUnsetVars(t *testing.T) {
 	}
 	if _, ok := allowedEnv()["TMPDIR"]; ok {
 		t.Errorf("unset allowlisted variable reported in env output")
+	}
+}
+
+func TestInfoReportsRuleWarnings(t *testing.T) {
+	g := newTestGate(t, "version: 1\nallow:\n  - wrapper: [sudo, -u]\n  - prefix: [echo]\n", false)
+
+	ctx := context.Background()
+	server := newServer("test", time.Now(), "SESS", g)
+
+	serverTransport, clientTransport := mcpsdk.NewInMemoryTransports()
+	ss, err := server.Connect(ctx, serverTransport, nil)
+	if err != nil {
+		t.Fatalf("server.Connect: %v", err)
+	}
+	t.Cleanup(func() { _ = ss.Close() })
+
+	client := mcpsdk.NewClient(&mcpsdk.Implementation{Name: "test-client", Version: "0"}, nil)
+	cs, err := client.Connect(ctx, clientTransport, nil)
+	if err != nil {
+		t.Fatalf("client.Connect: %v", err)
+	}
+	t.Cleanup(func() { _ = cs.Close() })
+
+	res, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{Name: "cg_info"})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+
+	data, err := json.Marshal(res.StructuredContent)
+	if err != nil {
+		t.Fatalf("marshaling structured content: %v", err)
+	}
+	var out infoOutput
+	if err := json.Unmarshal(data, &out); err != nil {
+		t.Fatalf("unmarshaling info: %v", err)
+	}
+
+	if len(out.RuleWarnings) != 1 || !strings.Contains(out.RuleWarnings[0], "wrapper [sudo, -u]") {
+		t.Errorf("RuleWarnings = %v, want the dangling flag warning", out.RuleWarnings)
+	}
+}
+
+func TestInfoWithoutAStoreReportsNoWarnings(t *testing.T) {
+	if got := (&gate{blindlyAllow: true}).ruleWarnings(); got != nil {
+		t.Errorf("ruleWarnings = %v, want nil", got)
 	}
 }

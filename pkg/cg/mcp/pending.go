@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ripta/rt/pkg/cg/approve"
 	"github.com/ripta/rt/pkg/cg/model"
 )
 
@@ -35,12 +36,34 @@ var ErrPendingApproval = fmt.Errorf("approval is no longer pending; call the too
 // shown.
 type pendingCommand struct {
 	Resolution *model.Resolution
-	Suggestion []string
+
+	// Suggestion is the rule the form pre-filled. Its kind travels with its tokens, since the
+	// retry writes the rule with the writer for that kind.
+	Suggestion approve.Suggestion
+
+	// PromptOffset is the offset into the typed argv of the command the form asked about. It is
+	// 0 for the whole command, and past 0 for the inner command a wrapper rule peeled.
+	PromptOffset int
+
+	// Chain holds the resolution of each inner layer the first round's verdict walked. The retry
+	// resolves those layers again and refuses when any now names a different executable.
+	Chain []pendingLayer
 
 	// Prompted reports whether the first round asked the user about this command. The retry
 	// refuses a command that now needs a prompt but was not asked about, because there is no
 	// answer to read for it.
 	Prompted bool
+
+	// Form is the id of the approval form that covered this command, empty when it was not
+	// prompted. Several commands share a form, and the retry reads their answer through it.
+	Form string
+}
+
+// pendingLayer is the resolution of one inner command of a wrapper chain, at its offset into
+// the typed argv.
+type pendingLayer struct {
+	Offset     int
+	Resolution *model.Resolution
 }
 
 // pendingEntry records a call that is waiting on the user. Tool, Argvs, Cwd, Env, and Args are
@@ -191,16 +214,29 @@ func cloneCommands(cmds []pendingCommand) []pendingCommand {
 	out := make([]pendingCommand, len(cmds))
 	for i, c := range cmds {
 		out[i].Prompted = c.Prompted
-		out[i].Suggestion = slices.Clone(c.Suggestion)
+		out[i].Form = c.Form
+		out[i].PromptOffset = c.PromptOffset
+		out[i].Suggestion = c.Suggestion
+		out[i].Suggestion.Tokens = slices.Clone(c.Suggestion.Tokens)
+		out[i].Resolution = cloneResolution(c.Resolution)
 
-		if c.Resolution != nil {
-			r := *c.Resolution
-			r.Argv = slices.Clone(c.Resolution.Argv)
-			out[i].Resolution = &r
+		for _, l := range c.Chain {
+			out[i].Chain = append(out[i].Chain, pendingLayer{Offset: l.Offset, Resolution: cloneResolution(l.Resolution)})
 		}
 	}
 
 	return out
+}
+
+func cloneResolution(res *model.Resolution) *model.Resolution {
+	if res == nil {
+		return nil
+	}
+
+	r := *res
+	r.Argv = slices.Clone(res.Argv)
+
+	return &r
 }
 
 func cloneArgvs(argvs [][]string) [][]string {

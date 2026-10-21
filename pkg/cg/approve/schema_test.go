@@ -133,6 +133,104 @@ restrict:
 		wantErr: ErrPermitNotOnAllow,
 	},
 	{
+		name: "wrapper on allow ok",
+		yaml: `version: 1
+allow:
+  - wrapper: [nice, -n, "19"]
+`,
+	},
+	{
+		name: "wrapper on allow with permit_unsafe_envs ok",
+		yaml: `version: 1
+allow:
+  - wrapper: [uv, run]
+    permit_unsafe_envs: [PATH]
+`,
+	},
+	{
+		name: "wrapper on deny rejected",
+		yaml: `version: 1
+deny:
+  - wrapper: [time]
+`,
+		wantErr: ErrWrapperNotOnAllow,
+	},
+	{
+		name: "wrapper on restrict rejected",
+		yaml: `version: 1
+restrict:
+  - wrapper: [sudo]
+`,
+		wantErr: ErrWrapperNotOnAllow,
+	},
+	{
+		name: "message on wrapper rejected",
+		yaml: `version: 1
+allow:
+  - wrapper: [nice]
+    message: no
+`,
+		wantErr: ErrMessageOnAllow,
+	},
+	{
+		name: "as_basename on wrapper rejected",
+		yaml: `version: 1
+allow:
+  - wrapper: [nice]
+    as_basename: true
+`,
+		wantErr: ErrAsBasenameOnTokens,
+	},
+	{
+		name: "wrapper with another kind rejected",
+		yaml: `version: 1
+allow:
+  - wrapper: [nice]
+    prefix: [nice]
+`,
+		wantErr: ErrMultipleRuleKinds,
+	},
+	{
+		name: "wrapper allow starting with a dash rejected",
+		yaml: `version: 1
+allow:
+  - wrapper: ["-n", "19"]
+`,
+		wantErr: ErrDashFirstToken,
+	},
+	{
+		name: "prefix allow starting with a dash rejected",
+		yaml: `version: 1
+allow:
+  - prefix: ["-n"]
+`,
+		wantErr: ErrDashFirstToken,
+	},
+	{
+		name: "exact allow starting with a dash rejected",
+		yaml: `version: 1
+allow:
+  - exact: ["-n", "19", make]
+`,
+		wantErr: ErrDashFirstToken,
+	},
+	{
+		name: "prefix deny starting with a dash still loads",
+		yaml: `version: 1
+deny:
+  - prefix: ["-n"]
+restrict:
+  - exact: ["-n"]
+`,
+	},
+	{
+		name: "dash later in an allow rule is fine",
+		yaml: `version: 1
+allow:
+  - prefix: [make, -j8]
+`,
+	},
+	{
 		name: "as_basename on prefix rejected",
 		yaml: `version: 1
 allow:
@@ -295,6 +393,7 @@ allow:
   - exact: [git, status]
   - prefix: [go, test]
   - glob: 'kubectl get *'
+  - wrapper: [nice]
 `
 	_, doc, err := ParseDocument([]byte(src))
 	if err != nil {
@@ -304,7 +403,7 @@ allow:
 	if got := doc.Deny[0].Kind(); got != KindRegex {
 		t.Errorf("deny[0] kind = %v, want KindRegex", got)
 	}
-	wantAllow := []RuleKind{KindExact, KindPrefix, KindGlob}
+	wantAllow := []RuleKind{KindExact, KindPrefix, KindGlob, KindWrapper}
 	for i, want := range wantAllow {
 		if got := doc.Allow[i].Kind(); got != want {
 			t.Errorf("allow[%d] kind = %v, want %v", i, got, want)

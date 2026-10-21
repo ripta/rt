@@ -28,12 +28,41 @@ type checkOptions struct {
 // checkResult is the `cg check --output json` payload: the evaluated command,
 // the verdict, and the rule that produced it, when there is one.
 type checkResult struct {
-	Command    []string  `json:"command"`
-	Decision   string    `json:"decision"`
-	Section    string    `json:"section,omitempty"`
-	Rule       *ruleInfo `json:"rule,omitempty"`
-	Restricted bool      `json:"restricted,omitempty"`
-	BadEnvs    []string  `json:"bad_envs,omitempty"`
+	Command    []string    `json:"command"`
+	Decision   string      `json:"decision"`
+	Section    string      `json:"section,omitempty"`
+	Rule       *ruleInfo   `json:"rule,omitempty"`
+	Restricted bool        `json:"restricted,omitempty"`
+	BadEnvs    []string    `json:"bad_envs,omitempty"`
+	Chain      []chainInfo `json:"chain,omitempty"`
+	Skipped    []skipInfo  `json:"skipped,omitempty"`
+
+	// Warnings describe the loaded rules, not this command, and do not affect the
+	// verdict. A --shell run carries them once, on the aggregate payload.
+	Warnings []string `json:"warnings,omitempty"`
+}
+
+// chainInfo is the JSON-facing description of one layer of a wrapper chain, from
+// the typed command inward. Resolved is the path an inner layer's executable
+// resolved to, and is empty when it did not resolve. Candidates and PathForm
+// describe the rules of the step that settled the layer.
+type chainInfo struct {
+	Offset     int        `json:"offset"`
+	Command    []string   `json:"command"`
+	Resolved   string     `json:"resolved,omitempty"`
+	Wrappers   []ruleInfo `json:"wrappers,omitempty"`
+	Step       string     `json:"step"`
+	Rule       *ruleInfo  `json:"rule,omitempty"`
+	Candidates []ruleInfo `json:"candidates,omitempty"`
+	PathForm   bool       `json:"path_form,omitempty"`
+}
+
+// skipInfo is the JSON-facing description of a wrapper rule that matched a layer
+// and did not peel.
+type skipInfo struct {
+	Offset int      `json:"offset"`
+	Rule   ruleInfo `json:"rule"`
+	Reason string   `json:"reason"`
 }
 
 // checkShellResult is the `cg check --shell --output json` payload: the
@@ -43,6 +72,7 @@ type checkShellResult struct {
 	Shell    string        `json:"shell"`
 	Decision string        `json:"decision"`
 	Commands []checkResult `json:"commands"`
+	Warnings []string      `json:"warnings,omitempty"`
 }
 
 // ruleInfo is the JSON-facing description of the rule that decided a verdict.
@@ -112,6 +142,7 @@ func (opts *checkOptions) run(cmd *cobra.Command, args []string) error {
 		return &model.ExitError{Code: 2}
 	}
 
+	resolver := approve.CommandResolver(opts.Cwd)
 	verdicts := make([]approve.Verdict, len(commands))
 	results := make([]checkResult, len(commands))
 	for i, argv := range commands {
@@ -120,24 +151,35 @@ func (opts *checkOptions) run(cmd *cobra.Command, args []string) error {
 		// treats an unresolvable executable. See model.ResolveCommand and gate.check.
 		resolved, _ := model.ResolveCommand(argv, opts.Cwd)
 		subject := approve.Subject{Argv: argv, Canonical: resolved.CanonicalArgv(), Resolved: resolved.ResolvedArgv()}
-		verdicts[i] = store.Ruleset().Evaluate(subject, opts.Env)
+		verdicts[i] = store.Ruleset().Evaluate(subject, opts.Env, resolver)
 		results[i] = checkResultFrom(argv, verdicts[i])
 	}
 
 	aggregate := aggregateDecision(verdicts)
 
+	warnings := approve.WarningMessages(store.Warnings())
+
 	if opts.Output == "json" {
-		var payload any = results[0]
+		var payload any
 		if opts.Shell {
-			payload = checkShellResult{Shell: shellSrc, Decision: decisionString(aggregate), Commands: results}
+			payload = checkShellResult{Shell: shellSrc, Decision: decisionString(aggregate), Commands: results, Warnings: warnings}
+		} else {
+			results[0].Warnings = warnings
+			payload = results[0]
 		}
 		if err := writeJSON(cmd.OutOrStdout(), payload); err != nil {
 			return err
 		}
-	} else if opts.Shell {
-		writeCheckShellText(cmd.OutOrStdout(), shellSrc, commands, verdicts, store.Project.Path)
 	} else {
-		writeCheckText(cmd.OutOrStdout(), commands[0], verdicts[0], store.Project.Path)
+		if opts.Shell {
+			writeCheckShellText(cmd.OutOrStdout(), shellSrc, commands, verdicts, store.Project.Path)
+		} else {
+			writeCheckText(cmd.OutOrStdout(), commands[0], verdicts[0], store.Project.Path)
+		}
+
+		for _, warning := range warnings {
+			fmt.Fprintf(cmd.ErrOrStderr(), "warning: %s\n", warning)
+		}
 	}
 
 	switch aggregate {
@@ -210,10 +252,56 @@ func checkResultFrom(argv []string, v approve.Verdict) checkResult {
 		BadEnvs:    v.BadEnvs,
 	}
 	if v.Rule != nil {
-		res.Rule = &ruleInfo{Kind: ruleKindString(v.Rule.Kind()), Pattern: describeRulePattern(v.Rule), Message: v.Rule.Message}
+		info := ruleInfoFor(v.Rule)
+		res.Rule = &info
+	}
+
+	for _, cl := range v.Chain {
+		res.Chain = append(res.Chain, chainInfoFrom(cl))
+	}
+	for _, sk := range v.Skipped {
+		res.Skipped = append(res.Skipped, skipInfo{Offset: sk.Offset, Rule: ruleInfoFor(sk.Rule), Reason: sk.Reason.String()})
 	}
 
 	return res
+}
+
+// ruleInfoFor describes a rule for the JSON output.
+func ruleInfoFor(r *approve.Rule) ruleInfo {
+	return ruleInfo{Kind: r.Kind().String(), Pattern: r.Pattern(), Message: r.Message}
+}
+
+// chainInfoFrom describes one chain layer for the JSON output.
+func chainInfoFrom(cl approve.ChainLayer) chainInfo {
+	info := chainInfo{
+		Offset:   cl.Offset,
+		Command:  cl.Argv,
+		Resolved: resolvedPath(cl.Resolution),
+		Step:     cl.Step.String(),
+		PathForm: cl.PathForm,
+	}
+	for _, r := range cl.Wrappers {
+		info.Wrappers = append(info.Wrappers, ruleInfoFor(r))
+	}
+	if cl.Rule != nil {
+		rule := ruleInfoFor(cl.Rule)
+		info.Rule = &rule
+	}
+	for _, r := range cl.Candidates {
+		info.Candidates = append(info.Candidates, ruleInfoFor(r))
+	}
+
+	return info
+}
+
+// resolvedPath is the executable path an inner layer resolved to, or empty when
+// it did not resolve.
+func resolvedPath(res *model.Resolution) string {
+	if res == nil || (res.Resolved == "" && res.Canonical == "") {
+		return ""
+	}
+
+	return res.RulePath()
 }
 
 // writeCheckText renders a verdict as a short human-readable report.
@@ -221,11 +309,17 @@ func writeCheckText(w io.Writer, argv []string, v approve.Verdict, projectPath s
 	fmt.Fprintf(w, "%s: %s\n", decisionString(v.Decision), model.EscapeArgs(argv))
 
 	if v.Rule != nil {
-		fmt.Fprintf(w, "  rule: %s %s\n", ruleSectionFor(v), describeRulePattern(v.Rule))
+		kind := ""
+		if v.Rule.Kind() == approve.KindWrapper {
+			kind = "wrapper "
+		}
+		fmt.Fprintf(w, "  rule: %s %s%s\n", ruleSectionFor(v), kind, v.Rule.Pattern())
 		if v.Rule.Message != "" {
 			fmt.Fprintf(w, "  message: %s\n", v.Rule.Message)
 		}
 	}
+
+	writeChainText(w, v)
 
 	if len(v.BadEnvs) > 0 {
 		fmt.Fprintf(w, "  blocked env: %s\n", strings.Join(v.BadEnvs, ", "))
@@ -238,6 +332,69 @@ func writeCheckText(w io.Writer, argv []string, v approve.Verdict, projectPath s
 
 	if v.Decision == approve.DecisionPrompt {
 		fmt.Fprintln(w, "  hint: no rule matched; cg_run would prompt for interactive approval, or fail closed without one")
+	}
+}
+
+// writeChainText renders the wrapper chain behind a verdict, then the wrapper
+// rules that matched and did not peel. Every layer of a chain must permit a
+// dangerous override, so a refusal names the layer that refused it.
+func writeChainText(w io.Writer, v approve.Verdict) {
+	if len(v.Chain) > 0 {
+		fmt.Fprintln(w, "  chain:")
+	}
+
+	for i, cl := range v.Chain {
+		fmt.Fprintf(w, "    [%d] %s", i, model.EscapeArgs(cl.Argv))
+		if path := resolvedPath(cl.Resolution); path != "" {
+			fmt.Fprintf(w, " (%s)", path)
+		}
+		fmt.Fprintln(w)
+
+		if len(cl.Wrappers) > 0 {
+			patterns := make([]string, len(cl.Wrappers))
+			for j, r := range cl.Wrappers {
+				patterns[j] = r.Pattern()
+			}
+			fmt.Fprintf(w, "        peeled by wrapper %s\n", strings.Join(patterns, " or "))
+		}
+
+		switch {
+		case cl.Rule == nil:
+			fmt.Fprintf(w, "        %s\n", cl.Step)
+		case cl.Step == approve.StepPeel:
+			fmt.Fprintf(w, "        peel runs, permitted by %s\n", chainRuleLabel(cl))
+		case cl.Step == approve.StepInner:
+			fmt.Fprintf(w, "        inner verdict stands, peel permitted by %s\n", chainRuleLabel(cl))
+		case cl.Step == approve.StepEnvRefusal:
+			fmt.Fprintf(w, "        %s: %s\n", cl.Step, chainRuleLabel(cl))
+		default:
+			fmt.Fprintf(w, "        %s\n", chainRuleLabel(cl))
+		}
+	}
+
+	if len(v.Chain) > 0 && len(v.BadEnvs) > 0 {
+		fmt.Fprintf(w, "  env refused at layer [%d]\n", len(v.Chain)-1)
+	}
+
+	for _, sk := range v.Skipped {
+		fmt.Fprintf(w, "  wrapper %s did not peel at offset %d: %s\n", sk.Rule.Pattern(), sk.Offset, sk.Reason)
+	}
+}
+
+// chainRuleLabel names a chain layer's rule with the list it came from: a wrapper
+// rule, or an allow, deny, or restrict rule by the step that settled the layer.
+func chainRuleLabel(cl approve.ChainLayer) string {
+	pattern := cl.Rule.Pattern()
+
+	switch {
+	case cl.Rule.Kind() == approve.KindWrapper:
+		return "wrapper " + pattern
+	case cl.Step == approve.StepDeny:
+		return "deny " + pattern
+	case cl.Step == approve.StepRestrict:
+		return "restrict " + pattern
+	default:
+		return "allow " + pattern
 	}
 }
 
@@ -277,38 +434,5 @@ func ruleSectionFor(v approve.Verdict) string {
 		return "allow"
 	default:
 		return "deny"
-	}
-}
-
-// ruleKindString renders a RuleKind for display.
-func ruleKindString(k approve.RuleKind) string {
-	switch k {
-	case approve.KindExact:
-		return "exact"
-	case approve.KindPrefix:
-		return "prefix"
-	case approve.KindGlob:
-		return "glob"
-	case approve.KindRegex:
-		return "regex"
-	default:
-		return "unknown"
-	}
-}
-
-// describeRulePattern renders the pattern side of a rule for display: the argv
-// tokens for exact/prefix, the raw pattern string for glob/regex.
-func describeRulePattern(r *approve.Rule) string {
-	switch r.Kind() {
-	case approve.KindExact:
-		return "[" + strings.Join(r.Exact, ", ") + "]"
-	case approve.KindPrefix:
-		return "[" + strings.Join(r.Prefix, ", ") + "]"
-	case approve.KindGlob:
-		return fmt.Sprintf("%q", r.Glob)
-	case approve.KindRegex:
-		return fmt.Sprintf("%q", r.Regex)
-	default:
-		return ""
 	}
 }

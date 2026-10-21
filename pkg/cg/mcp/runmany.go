@@ -22,9 +22,11 @@ const (
 	// per-run supervisor.
 	maxPoolParallelism = 32
 
-	// maxPoolCommands caps distinct argvs. The gate builds one approval form per distinct
-	// unapproved argv and shows them in one batch, so a product-only bound would let one
-	// malformed call put hundreds of forms in front of the user before any side effect.
+	// maxPoolCommands caps distinct argvs. The gate groups the unapproved argvs by suggested rule
+	// into forms of at most maxFormCommands each and shows them in one batch. A pool of
+	// commands that all suggest different rules still produces one form each, so a product-only
+	// bound would let one malformed call put hundreds of forms in front of the user before any
+	// side effect.
 	maxPoolCommands = 100
 
 	// poolExcerptBudget caps the total excerpt bytes across a pool's summary,
@@ -162,6 +164,13 @@ func handleRunMany(ctx context.Context, reg *runRegistry, g *gate, req *mcpsdk.C
 	}
 	warning := outcome.Warning
 
+	pinned := make(map[string]map[int]string, len(distinct))
+	for i, argv := range distinct {
+		if i < len(outcome.Rewrites) {
+			pinned[model.ArgvKey(argv)] = outcome.Rewrites[i]
+		}
+	}
+
 	spec := &model.PoolSpec{
 		Commands:    make([]model.PoolCommand, 0, len(in.Commands)),
 		Repeat:      repeat,
@@ -172,7 +181,7 @@ func handleRunMany(ctx context.Context, reg *runRegistry, g *gate, req *mcpsdk.C
 		SessionID:   sessionID,
 	}
 	for _, argv := range in.Commands {
-		pc := model.PoolCommand{Argv: argv}
+		pc := model.PoolCommand{Argv: argv, InnerExec: pinned[model.ArgvKey(argv)]}
 		if r := resolutions[model.ArgvKey(argv)]; r != nil {
 			pc.Resolved = r.Resolved
 			pc.Canonical = r.Canonical

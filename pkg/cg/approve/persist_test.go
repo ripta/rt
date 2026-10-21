@@ -130,12 +130,12 @@ func TestAppendKeepsEnvPermitAcrossReorder(t *testing.T) {
 
 	subj := identitySubject([]string{"make", "test"})
 	env := map[string]string{"PATH": "/custom"}
-	if got := s.Ruleset().Evaluate(subj, env); got.Decision != DecisionRun {
+	if got := s.Ruleset().Evaluate(subj, env, nil); got.Decision != DecisionRun {
 		t.Errorf("live decision = %v (bad envs %v), want run", got.Decision, got.BadEnvs)
 	}
 
 	reloaded := loadProject(t, root)
-	if got := reloaded.Ruleset().Evaluate(subj, env); got.Decision != DecisionRun {
+	if got := reloaded.Ruleset().Evaluate(subj, env, nil); got.Decision != DecisionRun {
 		t.Errorf("reloaded decision = %v (bad envs %v), want run", got.Decision, got.BadEnvs)
 	}
 }

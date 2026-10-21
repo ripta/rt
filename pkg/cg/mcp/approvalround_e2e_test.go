@@ -274,6 +274,61 @@ func TestApprovalEndToEndRunManyAsksOncePerDistinctCommand(t *testing.T) {
 	}
 }
 
+// TestApprovalEndToEndGroupedRound plays the client at protocol 2026-07-28 so the raw rounds are
+// visible. Two commands share a rule and one does not, so the first round carries two forms. The
+// retry answers each form by its id, and the shared rule is saved once.
+func TestApprovalEndToEndGroupedRound(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+
+	root := t.TempDir()
+	g := newTestGateAt(t, root, "version: 1\n", false)
+	cs := connectGateWith(t, g, protocolMultiRoundTrip, &mcpsdk.ClientOptions{
+		ElicitationHandler: (&formScript{}).handle,
+		MultiRoundTrip:     &mcpsdk.MultiRoundTripOptions{Disabled: true},
+	})
+
+	args := map[string]any{"commands": [][]string{{"echo", "a"}, {"printf", "x"}, {"echo", "b"}}}
+	first, err := cs.CallTool(context.Background(), &mcpsdk.CallToolParams{Name: "cg_run_many", Arguments: args})
+	if err != nil {
+		t.Fatalf("first CallTool: %v", err)
+	}
+	if !first.NeedsInput() {
+		t.Fatalf("first call did not ask for approval: IsError=%v, text=%q", first.IsError, resultText(first))
+	}
+	if len(first.InputRequests) != 2 {
+		t.Fatalf("forms = %d, want 2", len(first.InputRequests))
+	}
+
+	shared, ok := first.InputRequests["approval-1"].(*mcpsdk.ElicitParams)
+	if !ok {
+		t.Fatalf("approval-1 is %T, want *ElicitParams", first.InputRequests["approval-1"])
+	}
+	if want := "Approval 1 of 2: allow 2 commands in (server cwd)?\necho a\necho b"; shared.Message != want {
+		t.Errorf("approval-1 message = %q, want it to list both echo commands", shared.Message)
+	}
+
+	retry, err := cs.CallTool(context.Background(), &mcpsdk.CallToolParams{
+		Name:      "cg_run_many",
+		Arguments: args,
+		InputResponses: mcpsdk.InputResponseMap{
+			"approval-1": accept(map[string]any{"remember": true, "rule": "[echo]"}),
+			"approval-2": accept(map[string]any{"remember": false}),
+		},
+		RequestState: first.RequestState,
+	})
+	if err != nil {
+		t.Fatalf("retry CallTool: %v", err)
+	}
+	if retry.IsError || retry.NeedsInput() {
+		t.Fatalf("retry did not run: IsError=%v, NeedsInput=%v, text=%q", retry.IsError, retry.NeedsInput(), resultText(retry))
+	}
+
+	file, _ := readProjectIfPresent(root)
+	if got := strings.Count(file, "prefix: [echo]"); got != 1 {
+		t.Errorf("rule written %d times, want once:\n%s", got, file)
+	}
+}
+
 // failedPromptTest names what a client whose elicitation handler fails produces at one protocol
 // version. The failure is a JSON-RPC error from the call. It never becomes a tool result, so cg's
 // refusal text never reaches the caller.

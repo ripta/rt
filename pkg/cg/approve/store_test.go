@@ -262,7 +262,7 @@ func TestLoadEnvPermitCrossLayer(t *testing.T) {
 		t.Fatalf("Load() error: %v", err)
 	}
 
-	got := s.Ruleset().Evaluate(identitySubject([]string{"make", "test"}), map[string]string{"PATH": "/custom"})
+	got := s.Ruleset().Evaluate(identitySubject([]string{"make", "test"}), map[string]string{"PATH": "/custom"}, nil)
 	if got.Decision != DecisionRun {
 		t.Errorf("decision = %v (bad envs %v), want run via the project permit", got.Decision, got.BadEnvs)
 	}

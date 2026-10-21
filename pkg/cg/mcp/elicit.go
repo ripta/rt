@@ -4,10 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/ripta/rt/pkg/cg/approve"
 )
 
 // maxElicitProbe bounds both requests per round and rounds per call. The SDK client gives up
@@ -24,10 +28,14 @@ const maxElicitProbe = 10
 // elicitations together in one input-required result, and the call completes after the last
 // round is answered.
 type elicitInput struct {
-	Case     string `json:"case,omitempty" jsonschema:"which form to send: text, text_default, enum_single, enum_single_titled, enum_multi, enum_multi_titled, checkbox, number, format, all (default all)"`
+	Case     string `json:"case,omitempty" jsonschema:"which form to send: text, text_default, enum_single, enum_single_titled, enum_multi, enum_multi_titled, checkbox, number, format, approval-form, all (default all)"`
 	Message  string `json:"message,omitempty" jsonschema:"prompt to show the user; a per-case default is used when empty"`
-	Requests int    `json:"requests,omitempty" jsonschema:"elicitations sent together in each round (1-10, default 1)"`
+	Requests int    `json:"requests,omitempty" jsonschema:"elicitations sent together in each round (1-10, default 1; the approval-form case sends at least 2)"`
 	Rounds   int    `json:"rounds,omitempty" jsonschema:"input-required rounds before the call completes (1-10, default 1); more than one needs protocol 2026-07-28 or later"`
+	Commands int    `json:"commands,omitempty" jsonschema:"commands listed on each approval-form request (1-10, default is the gate's per-form limit)"`
+
+	WideCommand bool `json:"wide_command,omitempty" jsonschema:"approval-form only: make the first command wider than any terminal"`
+	LongCwd     bool `json:"long_cwd,omitempty" jsonschema:"approval-form only: make the working directory in the header wider than any terminal"`
 }
 
 // elicitOutput reports whether elicitation is supported and, when it is, every
@@ -59,14 +67,16 @@ type elicitState struct {
 	Responses []elicitResponse `json:"responses,omitempty"`
 }
 
-func registerElicitTest(s *mcpsdk.Server) {
+func registerElicitTest(s *mcpsdk.Server, g *gate) {
 	mcpsdk.AddTool(s, &mcpsdk.Tool{
 		Name:        "cg_elicit_test",
-		Description: "Diagnostic: send MCP elicitation forms to the client to verify support and inspect how each field type renders and round-trips. Use the case argument to pick a field type, requests to send several forms at once, and rounds to chain several input-required rounds.",
-	}, handleElicitTest)
+		Description: "Diagnostic: send MCP elicitation forms to the client to verify support and inspect how each field type renders and round-trips. Use the case argument to pick a field type, requests to send several forms at once, and rounds to chain several input-required rounds. The approval-form case renders the approval gate's own form for a given number of commands, to check how much of its message the client shows.",
+	}, func(ctx context.Context, req *mcpsdk.CallToolRequest, in elicitInput) (*mcpsdk.CallToolResult, elicitOutput, error) {
+		return handleElicitTest(ctx, req, g, in)
+	})
 }
 
-func handleElicitTest(_ context.Context, req *mcpsdk.CallToolRequest, in elicitInput) (*mcpsdk.CallToolResult, elicitOutput, error) {
+func handleElicitTest(_ context.Context, req *mcpsdk.CallToolRequest, g *gate, in elicitInput) (*mcpsdk.CallToolResult, elicitOutput, error) {
 	kase := in.Case
 	if kase == "" {
 		kase = "all"
@@ -80,7 +90,18 @@ func handleElicitTest(_ context.Context, req *mcpsdk.CallToolRequest, in elicitI
 		return nil, out, nil
 	}
 
-	schema, msg, err := elicitSchema(kase)
+	var form approvalProbe
+	if kase == approvalFormCase {
+		form, err = newApprovalProbe(in.Commands, in.WideCommand, in.LongCwd, probeProjectPath(g))
+		if err != nil {
+			out.Error = err.Error()
+			return nil, out, nil
+		}
+
+		requests = max(requests, 2)
+	}
+
+	schema, msg, err := elicitSchema(kase, form)
 	if err != nil {
 		out.Error = err.Error()
 		return nil, out, nil
@@ -88,7 +109,7 @@ func handleElicitTest(_ context.Context, req *mcpsdk.CallToolRequest, in elicitI
 	if in.Message != "" {
 		msg = in.Message
 	}
-	out.Schema = schema
+	out.Schema = schemaOutput(schema)
 
 	if !elicitationAvailable(req) {
 		out.Error = "client did not advertise the elicitation capability"
@@ -132,8 +153,19 @@ func handleElicitTest(_ context.Context, req *mcpsdk.CallToolRequest, in elicitI
 		return nil, elicitOutput{}, fmt.Errorf("encoding request state: %w", err)
 	}
 
+	message := func(i int) string {
+		if requests > 1 || rounds > 1 {
+			return fmt.Sprintf("%s\n\n[round %d of %d, form %d of %d]", msg, state.Round, rounds, i, requests)
+		}
+
+		return msg
+	}
+	if kase == approvalFormCase && in.Message == "" {
+		message = func(i int) string { return approvalMessage(form.Argvs, form.Cwd, i, requests) }
+	}
+
 	return &mcpsdk.CallToolResult{
-		InputRequests: elicitRequests(state.Round, rounds, requests, msg, schema),
+		InputRequests: elicitRequests(requests, message, schema),
 		RequestState:  string(encoded),
 	}, elicitOutput{}, nil
 }
@@ -163,23 +195,112 @@ func elicitCounts(in elicitInput) (int, int, error) {
 	return requests, rounds, nil
 }
 
-// elicitRequests builds one round's input requests. Each gets a position suffix whenever there
-// is more than one form in play, so the user can tell the forms apart.
-func elicitRequests(round, rounds, requests int, msg string, schema map[string]any) mcpsdk.InputRequestMap {
+// elicitRequests builds one round's input requests. message renders the prompt of form i, counting
+// from 1.
+func elicitRequests(requests int, message func(i int) string, schema any) mcpsdk.InputRequestMap {
 	irs := make(mcpsdk.InputRequestMap, requests)
 	for i := 1; i <= requests; i++ {
-		m := msg
-		if requests > 1 || rounds > 1 {
-			m = fmt.Sprintf("%s\n\n[round %d of %d, form %d of %d]", msg, round, rounds, i, requests)
-		}
-
 		irs[elicitRequestID(i)] = &mcpsdk.ElicitParams{
-			Message:         m,
+			Message:         message(i),
 			RequestedSchema: schema,
 		}
 	}
 
 	return irs
+}
+
+// schemaOutput renders a requested-form schema for the probe's output. The approval form's schema
+// is typed, so it goes through JSON to become the generic map the output carries.
+func schemaOutput(schema any) map[string]any {
+	if m, ok := schema.(map[string]any); ok {
+		return m
+	}
+
+	raw, err := json.Marshal(schema)
+	if err != nil {
+		return nil
+	}
+
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return nil
+	}
+
+	return m
+}
+
+// approvalFormCase is the probe case that sends the approval gate's own form.
+const approvalFormCase = "approval-form"
+
+// maxProbeCommands bounds the commands one approval-form request lists. It sits above
+// maxFormCommands so the probe can show the client's "more lines" marker for a form that lists
+// more commands than fit.
+const maxProbeCommands = 10
+
+// probeRuler is a line of digits wider than any terminal. Where the client cuts or wraps it shows
+// the width it renders at.
+var probeRuler = strings.Repeat("0123456789", 12)
+
+// approvalProbe is the content of the approval-form case: the commands a form lists and the rule
+// and project file it offers.
+type approvalProbe struct {
+	Argvs      [][]string
+	Cwd        string
+	Suggestion approve.Suggestion
+	Path       string
+}
+
+// newApprovalProbe builds realistic content for commands listed commands. Each command fits in
+// 80 columns, the rule is two tokens from a canonical executable path as a real go command
+// suggests, and the project file is the gate's own.
+//
+// wideCommand makes the first command wider than any terminal. If the client wraps it into the
+// lines it hides, the second command falls out of view. longCwd does the same to the header line.
+func newApprovalProbe(commands int, wideCommand, longCwd bool, path string) (approvalProbe, error) {
+	if commands == 0 {
+		commands = maxFormCommands
+	}
+	if commands < 1 || commands > maxProbeCommands {
+		return approvalProbe{}, fmt.Errorf("commands must be between 1 and %d, got %d", maxProbeCommands, commands)
+	}
+
+	const executable = "/usr/local/go/bin/go"
+
+	argvs := make([][]string, commands)
+	for i := range argvs {
+		argvs[i] = []string{"go", "test", "-count=1", "-run", fmt.Sprintf("TestCase%02d", i+1), fmt.Sprintf("./internal/service/component%02d/...", i+1)}
+	}
+
+	if wideCommand {
+		argvs[0] = []string{"go", "test", "-count=1", "-run", "TestCase01", "./" + probeRuler}
+	}
+
+	cwd := "/Users/example/projects/service"
+	if longCwd {
+		cwd = "/" + probeRuler
+	}
+
+	return approvalProbe{
+		Argvs:      argvs,
+		Cwd:        cwd,
+		Suggestion: approve.Suggestion{Kind: approve.KindPrefix, Tokens: approve.SuggestPrefix(argvs[0], executable)},
+		Path:       path,
+	}, nil
+}
+
+// probeProjectPath is the project rules file the gate would offer to save a rule to. A probe run
+// without a gate store falls back to the working directory's file.
+func probeProjectPath(g *gate) string {
+	if g != nil && g.store != nil {
+		return g.store.Project.Path
+	}
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		return ".cg.yaml"
+	}
+
+	return filepath.Join(cwd, ".cg.yaml")
 }
 
 // collectElicitResponses reads one round's answers in request order. A missing or non-elicit
@@ -220,9 +341,13 @@ func obj(props map[string]any, required ...string) map[string]any {
 	return s
 }
 
-// elicitSchema returns the requested-form schema and default prompt for a case.
-func elicitSchema(kase string) (map[string]any, string, error) {
+// elicitSchema returns the requested-form schema and default prompt for a case. form supplies the
+// content of the approval-form case and is ignored by the others.
+func elicitSchema(kase string, form approvalProbe) (any, string, error) {
 	switch kase {
+	case approvalFormCase:
+		return approvalSchema(form.Suggestion, false, form.Path), approvalMessage(form.Argvs, form.Cwd, 1, 2), nil
+
 	case "text":
 		return obj(map[string]any{
 			"answer": map[string]any{
@@ -328,7 +453,7 @@ func elicitSchema(kase string) (map[string]any, string, error) {
 func elicitCases() []string {
 	cs := []string{
 		"text", "text_default", "enum_single", "enum_single_titled",
-		"enum_multi", "enum_multi_titled", "checkbox", "number", "format", "all",
+		"enum_multi", "enum_multi_titled", "checkbox", "number", "format", approvalFormCase, "all",
 	}
 	sort.Strings(cs)
 	return cs

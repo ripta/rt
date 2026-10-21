@@ -4,11 +4,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"unicode"
 
 	jsonschema "github.com/google/jsonschema-go/jsonschema"
 	"github.com/pmezard/go-difflib/difflib"
 	"gopkg.in/yaml.v3"
 
+	"github.com/ripta/rt/pkg/cg/approve"
 	"github.com/ripta/rt/pkg/cg/model"
 )
 
@@ -25,55 +27,175 @@ const (
 	// count summary.
 	maxDiffLines = 10
 	maxDiffBytes = 4000
+
+	// visibleMessageLines is how many lines of a form's message the client shows. Claude Code's
+	// input dialog prints the first three, then "(+N more lines)", and offers no way to expand
+	// it. The cap does not change with terminal size.
+	visibleMessageLines = 3
+
+	// maxFormCommands is the most commands one approval form lists. The message is one header line
+	// plus one line per command, and a command past the visible lines is hidden from the person
+	// approving it. Rerun the cg_elicit_test approval-form probe if the client's cap changes.
+	maxFormCommands = visibleMessageLines - 1
 )
 
-// approvalMessage renders the human-facing prompt body: the command as it will run and the working
-// directory it runs in.
+// approvalMessage renders the human-facing prompt body: a header with the count and the working
+// directory, then every command the form covers as it will run, one per line.
 //
-// A call with several approval forms leads each one with its position, so every form stands
-// alone. A lone form carries none.
-func approvalMessage(argv []string, cwd string, pos, total int) string {
+// The client shows only the first visibleMessageLines lines, so the header takes one and the
+// commands take the rest, with no blank lines. A call with several approval forms leads the header
+// with its position, so every form stands alone. A lone form carries none.
+func approvalMessage(argvs [][]string, cwd string, pos, total int) string {
 	if cwd == "" {
 		cwd = "(server cwd)"
 	}
+	cwd = visibleText(cwd)
 
-	var lead string
-	if total > 1 {
-		lead = fmt.Sprintf("Approval %d of %d\n\n", pos, total)
+	what := "this command"
+	if len(argvs) != 1 {
+		what = fmt.Sprintf("%d commands", len(argvs))
 	}
 
-	return fmt.Sprintf("%sAllow this command?\n\n  %s\n\nworking directory: %s", lead, model.EscapeArgs(argv), cwd)
+	var b strings.Builder
+	if total > 1 {
+		fmt.Fprintf(&b, "Approval %d of %d: allow %s in %s?", pos, total, what, cwd)
+	} else {
+		fmt.Fprintf(&b, "Allow %s in %s?", what, cwd)
+	}
+
+	for _, argv := range argvs {
+		fmt.Fprintf(&b, "\n%s", visibleArgs(argv))
+	}
+
+	return b.String()
+}
+
+// visibleArgs renders an argv as a shell command on exactly one line. An argument with a control
+// character is written in ANSI-C quoting, so a newline cannot push the rest of the form out of the
+// client's visible lines and an escape sequence cannot reach the terminal.
+func visibleArgs(argv []string) string {
+	quoted := make([]string, len(argv))
+	for i, arg := range argv {
+		if hasControl(arg) {
+			quoted[i] = ansiCQuote(arg)
+		} else {
+			quoted[i] = model.EscapeArgs([]string{arg})
+		}
+	}
+
+	return strings.Join(quoted, " ")
+}
+
+// visibleText renders free text, such as a working directory, on one line. Text with a control
+// character is written in ANSI-C quoting and anything else is left as it is.
+func visibleText(s string) string {
+	if hasControl(s) {
+		return ansiCQuote(s)
+	}
+
+	return s
+}
+
+// hasControl reports whether s holds a character that could break a line, drive the terminal, or
+// display differently from what runs. That is a C0 or C1 control, DEL, a Unicode line or paragraph
+// separator, or a format character such as a bidi override or a zero-width joiner.
+func hasControl(s string) bool {
+	return strings.ContainsFunc(s, needsEscape)
+}
+
+func needsEscape(r rune) bool {
+	return unicode.IsControl(r) || unicode.Is(unicode.Cf, r) || r == '\u2028' || r == '\u2029'
+}
+
+// ansiCQuote quotes s as $'...', which bash and zsh read back to the same bytes.
+func ansiCQuote(s string) string {
+	var b strings.Builder
+	b.WriteString("$'")
+
+	for _, r := range s {
+		switch {
+		case r == '\n':
+			b.WriteString(`\n`)
+		case r == '\r':
+			b.WriteString(`\r`)
+		case r == '\t':
+			b.WriteString(`\t`)
+		case r == '\\':
+			b.WriteString(`\\`)
+		case r == '\'':
+			b.WriteString(`\'`)
+		case r < 0x20 || r == 0x7f:
+			fmt.Fprintf(&b, `\x%02x`, r)
+		case needsEscape(r) && r > 0xffff:
+			fmt.Fprintf(&b, `\U%08x`, r)
+		case needsEscape(r):
+			fmt.Fprintf(&b, `\u%04x`, r)
+		default:
+			b.WriteRune(r)
+		}
+	}
+
+	b.WriteString("'")
+
+	return b.String()
 }
 
 // approvalSchema builds the elicitation form: an editable rule field pre-filled
-// with the suggested prefix as a YAML flow sequence, followed by a remember
+// with the suggested rule as a YAML flow sequence, followed by a remember
 // checkbox. path is the project rules file the remembered rule is saved to.
+//
+// The field's title names the rule kind. The message has room for the command and nothing
+// else, because the client shows only its first visibleMessageLines lines. So what the rule
+// means goes in the field's description: that it covers an inner command, that it is exact
+// because the program heads a wrapper rule, and which wrapper rule nearly matched.
 //
 // The form is a typed *jsonschema.Schema rather than a property map so
 // PropertyOrder controls the field order on the wire: a property map marshals
 // its keys alphabetically, which would float "remember" above "rule". The client
 // renders fields in wire order, so listing rule first keeps the command the
 // prompt is about at the top, above the remember toggle.
-func approvalSchema(suggestion []string, path string) *jsonschema.Schema {
-	ruleDefault, _ := json.Marshal(renderFlowSeq(suggestion))
+func approvalSchema(suggestion approve.Suggestion, inner bool, path string) *jsonschema.Schema {
+	ruleDefault, _ := json.Marshal(renderFlowSeq(suggestion.Tokens))
 	return &jsonschema.Schema{
 		Type: "object",
 		Properties: map[string]*jsonschema.Schema{
 			"rule": {
 				Type:        "string",
-				Title:       "Allow rule (prefix)",
-				Description: "edited only when remembering; a YAML list of argv tokens, e.g. [go, test] or [foo, \"bar baz\"]",
+				Title:       fmt.Sprintf("Allow rule (%s)", suggestion.Kind),
+				Description: ruleDescription(suggestion, inner),
 				Default:     ruleDefault,
 			},
 			"remember": {
 				Type:        "boolean",
-				Title:       "Remember this command",
+				Title:       "Remember this rule",
 				Description: fmt.Sprintf("save an allow rule to %s so it is not asked again", path),
 				Default:     json.RawMessage("false"),
 			},
 		},
 		PropertyOrder: []string{"rule", "remember"},
 	}
+}
+
+// ruleDescription explains the rule field. The notes come first, because they say what the
+// pre-filled rule is for, and the editing hint closes the text.
+func ruleDescription(suggestion approve.Suggestion, inner bool) string {
+	var b strings.Builder
+
+	if inner {
+		b.WriteString("The rule covers the inner command after the wrapper. ")
+	}
+
+	if suggestion.HeadsWrapper {
+		b.WriteString("This program heads a wrapper rule, so the rule is exact and allows only this whole command. ")
+	}
+
+	if suggestion.NearMiss != nil {
+		fmt.Fprintf(&b, "The wrapper rule %s stopped at the inner command's leading '-'. To allow this form, add a second wrapper rule ending in --. Appending -- to the existing rule would stop it matching the form without --. ", visibleText(suggestion.NearMiss.String()))
+	}
+
+	b.WriteString("Edited only when remembering; a YAML list of argv tokens, e.g. [go, test] or [foo, \"bar baz\"]")
+
+	return b.String()
 }
 
 // divergenceMessage renders the trailing form's body describing how the project

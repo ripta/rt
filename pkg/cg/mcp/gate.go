@@ -27,6 +27,16 @@ type gate struct {
 	pendingApps *pendingStore
 }
 
+// ruleWarnings returns the warnings for the rules the server holds now, for cg_info. They go to
+// the tool result and never to stderr, which an MCP host shows on screen.
+func (g *gate) ruleWarnings() []string {
+	if g == nil || g.store == nil {
+		return nil
+	}
+
+	return approve.WarningMessages(g.store.Warnings())
+}
+
 // pending returns the store of calls waiting on the user, creating it on first use so a gate
 // built as a literal still works.
 func (g *gate) pending() *pendingStore {
@@ -95,6 +105,11 @@ type gateOutcome struct {
 	// Warning is a best-effort persistence diagnostic to surface alongside a permitted run, empty
 	// when there is nothing to report.
 	Warning string
+
+	// Rewrites runs parallel to the call's argvs. Each entry maps an offset into the typed argv to
+	// the path the wrapper receives there, so an inner command runs the file the gate judged. An
+	// entry is nil when nothing is pinned. A gate that checks nothing returns nil.
+	Rewrites []map[int]string
 }
 
 // check evaluates every command in the call. A nil error with a nil Pending permits execution of
@@ -102,7 +117,10 @@ type gateOutcome struct {
 //
 // A retry first redeems its pending entry, which deletes it, so a nonce works once even when the
 // rules changed in between. The live ruleset is then evaluated again. Deny and restrict win over
-// an accepted form, and an allow runs without reading its answer.
+// an accepted form, and an allow runs without its answer gating it.
+//
+// A retry reads its forms even when no command needs a prompt any more. A form whose commands are
+// all allowed now can still carry a remember to save.
 func (g *gate) check(call approvalCall) (gateOutcome, error) {
 	if g == nil || g.blindlyAllow {
 		return gateOutcome{}, nil
@@ -118,27 +136,76 @@ func (g *gate) check(call approvalCall) (gateOutcome, error) {
 	}
 
 	var needs []int
+	verdicts := make([]approve.Verdict, len(call.Argvs))
 	for i := range call.Argvs {
 		v, err := g.evaluate(call, i)
 		if err != nil {
 			return gateOutcome{}, err
 		}
+
+		verdicts[i] = v
 		if v.Decision == approve.DecisionPrompt {
 			needs = append(needs, i)
 		}
 	}
 
-	if len(needs) == 0 {
-		return gateOutcome{}, nil
+	if len(needs) == 0 && entry == nil {
+		return gateOutcome{Rewrites: pinnedPaths(verdicts)}, nil
 	}
-	if !call.CanPrompt {
+	if len(needs) > 0 && !call.CanPrompt {
 		return gateOutcome{}, g.failClosedError(call.Tool)
 	}
 	if entry == nil {
-		return g.request(call, needs)
+		return g.request(call, needs, verdicts)
 	}
 
-	return g.answer(call, entry, needs)
+	outcome, err := g.answer(call, entry, needs, verdicts)
+	if err != nil {
+		return gateOutcome{}, err
+	}
+
+	// A remembered rule may now decide a layer, and the pin follows the rule that decides it. So
+	// the commands are judged again against the rules as they stand after the answers.
+	for i := range call.Argvs {
+		if verdicts[i], err = g.evaluate(call, i); err != nil {
+			return gateOutcome{}, err
+		}
+	}
+	outcome.Rewrites = pinnedPaths(verdicts)
+
+	return outcome, nil
+}
+
+// pinnedPaths works out, for each judged command, the inner executables a wrapper must be
+// handed. The top layer is never pinned, since the supervisor already runs the path the gate
+// resolved.
+//
+// An inner layer is pinned to the path it resolved to when every rule that permits it is
+// path-form. A bare-name rule accepts any binary of that name, so a layer it permits keeps
+// the wrapper's own lookup. A layer still prompting was approved at the form, which showed its
+// resolved path, so that layer is pinned to the path shown.
+func pinnedPaths(verdicts []approve.Verdict) []map[int]string {
+	out := make([]map[int]string, len(verdicts))
+
+	for i, v := range verdicts {
+		for j, layer := range v.Chain {
+			if layer.Offset == 0 || layer.Resolution == nil || layer.Resolution.Resolved == "" {
+				continue
+			}
+
+			shown := v.Decision == approve.DecisionPrompt && j == len(v.Chain)-1
+			if !layer.PathForm && !shown {
+				continue
+			}
+
+			if out[i] == nil {
+				out[i] = make(map[int]string)
+			}
+			out[i][layer.Offset] = layer.Resolution.RulePath()
+		}
+	}
+
+	return out
 }
 
 // evaluate checks one command against the live ruleset. A deny, restrict, or dangerous-env
@@ -148,7 +215,7 @@ func (g *gate) evaluate(call approvalCall, i int) (approve.Verdict, error) {
 	resolved := call.Resolutions[i]
 	subject := approve.Subject{Argv: call.Argvs[i], Canonical: resolved.CanonicalArgv(), Resolved: resolved.ResolvedArgv()}
 
-	v := g.store.Ruleset().Evaluate(subject, call.Env)
+	v := g.store.Ruleset().Evaluate(subject, call.Env, approve.CommandResolver(call.Cwd))
 	if v.Decision != approve.DecisionRefuse {
 		return v, nil
 	}
@@ -161,29 +228,68 @@ func (g *gate) evaluate(call approvalCall, i int) (approve.Verdict, error) {
 
 // refusalError builds the error for a deny or restrict match, naming the rule
 // kind and appending the rule's message when set so the agent sees why the
-// command was blocked.
+// command was blocked. A refusal behind a wrapper rule names the layer that refused and
+// the rule that refused it.
 func refusalError(tool string, v approve.Verdict) error {
 	kind := "deny"
 	if v.Restricted {
 		kind = "restrict"
 	}
-	if v.Rule != nil && v.Rule.Message != "" {
-		return fmt.Errorf("%s refused: command matches a %s rule: %s", tool, kind, v.Rule.Message)
+
+	what := fmt.Sprintf("command matches a %s rule", kind)
+	if layer, ok := refusingLayer(v); ok {
+		what = fmt.Sprintf("%s matches %s", layerName(layer), ruleLabel(kind, v.Rule))
 	}
-	return fmt.Errorf("%s refused: command matches a %s rule", tool, kind)
+
+	if v.Rule != nil && v.Rule.Message != "" {
+		return fmt.Errorf("%s refused: %s: %s", tool, what, v.Rule.Message)
+	}
+	return fmt.Errorf("%s refused: %s", tool, what)
 }
 
 // envRefusalError builds the error for a DecisionRefuse produced by the
 // dangerous-env gate rather than a deny or restrict rule. A matched allow rule
 // (Rule non-nil) points at permit_unsafe_envs; an unmatched command (Rule nil)
-// has no rule to carry an exemption, so the message points at adding one to
-// the project file instead.
+// has no rule to carry an exemption, so the message points at the project file instead.
+// Behind a wrapper rule, the message names the layer and the rule that lacked the permit.
 func envRefusalError(tool string, v approve.Verdict, projectPath string) error {
 	bad := strings.Join(v.BadEnvs, ", ")
+	if layer, ok := refusingLayer(v); ok && v.Rule != nil {
+		return fmt.Errorf("%s refused: env override sets %s, which %s on %s does not permit; list them under permit_unsafe_envs to allow", tool, bad, ruleLabel("allow", v.Rule), layerName(layer))
+	}
 	if v.Rule != nil {
 		return fmt.Errorf("%s refused: env override sets %s, which the matching allow rule does not permit; list them under permit_unsafe_envs to allow", tool, bad)
 	}
 	return fmt.Errorf("%s refused: env override sets %s, which a prompted command cannot permit; add an allow rule with permit_unsafe_envs to %s", tool, bad, projectPath)
+}
+
+// refusingLayer returns the layer a wrapper chain refused at. It reports false when no wrapper
+// rule was involved, so the refusal is about the typed command alone.
+func refusingLayer(v approve.Verdict) (approve.ChainLayer, bool) {
+	if len(v.Chain) == 0 {
+		return approve.ChainLayer{}, false
+	}
+
+	return v.Chain[len(v.Chain)-1], true
+}
+
+// layerName names a chain layer for a message: the typed command, or the inner command a
+// wrapper rule peeled out of it.
+func layerName(layer approve.ChainLayer) string {
+	if layer.Offset == 0 {
+		return "the command"
+	}
+
+	return fmt.Sprintf("the inner command `%s`", visibleArgs(layer.Argv))
+}
+
+// ruleLabel names a rule with the list it came from.
+func ruleLabel(list string, rule *approve.Rule) string {
+	if rule == nil {
+		return "a " + list + " rule"
+	}
+
+	return fmt.Sprintf("the %s rule %s", list, visibleText(rule.String()))
 }
 
 // failClosedError builds the error for a command that matched neither allow

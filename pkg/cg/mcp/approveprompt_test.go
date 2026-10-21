@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/ripta/rt/pkg/cg/approve"
 )
 
 // TestApprovalSchemaFieldOrder pins the wire order of the approval form so the
@@ -16,7 +18,7 @@ import (
 func TestApprovalSchemaFieldOrder(t *testing.T) {
 	t.Parallel()
 
-	raw, err := json.Marshal(approvalSchema([]string{"go", "test"}, "/tmp/.cg.yaml"))
+	raw, err := json.Marshal(approvalSchema(approve.Suggestion{Kind: approve.KindPrefix, Tokens: []string{"go", "test"}}, false, "/tmp/.cg.yaml"))
 	if err != nil {
 		t.Fatalf("marshalling schema: %v", err)
 	}
@@ -29,6 +31,167 @@ func TestApprovalSchemaFieldOrder(t *testing.T) {
 	}
 	if idxRule > idxRemember {
 		t.Errorf("rule must serialize before remember:\n%s", wire)
+	}
+}
+
+type approvalMessageTest struct {
+	Name  string
+	Argvs [][]string
+	Cwd   string
+	Pos   int
+	Total int
+	Want  string
+}
+
+var approvalMessageTests = []approvalMessageTest{
+	{
+		Name:  "one command with no position",
+		Argvs: [][]string{{"echo", "a b"}},
+		Cwd:   "/work",
+		Pos:   1,
+		Total: 1,
+		Want:  "Allow this command in /work?\necho 'a b'",
+	},
+	{
+		Name:  "one command with a position",
+		Argvs: [][]string{{"echo", "a"}},
+		Cwd:   "/work",
+		Pos:   1,
+		Total: 2,
+		Want:  "Approval 1 of 2: allow this command in /work?\necho a",
+	},
+	{
+		Name:  "several commands with a position",
+		Argvs: [][]string{{"go", "test", "./a"}, {"go", "test", "./b"}},
+		Cwd:   "/work",
+		Pos:   2,
+		Total: 3,
+		Want:  "Approval 2 of 3: allow 2 commands in /work?\ngo test ./a\ngo test ./b",
+	},
+	{
+		Name:  "no working directory names the server's",
+		Argvs: [][]string{{"echo"}},
+		Pos:   1,
+		Total: 1,
+		Want:  "Allow this command in (server cwd)?\necho",
+	},
+}
+
+type approvalControlTest struct {
+	Name  string
+	Argvs [][]string
+	Cwd   string
+
+	WantContains []string
+}
+
+var approvalControlTests = []approvalControlTest{
+	{
+		Name:         "a newline in an argument",
+		Argvs:        [][]string{{"sh", "-c", "true\nrm -rf x"}, {"echo", "b"}},
+		Cwd:          "/work",
+		WantContains: []string{`sh -c $'true\nrm -rf x'`},
+	},
+	{
+		Name:         "an escape in an argument",
+		Argvs:        [][]string{{"printf", "\x1b[2J\x7f\u0085"}, {"echo", "b"}},
+		Cwd:          "/work",
+		WantContains: []string{`printf $'\x1b[2J\x7f\u0085'`},
+	},
+	{
+		Name:         "a bidi override in an argument",
+		Argvs:        [][]string{{"echo", "a\u202eb"}, {"echo", "b"}},
+		Cwd:          "/work",
+		WantContains: []string{`echo $'a\u202eb'`},
+	},
+	{
+		Name:         "a zero-width space in an argument",
+		Argvs:        [][]string{{"echo", "a\u200bb"}, {"echo", "b"}},
+		Cwd:          "/work",
+		WantContains: []string{`echo $'a\u200bb'`},
+	},
+	{
+		Name:         "a tag character above the basic plane",
+		Argvs:        [][]string{{"echo", "a\U000e0001b"}, {"echo", "b"}},
+		Cwd:          "/work",
+		WantContains: []string{`echo $'a\U000e0001b'`},
+	},
+	{
+		Name:         "a newline in the working directory",
+		Argvs:        [][]string{{"echo", "a"}, {"echo", "b"}},
+		Cwd:          "/work\nrm -rf x",
+		WantContains: []string{`in $'/work\nrm -rf x'?`},
+	},
+	{
+		Name:         "quotes and backslashes around a control character",
+		Argvs:        [][]string{{"echo", "it's\\\t"}, {"echo", "b"}},
+		Cwd:          "/work",
+		WantContains: []string{`echo $'it\'s\\\t'`},
+	},
+}
+
+func TestApprovalMessageKeepsControlCharactersOnOneLine(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range approvalControlTests {
+		t.Run(test.Name, func(t *testing.T) {
+			t.Parallel()
+
+			msg := approvalMessage(test.Argvs, test.Cwd, 1, 2)
+			if got := countLines(msg); got != visibleMessageLines {
+				t.Errorf("form has %d lines, want %d:\n%q", got, visibleMessageLines, msg)
+			}
+			if strings.ContainsAny(msg, "\x1b\x7f\r\t\u0085\u202e\u200b\U000e0001") {
+				t.Errorf("form carries a raw control character: %q", msg)
+			}
+			for _, want := range test.WantContains {
+				if !strings.Contains(msg, want) {
+					t.Errorf("form missing %q:\n%q", want, msg)
+				}
+			}
+		})
+	}
+}
+
+// TestApprovalMessageFitsVisibleLines pins the layout to the client's visible-line cap. A fuller
+// form would hide its last commands from the person approving them.
+func TestApprovalMessageFitsVisibleLines(t *testing.T) {
+	t.Parallel()
+
+	argvs := make([][]string, maxFormCommands)
+	for i := range argvs {
+		argvs[i] = []string{"echo", "a"}
+	}
+
+	msg := approvalMessage(argvs, "/work", 1, 2)
+	if got := countLines(msg); got != visibleMessageLines {
+		t.Errorf("a full form has %d lines, want %d:\n%s", got, visibleMessageLines, msg)
+	}
+	if strings.Contains(msg, "\n\n") {
+		t.Errorf("a form has a blank line, which spends a visible line:\n%s", msg)
+	}
+}
+
+func TestApprovalMessage(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range approvalMessageTests {
+		t.Run(test.Name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := approvalMessage(test.Argvs, test.Cwd, test.Pos, test.Total); got != test.Want {
+				t.Errorf("approvalMessage = %q, want %q", got, test.Want)
+			}
+		})
+	}
+}
+
+func TestApprovalSchemaRememberTitle(t *testing.T) {
+	t.Parallel()
+
+	schema := approvalSchema(approve.Suggestion{Kind: approve.KindPrefix, Tokens: []string{"go", "test"}}, false, "/tmp/.cg.yaml")
+	if got := schema.Properties["remember"].Title; got != "Remember this rule" {
+		t.Errorf("remember title = %q, want %q", got, "Remember this rule")
 	}
 }
 
