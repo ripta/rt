@@ -95,12 +95,15 @@ func visibleText(s string) string {
 	return s
 }
 
-// hasControl reports whether s holds a character that could break a line or drive the terminal.
-// That is a C0 or C1 control, DEL, or a Unicode line or paragraph separator.
+// hasControl reports whether s holds a character that could break a line, drive the terminal, or
+// display differently from what runs. That is a C0 or C1 control, DEL, a Unicode line or paragraph
+// separator, or a format character such as a bidi override or a zero-width joiner.
 func hasControl(s string) bool {
-	return strings.ContainsFunc(s, func(r rune) bool {
-		return unicode.IsControl(r) || r == ' ' || r == ' '
-	})
+	return strings.ContainsFunc(s, needsEscape)
+}
+
+func needsEscape(r rune) bool {
+	return unicode.IsControl(r) || unicode.Is(unicode.Cf, r) || r == '\u2028' || r == '\u2029'
 }
 
 // ansiCQuote quotes s as $'...', which bash and zsh read back to the same bytes.
@@ -122,7 +125,9 @@ func ansiCQuote(s string) string {
 			b.WriteString(`\'`)
 		case r < 0x20 || r == 0x7f:
 			fmt.Fprintf(&b, `\x%02x`, r)
-		case unicode.IsControl(r) || r == ' ' || r == ' ':
+		case needsEscape(r) && r > 0xffff:
+			fmt.Fprintf(&b, `\U%08x`, r)
+		case needsEscape(r):
 			fmt.Fprintf(&b, `\u%04x`, r)
 		default:
 			b.WriteRune(r)

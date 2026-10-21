@@ -153,7 +153,7 @@ var roundTests = []roundTest{
 		WantErr:   "call the tool again",
 	},
 	{
-		Name:         "an allow rule added between the calls runs without reading the answer",
+		Name:         "an allow rule added between the calls runs whatever the answer says",
 		Project:      "version: 1\n",
 		AllowBetween: []string{"echo"},
 		Argvs:        [][]string{echoHi},

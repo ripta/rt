@@ -97,6 +97,24 @@ var approvalControlTests = []approvalControlTest{
 		WantContains: []string{`printf $'\x1b[2J\x7f\u0085'`},
 	},
 	{
+		Name:         "a bidi override in an argument",
+		Argvs:        [][]string{{"echo", "a\u202eb"}, {"echo", "b"}},
+		Cwd:          "/work",
+		WantContains: []string{`echo $'a\u202eb'`},
+	},
+	{
+		Name:         "a zero-width space in an argument",
+		Argvs:        [][]string{{"echo", "a\u200bb"}, {"echo", "b"}},
+		Cwd:          "/work",
+		WantContains: []string{`echo $'a\u200bb'`},
+	},
+	{
+		Name:         "a tag character above the basic plane",
+		Argvs:        [][]string{{"echo", "a\U000e0001b"}, {"echo", "b"}},
+		Cwd:          "/work",
+		WantContains: []string{`echo $'a\U000e0001b'`},
+	},
+	{
 		Name:         "a newline in the working directory",
 		Argvs:        [][]string{{"echo", "a"}, {"echo", "b"}},
 		Cwd:          "/work\nrm -rf x",
@@ -121,7 +139,7 @@ func TestApprovalMessageKeepsControlCharactersOnOneLine(t *testing.T) {
 			if got := countLines(msg); got != visibleMessageLines {
 				t.Errorf("form has %d lines, want %d:\n%q", got, visibleMessageLines, msg)
 			}
-			if strings.ContainsAny(msg, "\x1b\x7f\r\t") || strings.Contains(msg, "\u0085") {
+			if strings.ContainsAny(msg, "\x1b\x7f\r\t\u0085\u202e\u200b\U000e0001") {
 				t.Errorf("form carries a raw control character: %q", msg)
 			}
 			for _, want := range test.WantContains {
