@@ -27,6 +27,21 @@ type gate struct {
 	pendingApps *pendingStore
 }
 
+// ruleWarnings returns the warnings for the rules the server holds now, for cg_info. They go to
+// the tool result and never to stderr, which an MCP host shows on screen.
+func (g *gate) ruleWarnings() []string {
+	if g == nil || g.store == nil {
+		return nil
+	}
+
+	var out []string
+	for _, w := range g.store.Warnings() {
+		out = append(out, w.Message)
+	}
+
+	return out
+}
+
 // pending returns the store of calls waiting on the user, creating it on first use so a gate
 // built as a literal still works.
 func (g *gate) pending() *pendingStore {

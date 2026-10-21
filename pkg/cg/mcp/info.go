@@ -58,21 +58,25 @@ type infoOutput struct {
 	CaptureRoot string            `json:"capture_root"`
 	Build       infoBuild         `json:"build"`
 	Env         map[string]string `json:"env"`
+
+	// RuleWarnings lists the warnings for the approval rules the server holds,
+	// including rules a remember added since load.
+	RuleWarnings []string `json:"rule_warnings,omitempty"`
 }
 
-func registerInfo(s *mcpsdk.Server, v string, startedAt time.Time, sessionID string) {
+func registerInfo(s *mcpsdk.Server, v string, startedAt time.Time, sessionID string, g *gate) {
 	mcpsdk.AddTool(s, &mcpsdk.Tool{
 		Name:        "cg_info",
-		Description: "Return diagnostics about the running cg MCP server: its start time and uptime, version and build info, its working directory (fixed at start; the directory a cg_run inherits when its cwd is empty), its session_id (minted at start and stamped on every run and pool this server spawns, so cg_list/cg_meta can scope to it), its capture_root (where runs are recorded; the cg CLI reads runs from here when TMPDIR is set to its parent), and the set values of a curated allowlist of environment variables.",
+		Description: "Return diagnostics about the running cg MCP server: its start time and uptime, version and build info, its working directory (fixed at start; the directory a cg_run inherits when its cwd is empty), its session_id (minted at start and stamped on every run and pool this server spawns, so cg_list/cg_meta can scope to it), its capture_root (where runs are recorded; the cg CLI reads runs from here when TMPDIR is set to its parent), the set values of a curated allowlist of environment variables, and rule_warnings (warnings about the loaded approval rules, such as a wrapper rule that ends on a bare flag or that a prefix allow makes pointless).",
 	}, func(_ context.Context, _ *mcpsdk.CallToolRequest, _ infoInput) (*mcpsdk.CallToolResult, infoOutput, error) {
-		out, err := collectInfo(v, startedAt, sessionID, time.Now())
+		out, err := collectInfo(v, startedAt, sessionID, time.Now(), g.ruleWarnings())
 		return nil, out, err
 	})
 }
 
 // collectInfo assembles the cg_info response. The clock is threaded in as now
 // so tests can assert a deterministic uptime.
-func collectInfo(v string, startedAt time.Time, sessionID string, now time.Time) (infoOutput, error) {
+func collectInfo(v string, startedAt time.Time, sessionID string, now time.Time, ruleWarnings []string) (infoOutput, error) {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return infoOutput{}, fmt.Errorf("resolving working directory: %w", err)
@@ -85,6 +89,8 @@ func collectInfo(v string, startedAt time.Time, sessionID string, now time.Time)
 		CaptureRoot: model.CaptureRoot(),
 		Build:       buildInfo(v),
 		Env:         allowedEnv(),
+
+		RuleWarnings: ruleWarnings,
 	}, nil
 }
 

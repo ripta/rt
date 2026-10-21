@@ -36,6 +36,10 @@ type checkResult struct {
 	BadEnvs    []string    `json:"bad_envs,omitempty"`
 	Chain      []chainInfo `json:"chain,omitempty"`
 	Skipped    []skipInfo  `json:"skipped,omitempty"`
+
+	// Warnings describe the loaded rules, not this command, and do not affect the
+	// verdict. A --shell run carries them once, on the aggregate payload.
+	Warnings []string `json:"warnings,omitempty"`
 }
 
 // chainInfo is the JSON-facing description of one layer of a wrapper chain, from
@@ -68,6 +72,7 @@ type checkShellResult struct {
 	Shell    string        `json:"shell"`
 	Decision string        `json:"decision"`
 	Commands []checkResult `json:"commands"`
+	Warnings []string      `json:"warnings,omitempty"`
 }
 
 // ruleInfo is the JSON-facing description of the rule that decided a verdict.
@@ -152,18 +157,29 @@ func (opts *checkOptions) run(cmd *cobra.Command, args []string) error {
 
 	aggregate := aggregateDecision(verdicts)
 
+	warnings := warningMessages(store.Warnings())
+
 	if opts.Output == "json" {
-		var payload any = results[0]
+		var payload any
 		if opts.Shell {
-			payload = checkShellResult{Shell: shellSrc, Decision: decisionString(aggregate), Commands: results}
+			payload = checkShellResult{Shell: shellSrc, Decision: decisionString(aggregate), Commands: results, Warnings: warnings}
+		} else {
+			results[0].Warnings = warnings
+			payload = results[0]
 		}
 		if err := writeJSON(cmd.OutOrStdout(), payload); err != nil {
 			return err
 		}
-	} else if opts.Shell {
-		writeCheckShellText(cmd.OutOrStdout(), shellSrc, commands, verdicts, store.Project.Path)
 	} else {
-		writeCheckText(cmd.OutOrStdout(), commands[0], verdicts[0], store.Project.Path)
+		if opts.Shell {
+			writeCheckShellText(cmd.OutOrStdout(), shellSrc, commands, verdicts, store.Project.Path)
+		} else {
+			writeCheckText(cmd.OutOrStdout(), commands[0], verdicts[0], store.Project.Path)
+		}
+
+		for _, warning := range warnings {
+			fmt.Fprintf(cmd.ErrOrStderr(), "warning: %s\n", warning)
+		}
 	}
 
 	switch aggregate {

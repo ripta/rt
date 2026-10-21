@@ -47,6 +47,12 @@ var contractBreakingPrograms = [][]string{
 // Each of the canonical, resolved, and basename forms is checked with its first
 // token reduced to a basename, so a symlink alias of a listed program is caught.
 func breaksWrapperContract(forms ...matchForm) bool {
+	return listedEntry(forms...) != nil
+}
+
+// listedEntry returns the first listed entry that heads one of the forms, or nil
+// when none does.
+func listedEntry(forms ...matchForm) []string {
 	for _, form := range forms {
 		if !form.ok {
 			continue
@@ -54,12 +60,12 @@ func breaksWrapperContract(forms ...matchForm) bool {
 
 		for _, entry := range contractBreakingPrograms {
 			if matchesListed(entry, form) {
-				return true
+				return entry
 			}
 		}
 	}
 
-	return false
+	return nil
 }
 
 // matchesListed reports whether the form starts with entry, comparing the first

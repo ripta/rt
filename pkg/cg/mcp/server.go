@@ -108,6 +108,6 @@ func newServer(v string, startedAt time.Time, sessionID string, g *gate) *mcpsdk
 	registerPrune(s)
 	registerNotes(s)
 	registerElicitTest(s, g)
-	registerInfo(s, v, startedAt, sessionID)
+	registerInfo(s, v, startedAt, sessionID, g)
 	return s
 }

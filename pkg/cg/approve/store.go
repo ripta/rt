@@ -141,11 +141,17 @@ func Load(opts LoadOptions) (*Store, error) {
 }
 
 // LayerDiagnosis is one layer's lint result: whether the file is present, and
-// its parse/validation error, nil when the layer is clean or absent.
+// its parse/validation error, nil when the layer is clean or absent. Warnings holds
+// the findings about single rules in the layer, and is empty when the layer failed
+// to parse.
 type LayerDiagnosis struct {
-	Path    string
-	Present bool
-	Err     error
+	Path     string
+	Present  bool
+	Err      error
+	Warnings []Warning
+
+	layer Layer
+	root  string
 }
 
 // Diagnose validates the global and project layers independently for `cg
@@ -184,9 +190,40 @@ func Diagnose(opts LoadOptions) (global, project LayerDiagnosis, err error) {
 	// above stands in for the possibly-empty one on the returned Layer, and a
 	// non-nil error implies the file was found, since the only path that
 	// reports it absent, os.IsNotExist, returns a nil error.
-	return LayerDiagnosis{Path: globalPath, Present: globalLayer.Present || globalErr != nil, Err: globalErr},
-		LayerDiagnosis{Path: projectPath, Present: projectLayer.Present || projectErr != nil, Err: projectErr},
+	return LayerDiagnosis{
+			Path:     globalPath,
+			Present:  globalLayer.Present || globalErr != nil,
+			Err:      globalErr,
+			Warnings: documentWarnings(globalLayer.Doc),
+			layer:    globalLayer,
+			root:     projectRoot,
+		},
+		LayerDiagnosis{
+			Path:     projectPath,
+			Present:  projectLayer.Present || projectErr != nil,
+			Err:      projectErr,
+			Warnings: documentWarnings(projectLayer.Doc),
+			layer:    projectLayer,
+			root:     projectRoot,
+		},
 		nil
+}
+
+// MergedWarnings reports the findings that need both layers at once, such as a prefix
+// allow that covers a wrapper rule in the other layer. It reports ok=false without
+// checking when either layer failed to parse, since the merged ruleset does not exist
+// then. Findings about single rules belong to each layer's own Warnings.
+func MergedWarnings(global, project LayerDiagnosis) (warnings []Warning, ok bool) {
+	if global.Err != nil || project.Err != nil {
+		return nil, false
+	}
+
+	rs, err := buildRuleset(global.layer, project.layer, project.root)
+	if err != nil {
+		return nil, false
+	}
+
+	return rs.coverageWarnings(), true
 }
 
 // loadLayer reads and parses one layer file. A missing file yields a layer with
