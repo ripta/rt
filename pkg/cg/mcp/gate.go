@@ -151,7 +151,7 @@ func (g *gate) evaluate(call approvalCall, i int) (approve.Verdict, error) {
 	resolved := call.Resolutions[i]
 	subject := approve.Subject{Argv: call.Argvs[i], Canonical: resolved.CanonicalArgv(), Resolved: resolved.ResolvedArgv()}
 
-	v := g.store.Ruleset().Evaluate(subject, call.Env)
+	v := g.store.Ruleset().Evaluate(subject, call.Env, approve.CommandResolver(call.Cwd))
 	if v.Decision != approve.DecisionRefuse {
 		return v, nil
 	}

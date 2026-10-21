@@ -30,7 +30,7 @@ const (
 	ModeDenyAll Mode = "deny-all"
 )
 
-// RuleKind identifies which of the four matching strategies a rule uses. Each
+// RuleKind identifies which of the five matching strategies a rule uses. Each
 // rule carries exactly one; the loader enforces that.
 type RuleKind int
 
@@ -43,31 +43,37 @@ const (
 	KindGlob
 	// KindRegex matches an RE2 pattern against the quoted join.
 	KindRegex
+	// KindWrapper names a token prefix that re-executes the rest of the argv. It is
+	// valid only under allow and never runs a command by itself. It acts through a
+	// peel, which judges the tokens after the prefix as a command of their own.
+	KindWrapper
 )
 
-// Rule is one allow, deny, or restrict entry. Exactly one of
-// Exact/Prefix/Glob/Regex is populated after validation; kind records which.
+// Rule is one allow, deny, or restrict entry. Exactly one of Exact/Prefix/Wrapper/Glob/Regex is
+// populated after validation; kind records which.
 // Message is valid on deny and restrict rules and PermitUnsafeEnvs only on allow
 // rules.
 //
-// For prefix and exact rules the match form is inferred from the shape of the
-// first token: a bare program name matches the invoked basename, while an
+// For prefix, exact, and wrapper rules the match form is inferred from the shape of the first
+// token: a bare program name matches the invoked basename, while an
 // absolute or project-relative path matches the canonical or resolved
 // executable path.
 // AsBasename is meaningful only on glob and regex rules, where there is no token
-// to read; it selects the basename quoted join over the canonical one. The
-// loader rejects as_basename on prefix and exact rules, where the token shape
-// already settles the form.
+// to read; it selects the basename quoted join over the canonical one. The loader rejects
+// as_basename on prefix, exact, and wrapper rules, where the token shape already settles the form.
 //
-// wantBasename and cmpArgv are derived at load by compileMatch: wantBasename
-// selects the basename form for matching, and cmpArgv holds the prefix/exact
-// comparison tokens with a relative first token resolved against the project
-// root.
+// wantBasename, cmpArgv, and baseArgv are derived at load by compileMatch:
+// wantBasename selects the basename form for matching, cmpArgv holds the
+// prefix/exact/wrapper comparison tokens with a relative first token resolved
+// against the project root, and baseArgv is cmpArgv with its first token reduced
+// to a basename. baseArgv is set only for a path-form rule, where it lets a deny
+// match an inner layer of a wrapper chain by program name.
 type Rule struct {
-	Exact  []string `yaml:"exact,omitempty"`
-	Prefix []string `yaml:"prefix,omitempty"`
-	Glob   string   `yaml:"glob,omitempty"`
-	Regex  string   `yaml:"regex,omitempty"`
+	Exact   []string `yaml:"exact,omitempty"`
+	Prefix  []string `yaml:"prefix,omitempty"`
+	Wrapper []string `yaml:"wrapper,omitempty"`
+	Glob    string   `yaml:"glob,omitempty"`
+	Regex   string   `yaml:"regex,omitempty"`
 
 	AsBasename       bool     `yaml:"as_basename,omitempty"`
 	Message          string   `yaml:"message,omitempty"`
@@ -77,6 +83,7 @@ type Rule struct {
 	compiled     *regexp.Regexp
 	wantBasename bool
 	cmpArgv      []string
+	baseArgv     []string
 }
 
 // Kind reports which matching strategy this rule uses, set by the loader.
@@ -187,9 +194,11 @@ type MatchResult struct {
 var (
 	ErrUnknownVersion     = errors.New("unknown version (expected 1)")
 	ErrUnknownMode        = errors.New("unknown mode (expected enforce, allow-all, or deny-all)")
-	ErrNoRuleKind         = errors.New("rule has no rule-kind key (need one of exact, prefix, glob, or regex)")
+	ErrNoRuleKind         = errors.New("rule has no rule-kind key (need one of exact, prefix, wrapper, glob, or regex)")
 	ErrMultipleRuleKinds  = errors.New("rule has more than one rule-kind key")
 	ErrMessageOnAllow     = errors.New("message is not valid on an allow rule; use a YAML comment instead")
 	ErrPermitNotOnAllow   = errors.New("permit_unsafe_envs is valid only on an allow rule")
-	ErrAsBasenameOnTokens = errors.New("as_basename is not valid on a prefix or exact rule; the first token's shape already settles the form (bare name matches the basename, a path matches the resolved or canonical path)")
+	ErrAsBasenameOnTokens = errors.New("as_basename is not valid on a prefix, exact, or wrapper rule; the first token's shape already settles the form (bare name matches the basename, a path matches the resolved or canonical path)")
+	ErrWrapperNotOnAllow  = errors.New("wrapper is valid only on an allow rule; a deny or restrict rule uses prefix instead")
+	ErrDashFirstToken     = errors.New("an allow rule's first token must not start with '-'; the wrapper, not the command, owns such a token")
 )

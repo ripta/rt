@@ -253,6 +253,8 @@ func ruleEqual(a, b *Rule) bool {
 		return slices.Equal(a.Exact, b.Exact)
 	case KindPrefix:
 		return slices.Equal(a.Prefix, b.Prefix)
+	case KindWrapper:
+		return slices.Equal(a.Wrapper, b.Wrapper)
 	case KindGlob:
 		return a.Glob == b.Glob
 	case KindRegex:
@@ -281,6 +283,8 @@ func buildRuleEntry(rule *Rule, isDeny bool) *yaml.Node {
 		entry.Content = append(entry.Content, strScalar("exact"), flowSeq(rule.Exact))
 	case KindPrefix:
 		entry.Content = append(entry.Content, strScalar("prefix"), flowSeq(rule.Prefix))
+	case KindWrapper:
+		entry.Content = append(entry.Content, strScalar("wrapper"), flowSeq(rule.Wrapper))
 	case KindGlob:
 		entry.Content = append(entry.Content, strScalar("glob"), strScalar(rule.Glob))
 	case KindRegex:
@@ -388,6 +392,8 @@ func ruleKeys(n *yaml.Node) (sortKey, ident string, ok bool) {
 		return strings.Join(r.Exact, " "), "exact\x00" + strings.Join(r.Exact, "\x00"), true
 	case len(r.Prefix) > 0:
 		return strings.Join(r.Prefix, " "), "prefix\x00" + strings.Join(r.Prefix, "\x00"), true
+	case len(r.Wrapper) > 0:
+		return strings.Join(r.Wrapper, " "), "wrapper\x00" + strings.Join(r.Wrapper, "\x00"), true
 	case r.Glob != "":
 		return r.Glob, "glob\x00" + r.Glob, true
 	case r.Regex != "":
