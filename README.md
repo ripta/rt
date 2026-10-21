@@ -539,7 +539,8 @@ finish, while SIGINT additionally cancels them.
 
 Every distinct command in a pool passes the approval gate below before anything
 spawns. A denial fails the whole call with nothing started, and `repeat` does
-not multiply prompts.
+not multiply prompts. A command behind a `wrapper` rule is judged layer by layer,
+and commands that prompt for the same rule share one form.
 
 A blocking `cg_run`, `cg_run_many`, or `cg_wait` call sends MCP progress
 notifications while it waits. `cg_wait` sends them for a run and for a pool.
@@ -624,7 +625,8 @@ allow:
 
 In enforce mode the matcher checks deny rules, then allow rules, then restrict
 rules, then prompts; deny always wins. Each rule matches by `exact` argv, `prefix`
-tokens, `glob`, or `regex`. `argv[0]` is resolved to an absolute path before
+tokens, `glob`, or `regex`. A fifth kind, `wrapper`, is described below.
+`argv[0]` is resolved to an absolute path before
 matching. For `exact` and `prefix` rules the first token's shape decides how it
 matches: a bare program name (`go`) matches the invoked basename however the
 command was spelled, an absolute path pins the exact executable, and a relative
@@ -639,8 +641,8 @@ A `restrict` section adds a fourth tier below `allow`: a command that matches a
 can enumerate the safe subset of a tool and fail the rest closed within that
 scope. The tiers run `deny` > `allow` > `restrict` > `prompt`, so an `allow`
 carves a command out of a `restrict` scope while an explicit `deny` still beats
-everything. `restrict` rules take the same four kinds as `allow` and `deny` and
-accept an optional `message`.
+everything. `restrict` rules take the same kinds as `deny`, which is every kind
+except `wrapper`, and accept an optional `message`.
 
 ```yaml
 allow:
@@ -653,6 +655,97 @@ restrict:
 
 Here `git show` and `git log` run, every other `git` subcommand is refused with
 the message, and a command outside the `git` scope still prompts.
+
+### Wrapper rules
+
+Some programs run the command they are given: `nice`, `time`, `timeout`,
+`nohup`, `caffeinate`. A `prefix: [nice]` allow would let `nice rm -rf ~` run,
+because the real command sits in arguments the rule never reads. A `wrapper`
+rule names the tokens that make the program run the rest of its arguments as a
+command. The rest must then be allowed on its own.
+
+```yaml
+allow:
+  - wrapper: [nice, -n, "19"]
+  - wrapper: [timeout, "5"]
+  - exact: [make, test]
+```
+
+`nice -n 19 make test` and `timeout 5 make test` run. `nice -n 19 make install`
+prompts for `make install`, and the prompt suggests a rule for `make install`,
+not for `nice`. `nice -n 19 time make test` is refused when `time` is denied.
+Wrapper rules nest, and every layer is judged by the whole rule set. A deny on
+any layer refuses the call, whatever the allow rules say.
+
+`wrapper` is valid only under `allow`. It matches tokens the way `prefix` does,
+and at least one token must follow them. A bare `nice -n 19` is not matched, so
+allow it with an `exact` rule if you want it. Of several wrapper rules that
+match, the longest one peels.
+
+cg never reads the wrapper's flags. The rule's last token marks where the
+wrapper ends. The rule is a promise that the program, given exactly those
+leading tokens, runs the rest of its arguments as a command. Three things break
+that promise:
+
+* A rule that ends on a flag still waiting for its value. With
+  `wrapper: [sudo, -u]`, the command `sudo -u make rm -rf /` peels to
+  `make rm -rf /`, while `sudo` reads `make` as the user name. cg warns about a
+  rule that ends on `-X` or `--word`. A flag that takes no value, such as
+  `caffeinate -i`, draws the same warning. Appending `--` changes what the rule
+  matches, so it does not silence the warning.
+* A program that joins its arguments into a shell string. `watch` and `ssh`
+  do, so `watch make 'test;rm -rf ~'` would run a second command that no rule
+  judged.
+* A program that runs in another filesystem, reads a package spec instead of a
+  command, or loads its environment from files the agent can write. Examples
+  are `docker exec`, `chroot`, `npx`, and `direnv exec`.
+
+cg carries a built-in list of such programs: `watch`, `ssh`, `su`, `script`,
+`sudo -s`, `sudo -i`, `docker exec`, `docker run`, `kubectl exec`, `chroot`,
+`nsenter`, `npx`, `npm exec`, `direnv exec`, `mise exec`, `pipenv run`,
+`nix develop`, and shells outside the default deny. A wrapper rule never peels
+a command headed by one of them. The rule still loads, and `cg lint` warns that
+it has no effect. An `exact` rule on the same program still works.
+
+The list is a backstop. It matches leading tokens, so it misses combined flags
+such as `sudo -Es` and flags in the middle such as `sudo -u bob -s`. It misses
+unlisted programs too. Tools that load environment variables from project files
+are a residual class, and the list names only the ones above.
+
+An inner command that starts with `-` does not peel. A wrapper that reads
+`nice -n 19 -- make test` as flags and a command disagrees with cg about where
+the command starts. Write a second rule that ends in `--`, such as
+`wrapper: [nice, -n, "19", --]`. A rule whose first token starts with `-` is
+rejected under `allow`, and remember never writes one.
+
+The inner program is looked up again by the wrapper. When a path rule such as
+`prefix: [/usr/bin/git, status]` allows the inner command, cg hands the wrapper
+that path, so a `PATH` that the wrapper changes cannot pick another file. When a
+bare-name rule such as `prefix: [git]` allows it, cg passes the name through and
+the wrapper's lookup stands. With `wrapper: [uv, run]`, that lookup may find
+`.venv/bin/git`. A bare-name rule already accepts any binary of that name, and
+rewriting under it would change which program runs. Remembered rules are path
+rules by default.
+
+An `env` override that sets a dangerous variable such as `PATH` needs a
+`permit_unsafe_envs` entry on every rule in the chain, the wrapper rules and the
+rule that allows the inner command. When every layer permits `PATH` and a bare
+name decides the inner command, the caller's `PATH` chooses the inner binary.
+
+A deny rule that names a path is matched by the basename of its path on an inner
+layer, since the wrapper may find the denied file through its own lookup. Pin a
+deny with a `prefix` or `exact` rule. A path-form `glob` or `regex` deny has no
+token to take a basename from, so it can miss an inner layer that passes
+through.
+
+A plain `prefix: [nice]` allow beside a `wrapper: [nice, -n, "19"]` rule makes
+the wrapper rule pointless, and a `prefix` deny can make it dead. `cg lint`,
+`cg check`, and the `rule_warnings` field of `cg_info` report both. Warnings are
+a separate severity: a lint run with only warnings still exits 0.
+
+A prompt for a program that heads a wrapper rule pre-fills an `exact` rule of
+the whole command, and the form says so. Editing an exact rule narrows it,
+which a `prefix` rule would not. Remember never creates a `wrapper` rule.
 
 
 `enc`

@@ -438,22 +438,7 @@ func ruleSectionFor(v approve.Verdict) string {
 }
 
 // ruleKindString renders a RuleKind for display.
-func ruleKindString(k approve.RuleKind) string {
-	switch k {
-	case approve.KindExact:
-		return "exact"
-	case approve.KindPrefix:
-		return "prefix"
-	case approve.KindWrapper:
-		return "wrapper"
-	case approve.KindGlob:
-		return "glob"
-	case approve.KindRegex:
-		return "regex"
-	default:
-		return "unknown"
-	}
-}
+func ruleKindString(k approve.RuleKind) string { return k.String() }
 
 // describeRulePattern renders the pattern side of a rule for display: the argv
 // tokens for exact/prefix/wrapper, the raw pattern string for glob/regex.

@@ -49,6 +49,24 @@ const (
 	KindWrapper
 )
 
+// String names a kind the way a rules file spells it.
+func (k RuleKind) String() string {
+	switch k {
+	case KindExact:
+		return "exact"
+	case KindPrefix:
+		return "prefix"
+	case KindWrapper:
+		return "wrapper"
+	case KindGlob:
+		return "glob"
+	case KindRegex:
+		return "regex"
+	}
+
+	return "unknown"
+}
+
 // Rule is one allow, deny, or restrict entry. Exactly one of Exact/Prefix/Wrapper/Glob/Regex is
 // populated after validation; kind records which.
 // Message is valid on deny and restrict rules and PermitUnsafeEnvs only on allow
@@ -88,6 +106,9 @@ type Rule struct {
 
 // Kind reports which matching strategy this rule uses, set by the loader.
 func (r *Rule) Kind() RuleKind { return r.kind }
+
+// String renders a rule as its kind and pattern, such as `wrapper [nice, -n, 19]`.
+func (r *Rule) String() string { return describeRule(r) }
 
 // Document is the typed decode of one approve.yaml layer.
 type Document struct {

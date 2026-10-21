@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"syscall"
 	"time"
 
@@ -22,10 +23,15 @@ import (
 // it rides the pipe and never appears in argv or on disk. Pool names the pool this run
 // is a member of, so the run's on-disk records carry it. SessionID names the cg mcp
 // server that spawned the run, carried the same way.
+//
+// InnerExec maps an offset into Argv to the path the child receives there instead of
+// the typed token. It pins the inner command of a wrapper to the file the approval gate
+// judged. Argv stays the typed command for the record, so only the exec uses InnerExec.
 type SuperviseSpec struct {
 	Argv      []string          `json:"argv"`
 	Resolved  string            `json:"resolved,omitempty"`
 	Canonical string            `json:"canonical,omitempty"`
+	InnerExec map[int]string    `json:"inner_exec,omitempty"`
 	Cwd       string            `json:"cwd,omitempty"`
 	Env       map[string]string `json:"env,omitempty"`
 	Pool      string            `json:"pool,omitempty"`
@@ -39,6 +45,28 @@ type SuperviseSpec struct {
 // start-failure diagnostics.
 func (s *SuperviseSpec) resolution() *Resolution {
 	return &Resolution{Argv: s.Argv, Resolved: s.Resolved, Canonical: s.Canonical}
+}
+
+// childArgs returns the arguments the child is started with: Argv past index 0, with each
+// InnerExec offset replaced by its pinned path. An offset outside the inner part of Argv
+// means the spec is malformed, and the run does not start.
+func (s *SuperviseSpec) childArgs() ([]string, error) {
+	return pinArgs(s.Argv, s.InnerExec)
+}
+
+// pinArgs returns argv[1:] with each pinned offset replaced by its path.
+func pinArgs(argv []string, pinned map[int]string) ([]string, error) {
+	args := slices.Clone(argv[1:])
+
+	for offset, path := range pinned {
+		if offset < 1 || offset >= len(argv) {
+			return nil, fmt.Errorf("inner exec offset %d is outside the %d-token command", offset, len(argv))
+		}
+
+		args[offset-1] = path
+	}
+
+	return args, nil
 }
 
 // SuperviseAck is the single JSON line the supervisor writes on stdout after the
@@ -125,7 +153,15 @@ func superviseRun(dir string, in io.Reader, out io.Writer) error {
 		return err
 	}
 
-	child := exec.Command(resolved.ExecPath(), spec.Argv[1:]...)
+	args, err := spec.childArgs()
+	if err != nil {
+		stdout.Close()
+		stderr.Close()
+		writeAck(out, SuperviseAck{StartError: err.Error()})
+		return err
+	}
+
+	child := exec.Command(resolved.ExecPath(), args...)
 	child.Args[0] = spec.Argv[0]
 	child.Dir = cwd
 	child.Stdout = stdout

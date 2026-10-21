@@ -246,7 +246,7 @@ var probeRuler = strings.Repeat("0123456789", 12)
 type approvalProbe struct {
 	Argvs      [][]string
 	Cwd        string
-	Suggestion []string
+	Suggestion approve.Suggestion
 	Path       string
 }
 
@@ -283,7 +283,7 @@ func newApprovalProbe(commands int, wideCommand, longCwd bool, path string) (app
 	return approvalProbe{
 		Argvs:      argvs,
 		Cwd:        cwd,
-		Suggestion: approve.SuggestPrefix(argvs[0], executable),
+		Suggestion: approve.Suggestion{Kind: approve.KindPrefix, Tokens: approve.SuggestPrefix(argvs[0], executable)},
 		Path:       path,
 	}, nil
 }
@@ -346,7 +346,7 @@ func obj(props map[string]any, required ...string) map[string]any {
 func elicitSchema(kase string, form approvalProbe) (any, string, error) {
 	switch kase {
 	case approvalFormCase:
-		return approvalSchema(form.Suggestion, form.Path), approvalMessage(form.Argvs, form.Cwd, 1, 2), nil
+		return approvalSchema(form.Suggestion, false, form.Path), approvalMessage(form.Argvs, form.Cwd, 1, 2), nil
 
 	case "text":
 		return obj(map[string]any{

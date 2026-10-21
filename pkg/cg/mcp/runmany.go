@@ -164,6 +164,13 @@ func handleRunMany(ctx context.Context, reg *runRegistry, g *gate, req *mcpsdk.C
 	}
 	warning := outcome.Warning
 
+	pinned := make(map[string]map[int]string, len(distinct))
+	for i, argv := range distinct {
+		if i < len(outcome.Rewrites) {
+			pinned[model.ArgvKey(argv)] = outcome.Rewrites[i]
+		}
+	}
+
 	spec := &model.PoolSpec{
 		Commands:    make([]model.PoolCommand, 0, len(in.Commands)),
 		Repeat:      repeat,
@@ -174,7 +181,7 @@ func handleRunMany(ctx context.Context, reg *runRegistry, g *gate, req *mcpsdk.C
 		SessionID:   sessionID,
 	}
 	for _, argv := range in.Commands {
-		pc := model.PoolCommand{Argv: argv}
+		pc := model.PoolCommand{Argv: argv, InnerExec: pinned[model.ArgvKey(argv)]}
 		if r := resolutions[model.ArgvKey(argv)]; r != nil {
 			pc.Resolved = r.Resolved
 			pc.Canonical = r.Canonical

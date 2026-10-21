@@ -124,7 +124,12 @@ func handleRun(ctx context.Context, reg *runRegistry, g *gate, req *mcpsdk.CallT
 		}
 	}
 
-	run, err := model.RunSupervised(in.Command, model.SuperviseOptions{Resolved: resolved, Cwd: in.Cwd, Env: in.Env, SessionID: sessionID})
+	var inner map[int]string
+	if len(outcome.Rewrites) > 0 {
+		inner = outcome.Rewrites[0]
+	}
+
+	run, err := model.RunSupervised(in.Command, model.SuperviseOptions{Resolved: resolved, InnerExec: inner, Cwd: in.Cwd, Env: in.Env, SessionID: sessionID})
 	if err != nil {
 		var sf *model.StartFailure
 		if errors.As(err, &sf) {

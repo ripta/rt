@@ -10,6 +10,7 @@ import (
 	"github.com/pmezard/go-difflib/difflib"
 	"gopkg.in/yaml.v3"
 
+	"github.com/ripta/rt/pkg/cg/approve"
 	"github.com/ripta/rt/pkg/cg/model"
 )
 
@@ -140,23 +141,28 @@ func ansiCQuote(s string) string {
 }
 
 // approvalSchema builds the elicitation form: an editable rule field pre-filled
-// with the suggested prefix as a YAML flow sequence, followed by a remember
+// with the suggested rule as a YAML flow sequence, followed by a remember
 // checkbox. path is the project rules file the remembered rule is saved to.
+//
+// The field's title names the rule kind. The message has room for the command and nothing
+// else, because the client shows only its first visibleMessageLines lines. So what the rule
+// means goes in the field's description: that it covers an inner command, that it is exact
+// because the program heads a wrapper rule, and which wrapper rule nearly matched.
 //
 // The form is a typed *jsonschema.Schema rather than a property map so
 // PropertyOrder controls the field order on the wire: a property map marshals
 // its keys alphabetically, which would float "remember" above "rule". The client
 // renders fields in wire order, so listing rule first keeps the command the
 // prompt is about at the top, above the remember toggle.
-func approvalSchema(suggestion []string, path string) *jsonschema.Schema {
-	ruleDefault, _ := json.Marshal(renderFlowSeq(suggestion))
+func approvalSchema(suggestion approve.Suggestion, inner bool, path string) *jsonschema.Schema {
+	ruleDefault, _ := json.Marshal(renderFlowSeq(suggestion.Tokens))
 	return &jsonschema.Schema{
 		Type: "object",
 		Properties: map[string]*jsonschema.Schema{
 			"rule": {
 				Type:        "string",
-				Title:       "Allow rule (prefix)",
-				Description: "edited only when remembering; a YAML list of argv tokens, e.g. [go, test] or [foo, \"bar baz\"]",
+				Title:       fmt.Sprintf("Allow rule (%s)", suggestion.Kind),
+				Description: ruleDescription(suggestion, inner),
 				Default:     ruleDefault,
 			},
 			"remember": {
@@ -168,6 +174,28 @@ func approvalSchema(suggestion []string, path string) *jsonschema.Schema {
 		},
 		PropertyOrder: []string{"rule", "remember"},
 	}
+}
+
+// ruleDescription explains the rule field. The notes come first, because they say what the
+// pre-filled rule is for, and the editing hint closes the text.
+func ruleDescription(suggestion approve.Suggestion, inner bool) string {
+	var b strings.Builder
+
+	if inner {
+		b.WriteString("The rule covers the inner command after the wrapper. ")
+	}
+
+	if suggestion.HeadsWrapper {
+		b.WriteString("This program heads a wrapper rule, so the rule is exact and allows only this whole command. ")
+	}
+
+	if suggestion.NearMiss != nil {
+		fmt.Fprintf(&b, "The wrapper rule %s stopped at the inner command's leading '-'. To allow this form, add a second wrapper rule ending in --. Appending -- to the existing rule would stop it matching the form without --. ", visibleText(suggestion.NearMiss.String()))
+	}
+
+	b.WriteString("Edited only when remembering; a YAML list of argv tokens, e.g. [go, test] or [foo, \"bar baz\"]")
+
+	return b.String()
 }
 
 // divergenceMessage renders the trailing form's body describing how the project

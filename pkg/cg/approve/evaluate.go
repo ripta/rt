@@ -495,7 +495,7 @@ func (e *evaluation) settleLayer(l *layer) *settled {
 			s.decision, s.rule, s.restricted, s.badEnvs = inner.decision, inner.rule, inner.restricted, inner.badEnvs
 			s.step, s.next = StepInner, inner
 			if len(permitting) > 0 {
-				s.own = permitting[0]
+				s.own, s.candidates = permitting[0], permitting
 			}
 		default:
 			s.own, s.badEnvs = leastDisallowed(tied, e.env)

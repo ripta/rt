@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/ripta/rt/pkg/cg/approve"
 )
 
 // TestApprovalSchemaFieldOrder pins the wire order of the approval form so the
@@ -16,7 +18,7 @@ import (
 func TestApprovalSchemaFieldOrder(t *testing.T) {
 	t.Parallel()
 
-	raw, err := json.Marshal(approvalSchema([]string{"go", "test"}, "/tmp/.cg.yaml"))
+	raw, err := json.Marshal(approvalSchema(approve.Suggestion{Kind: approve.KindPrefix, Tokens: []string{"go", "test"}}, false, "/tmp/.cg.yaml"))
 	if err != nil {
 		t.Fatalf("marshalling schema: %v", err)
 	}
@@ -187,7 +189,7 @@ func TestApprovalMessage(t *testing.T) {
 func TestApprovalSchemaRememberTitle(t *testing.T) {
 	t.Parallel()
 
-	schema := approvalSchema([]string{"go", "test"}, "/tmp/.cg.yaml")
+	schema := approvalSchema(approve.Suggestion{Kind: approve.KindPrefix, Tokens: []string{"go", "test"}}, false, "/tmp/.cg.yaml")
 	if got := schema.Properties["remember"].Title; got != "Remember this rule" {
 		t.Errorf("remember title = %q, want %q", got, "Remember this rule")
 	}

@@ -17,11 +17,13 @@ import (
 
 // PoolCommand is one command in a pool spec. Argv is the full command; Resolved and
 // Canonical carry the executable identity the approval gate matched, so member runs
-// exec the same file without a fresh PATH lookup.
+// exec the same file without a fresh PATH lookup. InnerExec pins the inner command of a
+// wrapper the same way SuperviseSpec.InnerExec does.
 type PoolCommand struct {
-	Argv      []string `json:"argv"`
-	Resolved  string   `json:"resolved,omitempty"`
-	Canonical string   `json:"canonical,omitempty"`
+	Argv      []string       `json:"argv"`
+	Resolved  string         `json:"resolved,omitempty"`
+	Canonical string         `json:"canonical,omitempty"`
+	InnerExec map[int]string `json:"inner_exec,omitempty"`
 }
 
 // resolution reconstructs the Resolution the server computed for this command.
@@ -255,6 +257,7 @@ func schedulePool(dir string, spec *PoolSpec, manifest *PoolManifest, sigCh <-ch
 
 		run, err := RunSupervised(cmd.Argv, SuperviseOptions{
 			Resolved:  cmd.resolution(),
+			InnerExec: cmd.InnerExec,
 			Cwd:       spec.Cwd,
 			Env:       spec.Env,
 			Pool:      manifest.ID,

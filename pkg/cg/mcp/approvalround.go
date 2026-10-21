@@ -28,21 +28,46 @@ func approvalID(i, n int) string {
 }
 
 // approvalForm is one approval prompt: the commands it lists, all of which share a suggested rule.
+// Inner reports that the rule covers the inner command of a wrapper for at least one of them.
 type approvalForm struct {
-	Suggestion []string
+	Suggestion approve.Suggestion
 	Commands   []int
+	Inner      bool
 }
 
-// planForms groups the commands that need a prompt by their suggested rule. Groups come in the
-// order their first command appears, commands keep call order inside a group, and a group longer
-// than maxFormCommands splits into consecutive forms under the same rule.
-func planForms(call approvalCall, needs []int) []approvalForm {
+// promptTarget is the command a prompt asks about. That is the typed command, or the inner
+// command a wrapper rule peeled out of it when the wrapper rule is allowed and the inner one
+// is not.
+type promptTarget struct {
+	Offset     int
+	Argv       []string
+	Resolution *model.Resolution
+}
+
+// promptTargetOf finds the command a prompting verdict asks about. The last layer of the chain
+// is the one without a rule.
+func promptTargetOf(call approvalCall, i int, v approve.Verdict) promptTarget {
+	if n := len(v.Chain); n > 0 && v.Chain[n-1].Offset > 0 {
+		last := v.Chain[n-1]
+
+		return promptTarget{Offset: last.Offset, Argv: last.Argv, Resolution: last.Resolution}
+	}
+
+	return promptTarget{Argv: call.Argvs[i], Resolution: call.Resolutions[i]}
+}
+
+// planForms groups the commands that need a prompt by their suggested rule, kind and tokens
+// together. Groups come in the order their first command appears, commands keep call order inside
+// a group, and a group longer than maxFormCommands splits into consecutive forms under the same
+// rule.
+func planForms(rs *approve.Ruleset, needs []int, targets map[int]promptTarget) []approvalForm {
 	var groups []approvalForm
 	index := make(map[string]int)
 
 	for _, i := range needs {
-		suggestion := approve.SuggestPrefix(call.Argvs[i], call.Resolutions[i].RulePath())
-		key := strings.Join(suggestion, "\x00")
+		target := targets[i]
+		suggestion := rs.Suggest(target.Argv, target.Resolution)
+		key := fmt.Sprintf("%d\x00%s", suggestion.Kind, strings.Join(suggestion.Tokens, "\x00"))
 
 		at, ok := index[key]
 		if !ok {
@@ -52,12 +77,13 @@ func planForms(call approvalCall, needs []int) []approvalForm {
 		}
 
 		groups[at].Commands = append(groups[at].Commands, i)
+		groups[at].Inner = groups[at].Inner || target.Offset > 0
 	}
 
 	var forms []approvalForm
 	for _, group := range groups {
 		for chunk := range slices.Chunk(group.Commands, maxFormCommands) {
-			forms = append(forms, approvalForm{Suggestion: group.Suggestion, Commands: chunk})
+			forms = append(forms, approvalForm{Suggestion: group.Suggestion, Commands: chunk, Inner: group.Inner})
 		}
 	}
 
@@ -71,7 +97,7 @@ func planForms(call approvalCall, needs []int) []approvalForm {
 //
 // A project file that cannot be read is treated as unchanged. The retry reads it again, and a
 // remember that cannot read it either is skipped with a warning.
-func (g *gate) request(call approvalCall, needs []int) (gateOutcome, error) {
+func (g *gate) request(call approvalCall, needs []int, verdicts []approve.Verdict) (gateOutcome, error) {
 	changed, current, err := g.store.CheckProjectDivergence()
 	unreadable := err != nil
 	if unreadable {
@@ -81,9 +107,20 @@ func (g *gate) request(call approvalCall, needs []int) (gateOutcome, error) {
 	commands := make([]pendingCommand, len(call.Argvs))
 	for i := range call.Argvs {
 		commands[i].Resolution = call.Resolutions[i]
+
+		for _, layer := range verdicts[i].Chain {
+			if layer.Offset > 0 {
+				commands[i].Chain = append(commands[i].Chain, pendingLayer{Offset: layer.Offset, Resolution: layer.Resolution})
+			}
+		}
 	}
 
-	plan := planForms(call, needs)
+	targets := make(map[int]promptTarget, len(needs))
+	for _, i := range needs {
+		targets[i] = promptTargetOf(call, i, verdicts[i])
+	}
+
+	plan := planForms(g.store.Ruleset(), needs, targets)
 	forms := make(mcpsdk.InputRequestMap, len(plan)+1)
 	for pos, form := range plan {
 		id := approvalID(pos, len(plan))
@@ -93,12 +130,13 @@ func (g *gate) request(call approvalCall, needs []int) (gateOutcome, error) {
 			argvs[j] = call.Argvs[i]
 			commands[i].Prompted = true
 			commands[i].Suggestion = form.Suggestion
+			commands[i].PromptOffset = targets[i].Offset
 			commands[i].Form = id
 		}
 
 		forms[id] = &mcpsdk.ElicitParams{
 			Message:         approvalMessage(argvs, call.Cwd, pos+1, len(plan)),
-			RequestedSchema: approvalSchema(form.Suggestion, g.store.Project.Path),
+			RequestedSchema: approvalSchema(form.Suggestion, form.Inner, g.store.Project.Path),
 		}
 	}
 
@@ -142,7 +180,9 @@ func (g *gate) request(call approvalCall, needs []int) (gateOutcome, error) {
 //
 // A form whose commands are all allowed now gates nothing. Its answer is read only for the
 // remember, and a problem with it becomes a warning instead of a refusal.
-func (g *gate) answer(call approvalCall, entry *pendingEntry, needs []int) (gateOutcome, error) {
+func (g *gate) answer(call approvalCall, entry *pendingEntry, needs []int, verdicts []approve.Verdict) (gateOutcome, error) {
+	resolve := approve.CommandResolver(call.Cwd)
+
 	needed := make([]bool, len(call.Argvs))
 	for _, i := range needs {
 		needed[i] = true
@@ -153,6 +193,16 @@ func (g *gate) answer(call approvalCall, entry *pendingEntry, needs []int) (gate
 		}
 		if resolutionChanged(cmd.Resolution, call.Resolutions[i]) {
 			return gateOutcome{}, &pendingRefusal{msg: fmt.Sprintf("%s refused: the command now resolves to a different executable than the one that was shown; %s", call.Tool, pendingAdvice)}
+		}
+		if promptTargetOf(call, i, verdicts[i]).Offset != cmd.PromptOffset {
+			return gateOutcome{}, &pendingRefusal{msg: fmt.Sprintf("%s refused: the rules changed and the prompt is now about a different part of this command than the one that was shown; %s", call.Tool, pendingAdvice)}
+		}
+
+		for _, layer := range cmd.Chain {
+			inner := call.Argvs[i][layer.Offset:]
+			if resolutionChanged(layer.Resolution, resolve(inner)) {
+				return gateOutcome{}, &pendingRefusal{msg: fmt.Sprintf("%s refused: the inner command `%s` now resolves to a different executable than the one that was shown; %s", call.Tool, visibleArgs(inner), pendingAdvice)}
+			}
 		}
 	}
 
@@ -172,13 +222,13 @@ func (g *gate) answer(call approvalCall, entry *pendingEntry, needs []int) (gate
 				continue
 			}
 
-			tokens, err := parseRuleField(res.Content, suggestion)
+			tokens, err := parseRuleField(res.Content, suggestion.Tokens)
 			if err != nil {
 				notes = append(notes, fmt.Sprintf("skipping remember: %v", err))
 				continue
 			}
 
-			rules = addRememberRule(rules, tokens, false)
+			rules = addRememberRule(rules, suggestion.Kind, tokens, false)
 			continue
 		}
 
@@ -203,7 +253,7 @@ func (g *gate) answer(call approvalCall, entry *pendingEntry, needs []int) (gate
 			continue
 		}
 
-		tokens, err := parseRuleField(res.Content, suggestion)
+		tokens, err := parseRuleField(res.Content, suggestion.Tokens)
 		if err != nil {
 			if answerErr == nil {
 				answerErr = err
@@ -211,7 +261,7 @@ func (g *gate) answer(call approvalCall, entry *pendingEntry, needs []int) (gate
 			continue
 		}
 
-		rules = addRememberRule(rules, tokens, true)
+		rules = addRememberRule(rules, suggestion.Kind, tokens, true)
 	}
 
 	// The refusals below still carry the remember warning. The rules from the accepted forms were
@@ -257,26 +307,30 @@ func entryForms(entry *pendingEntry) ([]string, map[string][]int) {
 	return ids, members
 }
 
-// rememberRule is a rule a user asked to save. Retryable reports whether any form that asked for
-// it still held a command needing a prompt. Calling the tool again offers such a rule afresh. For
-// any other rule the commands no longer prompt, so a new call would never offer it.
+// rememberRule is a rule a user asked to save, of the kind the form suggested.
+//
+// Retryable reports whether any form that asked for it still held a command needing a prompt.
+// Calling the tool again offers such a rule afresh. For any other rule the commands no longer
+// prompt, so a new call would never offer it.
 type rememberRule struct {
+	Kind      approve.RuleKind
 	Tokens    []string
 	Retryable bool
 }
 
 // addRememberRule adds a rule once. Several forms of one group carry the same rule, and saving it
-// twice would only duplicate the entry.
-func addRememberRule(rules []rememberRule, tokens []string, retryable bool) []rememberRule {
+// twice would only duplicate the entry. An exact and a prefix rule over the same tokens are two
+// rules, since they allow different things.
+func addRememberRule(rules []rememberRule, kind approve.RuleKind, tokens []string, retryable bool) []rememberRule {
 	for i := range rules {
-		if slices.Equal(rules[i].Tokens, tokens) {
+		if rules[i].Kind == kind && slices.Equal(rules[i].Tokens, tokens) {
 			rules[i].Retryable = rules[i].Retryable || retryable
 
 			return rules
 		}
 	}
 
-	return append(rules, rememberRule{Tokens: tokens, Retryable: retryable})
+	return append(rules, rememberRule{Kind: kind, Tokens: tokens, Retryable: retryable})
 }
 
 // persistRemembered writes the rules remembered in one round with a single divergence answer.
@@ -326,12 +380,26 @@ func (g *gate) persistRemembered(call approvalCall, entry *pendingEntry, rules [
 
 	var failures []string
 	for _, rule := range rules {
-		if err := g.store.AppendProjectAllowPrefix(rule.Tokens, strategy); err != nil {
+		if err := g.writeRemembered(rule, strategy); err != nil {
 			failures = append(failures, rememberFailure(path, rule, err))
 		}
 	}
 
 	return strings.Join(failures, "; ")
+}
+
+// writeRemembered saves one remembered rule with the writer for its kind. Remember never creates
+// a wrapper rule. A wrapper rule says that a program re-executes its arguments, which only the
+// user can know.
+func (g *gate) writeRemembered(rule rememberRule, strategy approve.WriteStrategy) error {
+	switch rule.Kind {
+	case approve.KindExact:
+		return g.store.AppendProjectAllowExact(rule.Tokens, strategy)
+	case approve.KindPrefix:
+		return g.store.AppendProjectAllowPrefix(rule.Tokens, strategy)
+	}
+
+	return fmt.Errorf("cannot remember a %s rule", rule.Kind)
 }
 
 // skippedRemember words a skip that applies to every rule of the round. reason finishes the
