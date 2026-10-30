@@ -16,12 +16,13 @@
 
         # The all-in-one hyperbinary, equivalent to:
         #   go install github.com/ripta/rt/hypercmd/rt@latest
-        rt = pkgs.buildGoModule {
+        # go.mod requires go1.27, newer than nixpkgs' default go.
+        rt = (pkgs.buildGoModule.override { go = pkgs.go_1_27; }) {
           pname = "rt";
           version = self.shortRev or self.dirtyShortRev or "unknown";
           src = self;
 
-          vendorHash = "sha256-Un7ZvNKjVnV4DyfYXacxiZAgVzQxXYuHc6bJxRD4m+A=";
+          vendorHash = "sha256-UUKljY+JgEcRdAYa9DfYr7GMuExKCOkzusMy/FYTBmY=";
 
           subPackages = [ "hypercmd/rt" ];
 
@@ -47,7 +48,7 @@
       devShells = forAllSystems (pkgs: {
         default = pkgs.mkShell {
           packages = with pkgs; [
-            go
+            go_1_27
             gotools # goimports
             protobuf # protoc
             protoc-gen-go
