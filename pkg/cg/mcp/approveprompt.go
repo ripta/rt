@@ -243,6 +243,14 @@ func ruleDescription(spec formSpec) string {
 		b.WriteString("The rule covers the inner command after the wrapper. ")
 	}
 
+	shown := spec.Prefill
+	if shown == nil {
+		shown = spec.Suggestion.Tokens
+	}
+	if positions := approve.CredentialPositions(shown); len(positions) > 0 {
+		fmt.Fprintf(&b, "The rule holds what looks like a credential at %s, and remember will not save it. ", approve.DescribePositions(positions))
+	}
+
 	suggestion := spec.Suggestion
 	if suggestion.HeadsWrapper {
 		b.WriteString("This program heads a wrapper rule, so a remembered rule is always exact and allows only this whole command. Only the first token may change. ")

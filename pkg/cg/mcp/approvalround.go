@@ -575,7 +575,7 @@ func skippedRemember(path string, rules []rememberRule, reason string) string {
 // unsavedRule words a skipped rule whose commands no longer prompt. It names the rule and the
 // file and leaves out the advice to call again, because a new call would not offer the rule.
 func unsavedRule(path string, rule rememberRule, reason string) string {
-	return fmt.Sprintf("skipping remember: rule %s was not saved because %s %s", renderFlowSeq(rule.Tokens), path, reason)
+	return fmt.Sprintf("skipping remember: rule %s was not saved because %s %s", renderFlowSeq(approve.RedactCredentials(rule.Tokens)), path, reason)
 }
 
 // rememberFailure words a failed rule write. A file that changed between the divergence check and
