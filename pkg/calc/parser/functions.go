@@ -17,6 +17,9 @@ import (
 // implementations that decide irrational operands at a binary precision can read
 // env.precision. name, group, signature, and summary drive the discoverability
 // listing; group orders the catalog and signature/summary are human-facing.
+//
+// A non-nil binder marks a binder: its last argument is a binding, and it
+// evaluates its other arguments itself. Arity counts the binding argument.
 type function struct {
 	name      string
 	group     string
@@ -24,7 +27,23 @@ type function struct {
 	summary   string
 	minArgs   int
 	maxArgs   int
+	binder    *binderSpec
 	fn        func(ctx context.Context, env *Env, args []*unified.Real) (*unified.Real, error)
+}
+
+// bindForm is a set of binding argument forms.
+type bindForm int
+
+const (
+	bindPoint bindForm = 1 << iota
+	bindRange
+)
+
+// binderSpec describes what a binder accepts as its binding argument.
+type binderSpec struct {
+	forms    bindForm
+	infinite bool
+	eval     binderFunc
 }
 
 // functionCatalog is the source of truth for the function registry. Entries are
@@ -110,6 +129,9 @@ var functionCatalog = []function{
 	{name: "perm", group: "Combinatorial", signature: "perm(n, k)", summary: "number of k-permutations of n", minArgs: 2, maxArgs: 2, fn: func(ctx context.Context, e *Env, a []*unified.Real) (*unified.Real, error) {
 		return perm(ctx, a[0], a[1], e.precision)
 	}},
+
+	{name: "sum", group: "Binders", signature: "sum(expr, i = a..b)", summary: "sum of expr for integer i from a to b", minArgs: 2, maxArgs: 2, binder: &binderSpec{forms: bindRange, eval: sumBinder}},
+	{name: "product", group: "Binders", signature: "product(expr, i = a..b)", summary: "product of expr for integer i from a to b", minArgs: 2, maxArgs: 2, binder: &binderSpec{forms: bindRange, eval: productBinder}},
 }
 
 // functions is the registry consulted by CallNode, derived from functionCatalog.
@@ -213,7 +235,14 @@ func factorial(ctx context.Context, r *unified.Real, precision int) (*unified.Re
 
 	n := rat.Num()
 	result := big.NewInt(1)
+	lc, err := newLoopCheck(ctx)
+	if err != nil {
+		return nil, err
+	}
 	for i := big.NewInt(2); i.Cmp(n) <= 0; i.Add(i, big.NewInt(1)) {
+		if err := lc.tick(); err != nil {
+			return nil, err
+		}
 		result.Mul(result, i)
 	}
 
@@ -362,7 +391,14 @@ func choose(ctx context.Context, nr, kr *unified.Real, precision int) (*unified.
 	result := big.NewInt(1)
 	num := new(big.Int).Set(n)
 	den := big.NewInt(1)
+	lc, err := newLoopCheck(ctx)
+	if err != nil {
+		return nil, err
+	}
 	for i := new(big.Int); i.Cmp(k) < 0; i.Add(i, one) {
+		if err := lc.tick(); err != nil {
+			return nil, err
+		}
 		result.Mul(result, num)
 		result.Quo(result, den)
 		num.Sub(num, one)
@@ -389,7 +425,14 @@ func perm(ctx context.Context, nr, kr *unified.Real, precision int) (*unified.Re
 	one := big.NewInt(1)
 	result := big.NewInt(1)
 	num := new(big.Int).Set(n)
+	lc, err := newLoopCheck(ctx)
+	if err != nil {
+		return nil, err
+	}
 	for i := new(big.Int); i.Cmp(k) < 0; i.Add(i, one) {
+		if err := lc.tick(); err != nil {
+			return nil, err
+		}
 		result.Mul(result, num)
 		num.Sub(num, one)
 	}
@@ -420,8 +463,12 @@ func plural(n int) string {
 // its rendered arguments followed by the reason: sqrt(-1): argument must be
 // non-negative. Recognized upstream sentinels map to calc-owned reason text;
 // any other error falls back to its own message so non-domain failures still
-// surface.
+// surface. Budget and cancellation errors pass through unchanged.
 func domainError(ctx context.Context, name string, args []*unified.Real, precision int, err error) error {
+	if isStop(err) {
+		return err
+	}
+
 	rendered := make([]string, len(args))
 	for i, a := range args {
 		rendered[i] = formatArg(ctx, a, precision)

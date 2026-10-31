@@ -92,6 +92,14 @@ func lexExpression(l *L) lexingState {
 		l.Emit(tokens.COMMA)
 		return lexExpression
 
+	case r == '.':
+		if l.Peek() == '.' {
+			l.Next()
+			l.Emit(tokens.DOTDOT)
+			return lexExpression
+		}
+		return l.Errorf("%w %q in expression, expecting another '.'", ErrUnexpectedToken, string(r))
+
 	case r == '$':
 		return lexLineIdent
 

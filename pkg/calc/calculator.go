@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"runtime/debug"
 	"sort"
@@ -52,6 +53,9 @@ type Calculator struct {
 	count   int
 	env     *parser.Env
 	history []historyEntry
+
+	// interrupt ends the line being run when the user presses Ctrl-C. Nil means never.
+	interrupt context.Context
 
 	// now supplies the timestamp .save writes. A nil now means time.Now.
 	now func() time.Time
@@ -132,13 +136,27 @@ func (n *loadNumbering) summary() string {
 }
 
 // isStructural reports whether err leaves the numbering of the lines after it unknown. A nested
-// load that stopped is not structural for the file that loaded it.
+// load that stopped is not structural for the file that loaded it, unless the user cancelled it.
+// A cancelled line is structural so that Ctrl-C aborts every enclosing load.
 func isStructural(err error) bool {
+	if errors.Is(err, context.Canceled) {
+		return true
+	}
+
 	if errors.Is(err, ErrLoadStopped) {
 		return false
 	}
 
 	return errors.Is(err, ErrInvalidFormat) || errors.Is(err, ErrInvalidNext)
+}
+
+// context returns the context of the line being run.
+func (c *Calculator) context() context.Context {
+	if c.interrupt != nil {
+		return c.interrupt
+	}
+
+	return context.Background()
 }
 
 func (c *Calculator) Evaluate(expr string) (*unified.Real, error) {
@@ -148,7 +166,7 @@ func (c *Calculator) Evaluate(expr string) (*unified.Real, error) {
 
 	c.env.SetDecimalPlaces(c.DecimalPlaces)
 	c.env.SetTrace(c.Trace)
-	return Evaluate(context.Background(), expr, c.env)
+	return Evaluate(c.context(), expr, c.env)
 }
 
 // processLine processes a single line of input (expression or meta-command).
@@ -188,7 +206,7 @@ func (c *Calculator) processLine(expr string, mode ExecutionMode, lineNum int) e
 		return err
 	}
 
-	if err := c.DisplayResult(context.Background(), res); err != nil {
+	if err := c.DisplayResult(c.context(), res); err != nil {
 		c.reportError(err, mode, lineNum)
 		return err
 	}
@@ -239,7 +257,10 @@ func (c *Calculator) processLoadedLine(expr string, lineNum int) error {
 	}
 
 	if err != nil {
-		c.reportError(err, ModeLoad, lineNum)
+		// handleLoad names the interrupted line, so a warning here would repeat it.
+		if !errors.Is(err, context.Canceled) {
+			c.reportError(err, ModeLoad, lineNum)
+		}
 		return err
 	}
 
@@ -277,9 +298,13 @@ func (c *Calculator) reportError(err error, mode ExecutionMode, lineNum int) {
 	}
 }
 
+// Execute runs one REPL line. Ctrl-C cancels the line instead of being swallowed: go-prompt stops
+// its own signal goroutine before calling the executor, and its notify registration never reads
+// again.
 func (c *Calculator) Execute(expr string) {
 	defer fmt.Println()
-	c.processLine(expr, ModeREPL, 0)
+
+	c.processInterruptible(expr, ModeREPL)
 }
 
 func (c *Calculator) DisplayError(err error) {
@@ -342,11 +367,24 @@ func (c *Calculator) REPL() error {
 func (c *Calculator) ProcessSTDIN() error {
 	scanner := bufio.NewScanner(os.Stdin)
 	for scanner.Scan() {
-		line := scanner.Text()
-		c.processLine(line, ModeSTDIN, 0)
+		c.processInterruptible(scanner.Text(), ModeSTDIN)
 	}
 
 	return scanner.Err()
+}
+
+// processInterruptible runs one line with Ctrl-C cancelling it. The handler exists only while the
+// line runs, so SIGINT while blocked on input keeps its default action.
+func (c *Calculator) processInterruptible(line string, mode ExecutionMode) {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+
+	c.interrupt = ctx
+	defer func() {
+		c.interrupt = nil
+	}()
+
+	c.processLine(line, mode, 0)
 }
 
 type metaCommandFunc func(*Calculator, []string) error
@@ -744,7 +782,18 @@ func (c *Calculator) handleLoad(args []string) error {
 
 		// Expression errors are reported as warnings and don't stop loading. A structural error
 		// leaves the numbering of every later line unknown.
-		if err := c.processLine(line, ModeLoad, lineNum); isStructural(err) {
+		var err error
+		if c.context().Err() != nil {
+			err = parser.ErrCancelled
+		} else {
+			err = c.processLine(line, ModeLoad, lineNum)
+		}
+
+		if errors.Is(err, context.Canceled) {
+			return fmt.Errorf("%w: interrupted at line %d of %s, keeping %s: %w", ErrLoadStopped, lineNum, filename, num.summary(), err)
+		}
+
+		if isStructural(err) {
 			return fmt.Errorf("%w at line %d of %s, keeping %s: %w", ErrLoadStopped, lineNum, filename, num.summary(), err)
 		}
 	}
@@ -868,6 +917,9 @@ var examples = []example{
 	{"Functions", "log(8, 2)", "multiple arguments separated by commas"},
 	{"Functions", "max(3, 7, 5)", "variadic"},
 	{"Functions", "sin(deg2rad(30))", "trig uses radians; nest calls to convert"},
+
+	{"Binders", "sum(i**2, i = 1..10)", "sum over integer bounds; the index is local to the call"},
+	{"Binders", "product(i, i = 1..5)", "product over integer bounds"},
 
 	{"Variables", "r = 3", "assign a name"},
 	{"Variables", "PI * r ** 2", "use it later"},

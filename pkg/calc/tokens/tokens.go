@@ -53,6 +53,7 @@ const (
 	LPAREN // (
 	RPAREN // )
 	COMMA  // ,
+	DOTDOT // ..
 )
 
 var tokenNames = map[TokenType]string{
@@ -81,6 +82,7 @@ var tokenNames = map[TokenType]string{
 	LPAREN: "LPAREN",
 	RPAREN: "RPAREN",
 	COMMA:  "COMMA",
+	DOTDOT: "DOTDOT",
 }
 
 func (t TokenType) String() string {

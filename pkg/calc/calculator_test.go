@@ -894,3 +894,24 @@ func TestDisplayResultRenderFailure(t *testing.T) {
 		t.Fatalf("stdout = %q, want nothing printed", out)
 	}
 }
+
+func TestShowFunctionsListsBindersGroup(t *testing.T) {
+	// Not parallel: it swaps os.Stdout.
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := os.Stdout
+	os.Stdout = w
+	(&Calculator{DecimalPlaces: 30}).showFunctions()
+	os.Stdout = old
+	w.Close()
+
+	out, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), "Binders:\n  sum(expr, i = a..b)") {
+		t.Errorf("listing lacks a Binders group:\n%s", out)
+	}
+}

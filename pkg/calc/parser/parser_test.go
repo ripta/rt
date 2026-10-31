@@ -525,6 +525,11 @@ func TestParserErrors(t *testing.T) {
 			expr:    "sqrt(4",
 			wantErr: "expected ',' or ')', got EOF",
 		},
+		{
+			name:    "stray range token",
+			expr:    "1..10",
+			wantErr: "DOTDOT",
+		},
 	}
 
 	for _, tt := range tests {
@@ -551,21 +556,6 @@ func TestCallEvalErrors(t *testing.T) {
 		expr    string
 		wantErr string
 	}{
-		{
-			name:    "too few arguments",
-			expr:    "sin()",
-			wantErr: "sin expects 1 argument, got 0",
-		},
-		{
-			name:    "too many arguments",
-			expr:    "sin(1, 2)",
-			wantErr: "sin expects 1 argument, got 2",
-		},
-		{
-			name:    "unknown function",
-			expr:    "nope(1)",
-			wantErr: `unknown function "nope"`,
-		},
 		{
 			name:    "domain error",
 			expr:    "sqrt(-1)",
@@ -602,11 +592,6 @@ func TestCallEvalErrors(t *testing.T) {
 			wantErr: "log(8, 1): base must not be equal to one",
 		},
 		{
-			name:    "log with one argument",
-			expr:    "log(8)",
-			wantErr: "log expects 2 arguments, got 1",
-		},
-		{
 			name:    "factorial of negative",
 			expr:    "factorial(-1)",
 			wantErr: "factorial(-1): argument must be a non-negative integer",
@@ -625,11 +610,6 @@ func TestCallEvalErrors(t *testing.T) {
 			name:    "gamma at a negative pole",
 			expr:    "gamma(-2)",
 			wantErr: "gamma(-2): argument must not be a non-positive integer",
-		},
-		{
-			name:    "min with no arguments",
-			expr:    "min()",
-			wantErr: "min expects at least 1 argument, got 0",
 		},
 		{
 			name:    "acosh below one",

@@ -304,6 +304,62 @@ var tokenTests = []tokenTest{
 			{Type: tokens.LIT_INT, Value: "3", Col: 7},
 		},
 	},
+	{
+		name:  "range of integers",
+		input: "1..10",
+		want: []tokenExpectation{
+			{Type: tokens.LIT_INT, Value: "1", Col: 1},
+			{Type: tokens.DOTDOT, Value: "..", Col: 2},
+			{Type: tokens.LIT_INT, Value: "10", Col: 4},
+		},
+	},
+	{
+		name:  "range from float",
+		input: "1.5..2",
+		want: []tokenExpectation{
+			{Type: tokens.LIT_FLOAT, Value: "1.5", Col: 1},
+			{Type: tokens.DOTDOT, Value: "..", Col: 4},
+			{Type: tokens.LIT_INT, Value: "2", Col: 6},
+		},
+	},
+	{
+		name:  "range of identifiers",
+		input: "a..b",
+		want: []tokenExpectation{
+			{Type: tokens.IDENT, Value: "a", Col: 1},
+			{Type: tokens.DOTDOT, Value: "..", Col: 2},
+			{Type: tokens.IDENT, Value: "b", Col: 4},
+		},
+	},
+	{
+		name:  "range with whitespace",
+		input: "1 .. 2",
+		want: []tokenExpectation{
+			{Type: tokens.LIT_INT, Value: "1", Col: 1},
+			{Type: tokens.WHITESPACE, Value: " ", Col: 2},
+			{Type: tokens.DOTDOT, Value: "..", Col: 3},
+			{Type: tokens.WHITESPACE, Value: " ", Col: 5},
+			{Type: tokens.LIT_INT, Value: "2", Col: 6},
+		},
+	},
+	{
+		name:  "three dots are not a range",
+		input: "1...2",
+		want: []tokenExpectation{
+			{Type: tokens.LIT_INT, Value: "1", Col: 1},
+			{Type: tokens.DOTDOT, Value: "..", Col: 2},
+			{Type: tokens.ILLEGAL, Value: ".", Col: 4},
+		},
+		wantErr: "unexpected token",
+	},
+	{
+		name:  "lone dot",
+		input: ".",
+		want: []tokenExpectation{
+			{Type: tokens.ILLEGAL, Value: ".", Col: 1},
+		},
+		wantErr: "unexpected token",
+	},
 }
 
 func TestLexerTokens(t *testing.T) {

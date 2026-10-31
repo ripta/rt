@@ -22,7 +22,14 @@ func lexLineIdent(l *L) lexingState {
 }
 
 func lexNumber(l *L) lexingState {
-	if !l.AcceptWhile(IsNumeric) {
+	// A '.' that starts a '..' belongs to the range token, not the number.
+	numeric := func(r rune) bool {
+		if r == '.' && strings.HasPrefix(l.src[l.pos:], ".") {
+			return false
+		}
+		return IsNumeric(r)
+	}
+	if !l.AcceptWhile(numeric) {
 		return l.Errorf("invalid number: %s", l.Current())
 	}
 
