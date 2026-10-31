@@ -328,12 +328,13 @@ func (n *CallNode) Eval(ctx context.Context, env *Env) (*unified.Real, error) {
 
 func (n *CallNode) evalBinder(ctx context.Context, env *Env, fn function) (*unified.Real, error) {
 	last := len(n.Args) - 1
-	if fn.binder.eval == nil {
+	var b *BindingNode
+	if last >= 0 {
+		b, _ = n.Args[last].(*BindingNode)
+	}
+	if b == nil || fn.binder.eval == nil {
 		return nil, fmt.Errorf("%s: binder %s cannot be evaluated", n.Func.Pos, n.Func.Value)
 	}
-
-	// finishCall guarantees a trailing BindingNode.
-	b := n.Args[last].(*BindingNode)
 
 	// Bounds are ordinary expressions in the caller's scope, so nested binders see the outer binding.
 	bind, err := evalBinding(ctx, env, b)

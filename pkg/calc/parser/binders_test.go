@@ -1,8 +1,11 @@
 package parser
 
 import (
+	"context"
 	"strings"
 	"testing"
+
+	"github.com/ripta/rt/pkg/calc/tokens"
 )
 
 // binderCatalog returns the shipping catalog plus test-only binders. They cover
@@ -177,5 +180,23 @@ func TestConstantNamesSingleSource(t *testing.T) {
 		if _, ok := env.Get(name); !ok {
 			t.Errorf("NewEnv does not seed %q", name)
 		}
+	}
+}
+
+func TestHandBuiltBinderCallErrors(t *testing.T) {
+	t.Parallel()
+
+	fn := tokens.Token{Type: tokens.IDENT, Value: "sum"}
+	cases := map[string]*CallNode{
+		"no arguments": {Func: fn},
+		"no binding":   {Func: fn, Args: []Node{&NumberNode{}}},
+	}
+	for name, call := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			if _, err := call.Eval(context.Background(), NewEnv()); err == nil {
+				t.Fatal("expected an error")
+			}
+		})
 	}
 }

@@ -62,12 +62,13 @@ func TestSumShadowsAndDoesNotLeak(t *testing.T) {
 	t.Parallel()
 
 	env := NewEnv()
-	for src, want := range map[string]string{
-		"i = 7":            "7",
-		"sum(i, i = 1..3)": "6",
-		"i":                "7",
-		"sum(i, i = 1..i)": "28",
+	for _, c := range []struct{ src, want string }{
+		{"i = 7", "7"},
+		{"sum(i, i = 1..3)", "6"},
+		{"i", "7"},
+		{"sum(i, i = 1..i)", "28"},
 	} {
+		src, want := c.src, c.want
 		got, err := evalShipping(context.Background(), src, env)
 		if err != nil {
 			t.Fatalf("%s: %v", src, err)
