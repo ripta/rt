@@ -793,8 +793,8 @@ trim widens the rule. The project-file writer refuses the same tokens.
 
 The check misses what it has no shape for, such as `mysql -phunter2`,
 `--password hunter2`, `curl -u user:pass`, a token in a query parameter, a
-`Bearer` value with no digit, and an opaque value. No warning does not mean a rule is free of secrets. Read the rule
-before remembering it.
+`Bearer` value with no digit, and an opaque value. No warning does not mean a
+rule is free of secrets. Read the rule before remembering it.
 
 
 `enc`

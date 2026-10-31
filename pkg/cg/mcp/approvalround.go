@@ -395,6 +395,8 @@ func (g *gate) askAgain(call approvalCall, entry *pendingEntry, formIDs []string
 				Inner:      inner,
 				Note:       again.Note,
 				Path:       g.store.Project.Path,
+
+				NoteNamesCredential: f.Failure.Reason == editCredential,
 			}),
 		}
 	}

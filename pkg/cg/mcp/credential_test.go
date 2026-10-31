@@ -389,3 +389,36 @@ func TestEndToEndCredentialRememberOnAnOldClient(t *testing.T) {
 		t.Errorf("a rule was written:\n%s", file)
 	}
 }
+
+func TestSecondRoundDescriptionNamesTheCredentialOnce(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+
+	g := newTestGateAt(t, t.TempDir(), "version: 1\n", false)
+
+	call := multiRound(testCall([]string{"echo", "hi", secretToken}))
+	pending := firstRound(t, g, call)
+
+	second, err := g.check(retryCall(call, pending, mcpsdk.InputResponseMap{"approval-1": accept(map[string]any{"remember": true})}))
+	if err != nil || second.Pending == nil {
+		t.Fatalf("retry = %+v, %v; want a second round", second, err)
+	}
+
+	got := ruleDescriptionOf(t, second.Pending, "approval-1")
+	if n := strings.Count(got, "looks like a credential"); n != 1 {
+		t.Errorf("description names the credential %d times, want once:\n%s", n, got)
+	}
+
+	root := g.store.Project.Path
+	want := "The rule holds what looks like a credential at token 3, so nothing was saved. " +
+		"The project file may be committed, and a pushed secret cannot be recalled. " +
+		"Uncheck remember, or write the rule by hand in " + root + ". " +
+		"Or trim the rule to the tokens before token 3. A trim allows any command that starts with those tokens, so it widens the rule. " +
+		"The field holds the edit that failed. " +
+		"An exact rule fixes every argument, and its first token decides which programs it covers. " +
+		"Leave the rule as it is for an exact rule, tick the box for a prefix rule of the whole command, " +
+		"or trim it to a leading part for a prefix rule that allows any command starting with those tokens. " +
+		"Edited only when remembering; a YAML list of argv tokens, e.g. [go, test] or [foo, \"bar baz\"]"
+	if got != want {
+		t.Errorf("description =\n%s\nwant\n%s", got, want)
+	}
+}
