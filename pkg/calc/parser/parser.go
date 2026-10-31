@@ -448,7 +448,7 @@ func (p *P) parseBinding(name tokens.Token) (Node, error) {
 // finishCall checks a parsed call against the catalog, so that every call error
 // is reported before any part of the line runs.
 func (p *P) finishCall(name tokens.Token, args []Node) (Node, error) {
-	call := &CallNode{Func: name, Args: args}
+	call := &CallNode{Func: name, Args: args, catalog: p.catalog}
 
 	fn, ok := p.catalog[name.Value]
 	if !ok {

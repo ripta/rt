@@ -25,6 +25,7 @@ type binding struct {
 }
 
 type Env struct {
+	parent    *Env
 	precision int
 	vars      map[string]*binding
 	trace     bool
@@ -73,9 +74,24 @@ func seedConstants() map[string]*binding {
 	return vars
 }
 
+// child returns a scope holding only name, bound to val. Lookups that miss fall through to e.
+// Precision and tracing are copied from e, which is safe because nothing changes them during an
+// evaluation.
+func (e *Env) child(name string, val *unified.Real) *Env {
+	return &Env{
+		parent:    e,
+		precision: e.precision,
+		vars:      map[string]*binding{name: {value: val}},
+		trace:     e.trace,
+		traceOut:  e.traceOut,
+	}
+}
+
 func (e *Env) Get(name string) (*unified.Real, bool) {
-	if binding, ok := e.vars[name]; ok {
-		return binding.value, true
+	for s := e; s != nil; s = s.parent {
+		if binding, ok := s.vars[name]; ok {
+			return binding.value, true
+		}
 	}
 	return nil, false
 }
@@ -85,6 +101,13 @@ func (e *Env) Get(name string) (*unified.Real, bool) {
 func (e *Env) Set(name string, val *unified.Real) error {
 	if strings.HasPrefix(name, "$") {
 		return fmt.Errorf("cannot assign to constant %q", name)
+	}
+
+	if e.parent != nil {
+		if _, ok := e.vars[name]; ok {
+			return fmt.Errorf("cannot assign to constant %q", name)
+		}
+		return e.parent.Set(name, val)
 	}
 
 	if binding, ok := e.vars[name]; ok && !binding.mutable {
@@ -99,6 +122,11 @@ func (e *Env) Set(name string, val *unified.Real) error {
 }
 
 func (e *Env) SetConstant(name string, val *unified.Real) {
+	if e.parent != nil {
+		e.parent.SetConstant(name, val)
+		return
+	}
+
 	e.vars[name] = &binding{
 		value:   val,
 		mutable: false,
@@ -258,17 +286,25 @@ func (n *IdentNode) Eval(ctx context.Context, env *Env) (*unified.Real, error) {
 type CallNode struct {
 	Func tokens.Token
 	Args []Node
+
+	// catalog is the table the parser checked this call against. Nil means the shipping functions.
+	catalog map[string]function
 }
 
 func (n *CallNode) Eval(ctx context.Context, env *Env) (*unified.Real, error) {
 	// The parser has already checked the name and arity. Only a hand-built tree can fail here.
-	fn, ok := functions[n.Func.Value]
+	table := n.catalog
+	if table == nil {
+		table = functions
+	}
+
+	fn, ok := table[n.Func.Value]
 	if !ok {
 		return nil, fmt.Errorf("%s: unknown function %q", n.Func.Pos, n.Func.Value)
 	}
 
 	if fn.binder != nil {
-		return nil, fmt.Errorf("%s: binder %s cannot be evaluated yet", n.Func.Pos, n.Func.Value)
+		return n.evalBinder(ctx, env, fn)
 	}
 
 	args := make([]*unified.Real, len(n.Args))
@@ -282,7 +318,33 @@ func (n *CallNode) Eval(ctx context.Context, env *Env) (*unified.Real, error) {
 
 	result, err := fn.fn(ctx, env, args)
 	if err != nil {
+		if isStop(err) {
+			return nil, err
+		}
 		return nil, fmt.Errorf("%s: %w", n.Func.Pos, domainError(ctx, n.Func.Value, args, env.precision, err))
+	}
+	return result, nil
+}
+
+func (n *CallNode) evalBinder(ctx context.Context, env *Env, fn function) (*unified.Real, error) {
+	last := len(n.Args) - 1
+	b, ok := n.Args[last].(*BindingNode)
+	if fn.binder.eval == nil || !ok {
+		return nil, fmt.Errorf("%s: binder %s cannot be evaluated", n.Func.Pos, n.Func.Value)
+	}
+
+	// Bounds are ordinary expressions in the caller's scope, so nested binders see the outer binding.
+	bind, err := evalBinding(ctx, env, b, fn.binder)
+	if err != nil {
+		return nil, err
+	}
+
+	result, err := fn.binder.eval(ctx, env, n.Args[:last], bind)
+	if err != nil {
+		if isStop(err) {
+			return nil, err
+		}
+		return nil, fmt.Errorf("%s: %w", n.Func.Pos, err)
 	}
 	return result, nil
 }
@@ -457,7 +519,14 @@ func power(ctx context.Context, l, r *unified.Real, precision int) (*unified.Rea
 		}
 
 		// Compute base^exp using repeated multiplication
+		lc, err := newLoopCheck(ctx)
+		if err != nil {
+			return nil, err
+		}
 		for i := new(big.Int).Set(exp); i.Sign() > 0; i.Sub(i, big.NewInt(1)) {
+			if err := lc.tick(); err != nil {
+				return nil, err
+			}
 			result.Mul(result, base)
 		}
 
@@ -475,7 +544,14 @@ func power(ctx context.Context, l, r *unified.Real, precision int) (*unified.Rea
 		exp := rRat.Num()
 
 		// Compute base^exp using repeated multiplication
+		lc, err := newLoopCheck(ctx)
+		if err != nil {
+			return nil, err
+		}
 		for i := new(big.Int).Set(exp); i.Sign() > 0; i.Sub(i, big.NewInt(1)) {
+			if err := lc.tick(); err != nil {
+				return nil, err
+			}
 			result.Mul(result, base)
 		}
 

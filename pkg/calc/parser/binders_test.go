@@ -13,9 +13,9 @@ func binderCatalog() map[string]function {
 	for k, v := range functions {
 		m[k] = v
 	}
-	m["tsum"] = function{name: "tsum", signature: "tsum(expr, i = a..b)", minArgs: 2, maxArgs: 2, binder: &binderSpec{forms: bindRange}}
+	m["tsum"] = function{name: "tsum", signature: "tsum(expr, i = a..b)", minArgs: 2, maxArgs: 2, binder: &binderSpec{forms: bindRange, eval: testSum}}
 	m["tint"] = function{name: "tint", signature: "tint(expr, x = a..b)", minArgs: 2, maxArgs: 2, binder: &binderSpec{forms: bindRange, infinite: true}}
-	m["tdiff"] = function{name: "tdiff", signature: "tdiff(expr, x = a)", minArgs: 2, maxArgs: 2, binder: &binderSpec{forms: bindPoint}}
+	m["tdiff"] = function{name: "tdiff", signature: "tdiff(expr, x = a)", minArgs: 2, maxArgs: 2, binder: &binderSpec{forms: bindPoint, eval: testPoint}}
 	m["tsolve"] = function{name: "tsolve", signature: "tsolve(expr, x = a)", minArgs: 2, maxArgs: 2, binder: &binderSpec{forms: bindPoint | bindRange, infinite: true}}
 	return m
 }

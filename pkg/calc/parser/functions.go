@@ -43,6 +43,7 @@ const (
 type binderSpec struct {
 	forms    bindForm
 	infinite bool
+	eval     binderFunc
 }
 
 // functionCatalog is the source of truth for the function registry. Entries are
@@ -231,7 +232,14 @@ func factorial(ctx context.Context, r *unified.Real, precision int) (*unified.Re
 
 	n := rat.Num()
 	result := big.NewInt(1)
+	lc, err := newLoopCheck(ctx)
+	if err != nil {
+		return nil, err
+	}
 	for i := big.NewInt(2); i.Cmp(n) <= 0; i.Add(i, big.NewInt(1)) {
+		if err := lc.tick(); err != nil {
+			return nil, err
+		}
 		result.Mul(result, i)
 	}
 
@@ -380,7 +388,14 @@ func choose(ctx context.Context, nr, kr *unified.Real, precision int) (*unified.
 	result := big.NewInt(1)
 	num := new(big.Int).Set(n)
 	den := big.NewInt(1)
+	lc, err := newLoopCheck(ctx)
+	if err != nil {
+		return nil, err
+	}
 	for i := new(big.Int); i.Cmp(k) < 0; i.Add(i, one) {
+		if err := lc.tick(); err != nil {
+			return nil, err
+		}
 		result.Mul(result, num)
 		result.Quo(result, den)
 		num.Sub(num, one)
@@ -407,7 +422,14 @@ func perm(ctx context.Context, nr, kr *unified.Real, precision int) (*unified.Re
 	one := big.NewInt(1)
 	result := big.NewInt(1)
 	num := new(big.Int).Set(n)
+	lc, err := newLoopCheck(ctx)
+	if err != nil {
+		return nil, err
+	}
 	for i := new(big.Int); i.Cmp(k) < 0; i.Add(i, one) {
+		if err := lc.tick(); err != nil {
+			return nil, err
+		}
 		result.Mul(result, num)
 		num.Sub(num, one)
 	}
@@ -438,8 +460,12 @@ func plural(n int) string {
 // its rendered arguments followed by the reason: sqrt(-1): argument must be
 // non-negative. Recognized upstream sentinels map to calc-owned reason text;
 // any other error falls back to its own message so non-domain failures still
-// surface.
+// surface. Budget and cancellation errors pass through unchanged.
 func domainError(ctx context.Context, name string, args []*unified.Real, precision int, err error) error {
+	if isStop(err) {
+		return err
+	}
+
 	rendered := make([]string, len(args))
 	for i, a := range args {
 		rendered[i] = formatArg(ctx, a, precision)

@@ -2,6 +2,7 @@ package calc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,6 +11,8 @@ import (
 	"time"
 
 	"github.com/ripta/reals/pkg/constructive"
+
+	"github.com/ripta/rt/pkg/calc/parser"
 )
 
 type nextPromptTest struct {
@@ -591,5 +594,92 @@ func writeFile(t *testing.T, path, contents string) {
 
 	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
 		t.Fatalf("WriteFile(%s): %v", path, err)
+	}
+}
+
+func TestLoadAbortsOnCancellation(t *testing.T) {
+	dir := t.TempDir()
+	inner := filepath.Join(dir, "inner.calc")
+	outer := filepath.Join(dir, "outer.calc")
+
+	writeFile(t, inner, ".format version=2\n5\n6\n")
+	writeFile(t, outer, ".format version=2\n1\n.load "+inner+"\n2\n3\n")
+
+	for _, path := range []string{inner, outer} {
+		c := newClockCalculator()
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		c.interrupt = ctx
+
+		var err error
+		captureStderr(t, func() {
+			captureStdout(t, func() {
+				err = c.handleLoad([]string{path})
+			})
+		})
+
+		if !errors.Is(err, ErrLoadStopped) || !errors.Is(err, context.Canceled) {
+			t.Fatalf("load %s: err = %v, want a stopped load wrapping context.Canceled", path, err)
+		}
+		if !strings.Contains(err.Error(), "interrupted at line") {
+			t.Errorf("load %s: err = %q does not name the interrupted line", path, err)
+		}
+		if len(c.history) != 0 {
+			t.Errorf("load %s ran %d lines after cancellation", path, len(c.history))
+		}
+	}
+}
+
+func TestNestedLoadCancellationStopsOuterLoad(t *testing.T) {
+	t.Parallel()
+
+	err := fmt.Errorf("%w: %w", ErrLoadStopped, parser.ErrCancelled)
+	if !isStructural(err) {
+		t.Error("a cancelled nested load is not structural, so the outer load would keep going")
+	}
+	if isStructural(fmt.Errorf("%w at line 1", ErrLoadStopped)) {
+		t.Error("a stopped nested load that was not cancelled became structural")
+	}
+}
+
+func TestExecuteClearsInterrupt(t *testing.T) {
+	c := newClockCalculator()
+
+	captureStdout(t, func() {
+		c.Execute("1 + 1")
+	})
+
+	if c.interrupt != nil {
+		t.Error("Execute left its interrupt context installed")
+	}
+	if got := resultText(t, c, "$0"); got != "2" {
+		t.Errorf("$0 = %s, want 2", got)
+	}
+}
+
+func TestCancelledLineReportsError(t *testing.T) {
+	c := newClockCalculator()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	c.interrupt = ctx
+
+	var err error
+	captureStderr(t, func() {
+		err = c.processLine("factorial(5)", ModeREPL, 0)
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("err = %v, want context.Canceled", err)
+	}
+}
+
+func TestProcessInterruptibleClearsInterrupt(t *testing.T) {
+	c := newClockCalculator()
+
+	captureStdout(t, func() {
+		c.processInterruptible("1 + 1", ModeSTDIN)
+	})
+
+	if c.interrupt != nil {
+		t.Error("processInterruptible left its interrupt context installed")
 	}
 }

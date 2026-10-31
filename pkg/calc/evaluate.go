@@ -28,7 +28,7 @@ func Evaluate(ctx context.Context, expr string, env *parser.Env) (*unified.Real,
 		return nil, err
 	}
 
-	val, err := node.Eval(ctx, env)
+	val, err := node.Eval(parser.WithBudget(ctx), env)
 	if err != nil {
 		return nil, err
 	}
