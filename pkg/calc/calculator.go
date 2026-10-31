@@ -2,6 +2,7 @@ package calc
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -147,7 +148,7 @@ func (c *Calculator) Evaluate(expr string) (*unified.Real, error) {
 
 	c.env.SetDecimalPlaces(c.DecimalPlaces)
 	c.env.SetTrace(c.Trace)
-	return Evaluate(expr, c.env)
+	return Evaluate(context.Background(), expr, c.env)
 }
 
 // processLine processes a single line of input (expression or meta-command).
@@ -187,8 +188,12 @@ func (c *Calculator) processLine(expr string, mode ExecutionMode, lineNum int) e
 		return err
 	}
 
+	if err := c.DisplayResult(context.Background(), res); err != nil {
+		c.reportError(err, mode, lineNum)
+		return err
+	}
+
 	c.bindResult(res)
-	c.DisplayResult(res)
 
 	return nil
 }
@@ -281,7 +286,10 @@ func (c *Calculator) DisplayError(err error) {
 	fmt.Fprintf(os.Stderr, "calc:%03d/ Error: %s\n", c.count, err)
 }
 
-func (c *Calculator) DisplayResult(res *unified.Real) {
+// DisplayResult prints res to the configured number of decimal places. A value that cannot be
+// rendered, such as one outside its function's domain, is returned as an error and prints nothing
+// beyond the verbose construction.
+func (c *Calculator) DisplayResult(ctx context.Context, res *unified.Real) error {
 	cons := res.Constructive()
 
 	if c.Verbose {
@@ -290,7 +298,11 @@ func (c *Calculator) DisplayResult(res *unified.Real) {
 
 	// Format the output to the specified number of decimal places. Insert an
 	// underscore after all zeroes for readability.
-	t := constructive.Text(cons, c.DecimalPlaces, 10)
+	t, err := constructive.Text(ctx, cons, c.DecimalPlaces, 10)
+	if err != nil {
+		return fmt.Errorf("formatting result: %w", err)
+	}
+
 	if strings.Contains(t, ".") {
 		if t2 := strings.TrimRight(t, "0"); len(t2) < len(t) {
 			if c.UnderscoreZeros {
@@ -302,6 +314,8 @@ func (c *Calculator) DisplayResult(res *unified.Real) {
 	}
 
 	fmt.Printf("%s\n", t)
+
+	return nil
 }
 
 func (c *Calculator) REPL() error {

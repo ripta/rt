@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"context"
 	"math"
 	"math/big"
 	"strings"
@@ -691,7 +692,7 @@ func TestEvalUndefinedIdentifier(t *testing.T) {
 		t.Fatalf("parse error: %v", err)
 	}
 
-	if _, err := node.Eval(NewEnv()); err == nil {
+	if _, err := node.Eval(context.Background(), NewEnv()); err == nil {
 		t.Fatalf("expected undefined identifier error")
 	} else if !strings.Contains(err.Error(), "undefined identifier") {
 		t.Fatalf("unexpected error: %v", err)
@@ -846,7 +847,7 @@ func parseAndEval(t *testing.T, expr string, env *Env) (*unified.Real, error) {
 	if err != nil {
 		return nil, err
 	}
-	return node.Eval(env)
+	return node.Eval(context.Background(), env)
 }
 
 const testPrecision = -100
@@ -866,9 +867,9 @@ func approximateRealForTest(t *testing.T, r *unified.Real, precision int) *big.R
 	if !constructive.IsPrecisionValid(precision) {
 		t.Fatalf("invalid precision %d", precision)
 	}
-	approx := constructive.Approximate(r.Constructive(), precision)
-	if approx == nil {
-		t.Fatalf("approximation failed for precision %d", precision)
+	approx, err := constructive.Approximate(context.Background(), r.Constructive(), precision)
+	if err != nil {
+		t.Fatalf("approximation failed for precision %d: %v", precision, err)
 	}
 
 	exp := int64(-precision)

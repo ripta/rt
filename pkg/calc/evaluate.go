@@ -1,6 +1,7 @@
 package calc
 
 import (
+	"context"
 	"errors"
 
 	"github.com/ripta/reals/pkg/unified"
@@ -12,7 +13,7 @@ var ErrEnvironmentMissing = errors.New("environment missing")
 
 // Evaluate parses expr and evaluates it in the given environment.
 // The caller is responsible for trimming whitespace from expr.
-func Evaluate(expr string, env *parser.Env) (*unified.Real, error) {
+func Evaluate(ctx context.Context, expr string, env *parser.Env) (*unified.Real, error) {
 	if expr == "" {
 		return unified.Zero(), nil
 	}
@@ -27,7 +28,7 @@ func Evaluate(expr string, env *parser.Env) (*unified.Real, error) {
 		return nil, err
 	}
 
-	val, err := node.Eval(env)
+	val, err := node.Eval(ctx, env)
 	if err != nil {
 		return nil, err
 	}

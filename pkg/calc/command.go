@@ -1,6 +1,7 @@
 package calc
 
 import (
+	"context"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -32,8 +33,11 @@ func NewCommand() *cobra.Command {
 						return err
 					}
 
+					if err := c.DisplayResult(context.Background(), res); err != nil {
+						return err
+					}
+
 					c.bindResult(res)
-					c.DisplayResult(res)
 					c.count++
 				}
 				return nil

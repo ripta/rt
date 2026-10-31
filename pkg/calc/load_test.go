@@ -1,6 +1,7 @@
 package calc
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -577,7 +578,12 @@ func resultText(t *testing.T, c *Calculator, ref string) string {
 		t.Fatalf("Evaluate(%s): %v", ref, err)
 	}
 
-	return constructive.Text(res.Constructive(), 0, 10)
+	text, err := constructive.Text(context.Background(), res.Constructive(), 0, 10)
+	if err != nil {
+		t.Fatalf("Text(%s): %v", ref, err)
+	}
+
+	return text
 }
 
 func writeFile(t *testing.T, path, contents string) {
