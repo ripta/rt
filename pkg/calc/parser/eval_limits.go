@@ -28,9 +28,13 @@ type budget struct {
 	used, limit int
 }
 
-// WithBudget returns a context that carries a fresh body-evaluation count. Without one, body
-// evaluations are not counted.
+// WithBudget returns a context that carries a body-evaluation count. A context that already
+// holds one is returned as it is, so work deferred to a later step of the same line charges that
+// line's count. Without a count, body evaluations are not counted.
 func WithBudget(ctx context.Context) context.Context {
+	if _, ok := ctx.Value(budgetKey{}).(*budget); ok {
+		return ctx
+	}
 	return withBudgetLimit(ctx, MaxBodyEvaluations)
 }
 

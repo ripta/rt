@@ -132,6 +132,7 @@ var functionCatalog = []function{
 
 	{name: "sum", group: "Binders", signature: "sum(expr, i = a..b)", summary: "sum of expr for integer i from a to b", minArgs: 2, maxArgs: 2, binder: &binderSpec{forms: bindRange, eval: sumBinder}},
 	{name: "product", group: "Binders", signature: "product(expr, i = a..b)", summary: "product of expr for integer i from a to b", minArgs: 2, maxArgs: 2, binder: &binderSpec{forms: bindRange, eval: productBinder}},
+	{name: "solve", group: "Binders", signature: "solve(expr, x = a..b) or solve(expr, x = x0)", summary: "a root of expr in the bracket a..b, or the root nearest the guess x0; expr must be continuous and change sign there, and which root a bracket returns is unspecified", minArgs: 2, maxArgs: 2, binder: &binderSpec{forms: bindRange | bindPoint, eval: solveBinder}},
 }
 
 // functions is the registry consulted by CallNode, derived from functionCatalog.

@@ -160,13 +160,19 @@ func (c *Calculator) context() context.Context {
 }
 
 func (c *Calculator) Evaluate(expr string) (*unified.Real, error) {
+	return c.evaluate(parser.WithBudget(c.context()), expr)
+}
+
+// evaluate evaluates expr under ctx. A caller that displays the result passes the same ctx to
+// DisplayResult, so refinement deferred to display charges the line's budget.
+func (c *Calculator) evaluate(ctx context.Context, expr string) (*unified.Real, error) {
 	if c.env == nil {
 		c.env = parser.NewEnv()
 	}
 
 	c.env.SetDecimalPlaces(c.DecimalPlaces)
 	c.env.SetTrace(c.Trace)
-	return Evaluate(c.context(), expr, c.env)
+	return Evaluate(ctx, expr, c.env)
 }
 
 // processLine processes a single line of input (expression or meta-command).
@@ -200,13 +206,14 @@ func (c *Calculator) processLine(expr string, mode ExecutionMode, lineNum int) e
 
 	c.history = append(c.history, historyEntry{Expr: expr, Line: c.count})
 
-	res, err := c.Evaluate(expr)
+	ctx := parser.WithBudget(c.context())
+	res, err := c.evaluate(ctx, expr)
 	if err != nil {
 		c.reportError(err, mode, lineNum)
 		return err
 	}
 
-	if err := c.DisplayResult(c.context(), res); err != nil {
+	if err := c.DisplayResult(ctx, res); err != nil {
 		c.reportError(err, mode, lineNum)
 		return err
 	}
@@ -920,6 +927,8 @@ var examples = []example{
 
 	{"Binders", "sum(i**2, i = 1..10)", "sum over integer bounds; the index is local to the call"},
 	{"Binders", "product(i, i = 1..5)", "product over integer bounds"},
+	{"Binders", "solve(x**2 - 2, x = 0..2)", "a root of a continuous expression in a bracket that changes its sign"},
+	{"Binders", "solve(cos(x) - x, x = 1)", "the root of an expression nearest a guess"},
 
 	{"Variables", "r = 3", "assign a name"},
 	{"Variables", "PI * r ** 2", "use it later"},

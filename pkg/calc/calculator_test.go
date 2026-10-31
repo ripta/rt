@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"math/big"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,6 +14,8 @@ import (
 
 	"github.com/ripta/reals/pkg/constructive"
 	"github.com/ripta/reals/pkg/unified"
+
+	"github.com/ripta/rt/pkg/calc/parser"
 )
 
 type handleMetaCommandTest struct {
@@ -895,6 +898,41 @@ func TestDisplayResultRenderFailure(t *testing.T) {
 	}
 }
 
+func TestDisplayResultApproximationCallback(t *testing.T) {
+	c := &Calculator{DecimalPlaces: 30}
+
+	want, err := c.Evaluate("√2")
+	if err != nil {
+		t.Fatalf("Evaluate: %v", err)
+	}
+
+	inner := want.Constructive()
+	calls := 0
+	cb := constructive.FromApproximation("callback-sqrt2", func(ctx context.Context, p int) (*big.Int, error) {
+		calls++
+		return constructive.Approximate(ctx, inner, p)
+	})
+	got := unified.New(cb, nil)
+
+	wantOut := captureStdout(t, func() {
+		if err := c.DisplayResult(context.Background(), want); err != nil {
+			t.Fatalf("DisplayResult(sqrt): %v", err)
+		}
+	})
+	gotOut := captureStdout(t, func() {
+		if err := c.DisplayResult(context.Background(), got); err != nil {
+			t.Fatalf("DisplayResult(callback): %v", err)
+		}
+	})
+
+	if gotOut != wantOut {
+		t.Fatalf("callback rendered %q, want %q", gotOut, wantOut)
+	}
+	if calls == 0 {
+		t.Fatal("callback was never called")
+	}
+}
+
 func TestShowFunctionsListsBindersGroup(t *testing.T) {
 	// Not parallel: it swaps os.Stdout.
 	r, w, err := os.Pipe()
@@ -913,5 +951,30 @@ func TestShowFunctionsListsBindersGroup(t *testing.T) {
 	}
 	if !strings.Contains(string(out), "Binders:\n  sum(expr, i = a..b)") {
 		t.Errorf("listing lacks a Binders group:\n%s", out)
+	}
+}
+
+func TestSolveResultSharpens(t *testing.T) {
+	t.Parallel()
+
+	c := &Calculator{DecimalPlaces: 20}
+	res, err := c.Evaluate("solve(x**2 - 2, x = 0..2)")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := parser.WithBudget(context.Background())
+	want, err := constructive.Text(ctx, unified.Sqrt2().Constructive(), 90, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, places := range []int{20, 90} {
+		got, err := constructive.Text(ctx, res.Constructive(), places, 10)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.HasPrefix(want, got[:len(got)-1]) {
+			t.Errorf("%d places: got %s, want prefix of %s", places, got, want)
+		}
 	}
 }
