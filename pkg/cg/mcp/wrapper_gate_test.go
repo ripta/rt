@@ -194,19 +194,19 @@ var wrappedRememberTests = []struct {
 	{
 		Name:     "a remembered path-form rule pins",
 		Content:  map[string]any{"remember": true},
-		WantFile: "prefix: [%s]",
+		WantFile: "exact: [%s, x]",
 		WantPin:  func(w wrapperEnv) string { return w.Tool },
 	},
 	{
 		Name:     "a remembered bare-name rule passes through",
-		Content:  map[string]any{"remember": true, "rule": "[tool]"},
-		WantFile: "prefix: [tool]",
+		Content:  map[string]any{"remember": true, "rule": "[tool, x]"},
+		WantFile: "exact: [tool, x]",
 		WantPin:  func(wrapperEnv) string { return "" },
 	},
 	{
 		Name:     "a remembered rule that does not match the layer pins the shown path",
 		Content:  map[string]any{"remember": true, "rule": "[other]"},
-		WantFile: "prefix: [other]",
+		WantFile: "exact: [other]",
 		WantPin:  func(w wrapperEnv) string { return w.Tool },
 	},
 }
@@ -219,12 +219,12 @@ func TestWrappedCommandApprovalRound(t *testing.T) {
 			g, call, pending, root := wrappedRound(t, w, w.rules(), argv)
 
 			form := formJSON(t, pending, "approval-1")
-			for _, want := range []string{"Allow rule (prefix)", "inner command", "wrap tool x"} {
+			for _, want := range []string{"Allow rule (exact)", "inner command", "wrap tool x"} {
 				if !strings.Contains(form, want) {
 					t.Errorf("form lacks %q:\n%s", want, form)
 				}
 			}
-			if !strings.Contains(form, w.Tool+"]") {
+			if !strings.Contains(form, w.Tool+", x]") {
 				t.Errorf("the pre-filled rule should be for the inner command %s:\n%s", w.Tool, form)
 			}
 
@@ -314,7 +314,7 @@ func TestGuardCasePromptNamesTheNearMissRule(t *testing.T) {
 	_, _, pending, _ := wrappedRound(t, w, rules, []string{"wrap", "-n", "19", "--", "tool"})
 
 	form := formJSON(t, pending, "approval-1")
-	for _, want := range []string{"Allow rule (exact)", "stopped at the inner command's leading", "add a second wrapper rule ending in --", "wrapper [" + w.Wrap + ", -n, 19]"} {
+	for _, want := range []string{"Allow rule (exact)", "heads a wrapper rule", "stopped at the inner command's leading", "add a second wrapper rule ending in --", "wrapper [" + w.Wrap + ", -n, 19]"} {
 		if !strings.Contains(form, want) {
 			t.Errorf("form lacks %q:\n%s", want, form)
 		}
@@ -361,7 +361,7 @@ func TestWrappedPromptsShareFormsWithTheUnwrappedCommand(t *testing.T) {
 	w := newWrapperEnv(t)
 	g := newTestGate(t, w.rules(), false)
 
-	first, err := g.check(testCall([]string{"wrap", "tool", "a"}, []string{"tool", "c"}))
+	first, err := g.check(testCall([]string{"wrap", "tool", "a"}, []string{"tool", "a"}))
 	if err != nil {
 		t.Fatalf("first call: %v", err)
 	}
@@ -370,14 +370,14 @@ func TestWrappedPromptsShareFormsWithTheUnwrappedCommand(t *testing.T) {
 	}
 
 	form := formJSON(t, first.Pending, "approval-1")
-	for _, want := range []string{"2 commands", "wrap tool a", "tool c"} {
+	for _, want := range []string{"2 commands", "wrap tool a", "tool a"} {
 		if !strings.Contains(form, want) {
 			t.Errorf("form lacks %q:\n%s", want, form)
 		}
 	}
 }
 
-func TestPlanFormsKeysOnKindAndTokens(t *testing.T) {
+func TestPlanFormsKeysOnTheWholeArgv(t *testing.T) {
 	w := newWrapperEnv(t)
 	g := newTestGate(t, "version: 1\nallow:\n  - wrapper: ["+w.Wrap+", -n, \"19\"]\n", false)
 
@@ -389,13 +389,18 @@ func TestPlanFormsKeysOnKindAndTokens(t *testing.T) {
 
 	forms := planForms(g.store.Ruleset(), []int{0, 1, 2}, targets)
 	if len(forms) != 3 {
-		t.Fatalf("forms = %d, want one per exact argv and one prefix form", len(forms))
+		t.Fatalf("forms = %d, want one per distinct argv", len(forms))
 	}
 
-	kinds := []approve.RuleKind{forms[0].Suggestion.Kind, forms[1].Suggestion.Kind, forms[2].Suggestion.Kind}
-	want := []approve.RuleKind{approve.KindExact, approve.KindExact, approve.KindPrefix}
-	if !slices.Equal(kinds, want) {
-		t.Errorf("kinds = %v, want %v", kinds, want)
+	for i, form := range forms {
+		if form.Suggestion.Kind != approve.KindExact {
+			t.Errorf("form %d kind = %v, want exact", i, form.Suggestion.Kind)
+		}
+	}
+
+	heads := []bool{forms[0].Suggestion.HeadsWrapper, forms[1].Suggestion.HeadsWrapper, forms[2].Suggestion.HeadsWrapper}
+	if want := []bool{true, true, false}; !slices.Equal(heads, want) {
+		t.Errorf("heads wrapper = %v, want %v", heads, want)
 	}
 }
 

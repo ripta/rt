@@ -75,11 +75,17 @@ type suggestTest struct {
 }
 
 var suggestTests = []suggestTest{
-	{Name: "a plain program keeps the prefix suggestion", Argv: []string{"make", "test"}, Path: "/usr/bin/make", Kind: KindPrefix, Want: []string{"/usr/bin/make", "test"}},
+	{Name: "a plain program pre-fills the whole argv", Argv: []string{"make", "-j8", "test"}, Path: "/usr/bin/make", Kind: KindExact, Want: []string{"/usr/bin/make", "-j8", "test"}},
+	{Name: "a quoted argument stays one token", Argv: []string{"sed", "-E", "s/a/b/", "f.txt"}, Path: "/usr/bin/sed", Kind: KindExact, Want: []string{"/usr/bin/sed", "-E", "s/a/b/", "f.txt"}},
+	{Name: "an interpreter keeps its script", Argv: []string{"python3", "foo.py"}, Path: "/opt/homebrew/bin/python3", Kind: KindExact, Want: []string{"/opt/homebrew/bin/python3", "foo.py"}},
+	{Name: "a project-relative binary pins its resolved path", Argv: []string{"./bin/tool", "run"}, Path: "/work/proj/bin/tool", Kind: KindExact, Want: []string{"/work/proj/bin/tool", "run"}},
+	{Name: "a program with no arguments is one token", Argv: []string{"ls"}, Path: "/bin/ls", Kind: KindExact, Want: []string{"/bin/ls"}},
+	{Name: "an empty argument is kept", Argv: []string{"git", "commit", "-m", ""}, Path: "/usr/bin/git", Kind: KindExact, Want: []string{"/usr/bin/git", "commit", "-m", ""}},
+	{Name: "a failed resolution falls back to argv0 as written", Argv: []string{"missing", "x"}, Kind: KindExact, Want: []string{"missing", "x"}},
 	{Name: "a bare wrapper token is read by basename", Argv: []string{"nice", "-n", "10", "make"}, Path: "/usr/bin/nice", Kind: KindExact, Want: []string{"/usr/bin/nice", "-n", "10", "make"}, Heads: true},
 	{Name: "a wrapper program called by path still heads the rule", Argv: []string{"/usr/local/bin/nice"}, Path: "/usr/local/bin/nice", Kind: KindExact, Want: []string{"/usr/local/bin/nice"}, Heads: true},
 	{Name: "a path wrapper token matches the canonical path", Argv: []string{"timeout", "9", "make"}, Path: "/opt/bin/timeout", Kind: KindExact, Want: []string{"/opt/bin/timeout", "9", "make"}, Heads: true},
-	{Name: "a path wrapper token does not match another file of that name", Argv: []string{"timeout", "9", "make"}, Path: "/usr/bin/timeout", Kind: KindPrefix, Want: []string{"/usr/bin/timeout"}},
+	{Name: "a path wrapper token does not match another file of that name", Argv: []string{"timeout", "9", "make"}, Path: "/usr/bin/timeout", Kind: KindExact, Want: []string{"/usr/bin/timeout", "9", "make"}},
 	{Name: "the guard case names the wrapper rule that nearly matched", Argv: []string{"nice", "-n", "19", "--", "make"}, Path: "/usr/bin/nice", Kind: KindExact, Want: []string{"/usr/bin/nice", "-n", "19", "--", "make"}, Heads: true, NearMiss: "wrapper [nice, -n, 19]"},
 }
 
@@ -92,6 +98,9 @@ func TestSuggest(t *testing.T) {
 	for _, tt := range suggestTests {
 		t.Run(tt.Name, func(t *testing.T) {
 			res := &model.Resolution{Argv: tt.Argv, Resolved: tt.Path, Canonical: tt.Path}
+			if tt.Path == "" {
+				res = &model.Resolution{Argv: tt.Argv}
+			}
 			got := rs.Suggest(tt.Argv, res)
 
 			if got.Kind != tt.Kind || !slices.Equal(got.Tokens, tt.Want) || got.HeadsWrapper != tt.Heads {

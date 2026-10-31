@@ -315,7 +315,7 @@ func choice(content map[string]any, key string) string {
 // parseRuleField reads the edited rule field as a YAML sequence of argv tokens,
 // falling back to the suggestion when the field is absent or blank. The flow- or
 // block-sequence YAML keeps tokens with spaces expressible via quoting without a
-// bespoke parser.
+// bespoke parser. An empty token after the first is valid, since a command can carry one.
 func parseRuleField(content map[string]any, suggestion []string) ([]string, error) {
 	raw, ok := content["rule"].(string)
 	if !ok || strings.TrimSpace(raw) == "" {
@@ -332,26 +332,76 @@ func parseRuleField(content map[string]any, suggestion []string) ([]string, erro
 	if len(tokens) == 0 {
 		return nil, fmt.Errorf("rule must have at least one token")
 	}
-	for _, t := range tokens {
-		if t == "" {
-			return nil, fmt.Errorf("rule tokens must be non-empty")
-		}
+	if tokens[0] == "" {
+		return nil, fmt.Errorf("the rule's first token must name a program")
 	}
 
 	return tokens, nil
 }
 
-// renderFlowSeq renders tokens as a YAML flow sequence ([a, b]) for the prompt's
-// pre-filled rule field, quoting tokens when needed.
+// renderFlowSeq renders tokens as a YAML flow sequence ([a, b]) for the prompt's pre-filled rule
+// field, quoting tokens when needed. An empty token renders as "" and survives parseRuleField.
 func renderFlowSeq(tokens []string) string {
-	seq := &yaml.Node{Kind: yaml.SequenceNode, Style: yaml.FlowStyle}
-	for _, t := range tokens {
-		seq.Content = append(seq.Content, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: t})
-	}
-	out, err := yaml.Marshal(seq)
-	if err != nil {
-		return strings.Join(tokens, " ")
+	parts := make([]string, len(tokens))
+	for i, t := range tokens {
+		parts[i] = renderFlowToken(t)
 	}
 
-	return strings.TrimRight(string(out), "\n")
+	return "[" + strings.Join(parts, ", ") + "]"
+}
+
+// renderFlowToken renders one token as a flow-sequence element. A token with a character that
+// needsEscape is written as a YAML double-quoted scalar with escapes, because the YAML emitter
+// passes bidi and other format characters through raw. Any other token goes through the emitter
+// inside a one-element flow sequence, so it is quoted for flow context.
+func renderFlowToken(t string) string {
+	if hasControl(t) {
+		return yamlDoubleQuote(t)
+	}
+
+	seq := &yaml.Node{Kind: yaml.SequenceNode, Style: yaml.FlowStyle}
+	seq.Content = append(seq.Content, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: t})
+
+	out, err := yaml.Marshal(seq)
+	if err != nil {
+		return yamlDoubleQuote(t)
+	}
+
+	one := strings.TrimRight(string(out), "\n")
+
+	return strings.TrimSuffix(strings.TrimPrefix(one, "["), "]")
+}
+
+// yamlDoubleQuote writes s as a YAML double-quoted scalar. Characters that needsEscape use the
+// \xXX, \uXXXX, and \UXXXXXXXX forms, so the text shows what the argument holds.
+func yamlDoubleQuote(s string) string {
+	var b strings.Builder
+	b.WriteByte('"')
+
+	for _, r := range s {
+		switch {
+		case r == '"':
+			b.WriteString(`\"`)
+		case r == '\\':
+			b.WriteString(`\\`)
+		case r == '\n':
+			b.WriteString(`\n`)
+		case r == '\r':
+			b.WriteString(`\r`)
+		case r == '\t':
+			b.WriteString(`\t`)
+		case r < 0x20:
+			fmt.Fprintf(&b, `\x%02x`, r)
+		case needsEscape(r) && r > 0xffff:
+			fmt.Fprintf(&b, `\U%08x`, r)
+		case needsEscape(r):
+			fmt.Fprintf(&b, `\u%04x`, r)
+		default:
+			b.WriteRune(r)
+		}
+	}
+
+	b.WriteByte('"')
+
+	return b.String()
 }

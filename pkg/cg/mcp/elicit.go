@@ -12,6 +12,7 @@ import (
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/ripta/rt/pkg/cg/approve"
+	"github.com/ripta/rt/pkg/cg/model"
 )
 
 // maxElicitProbe bounds both requests per round and rounds per call. The SDK client gives up
@@ -251,7 +252,7 @@ type approvalProbe struct {
 }
 
 // newApprovalProbe builds realistic content for commands listed commands. Each command fits in
-// 80 columns, the rule is two tokens from a canonical executable path as a real go command
+// 80 columns, the rule is the whole argv from a canonical executable path, as a real prompt
 // suggests, and the project file is the gate's own.
 //
 // wideCommand makes the first command wider than any terminal. If the client wraps it into the
@@ -280,10 +281,12 @@ func newApprovalProbe(commands int, wideCommand, longCwd bool, path string) (app
 		cwd = "/" + probeRuler
 	}
 
+	resolution := &model.Resolution{Argv: argvs[0], Resolved: executable, Canonical: executable}
+
 	return approvalProbe{
 		Argvs:      argvs,
 		Cwd:        cwd,
-		Suggestion: approve.Suggestion{Kind: approve.KindPrefix, Tokens: approve.SuggestPrefix(argvs[0], executable)},
+		Suggestion: (&approve.Ruleset{}).Suggest(argvs[0], resolution),
 		Path:       path,
 	}, nil
 }

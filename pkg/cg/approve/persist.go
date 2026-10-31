@@ -34,48 +34,6 @@ const (
 // snapshot a WriteDirect write was based on, so the write was not made.
 var ErrProjectChanged = fmt.Errorf("project rules changed on disk since they were loaded")
 
-// multiVerbTools are programs whose first argument is a subcommand, so a useful
-// suggested prefix covers argv[0..1] rather than argv[0] alone.
-var multiVerbTools = map[string]struct{}{
-	"go":      {},
-	"git":     {},
-	"cargo":   {},
-	"kubectl": {},
-	"make":    {},
-}
-
-// SuggestPrefix derives the prefix rule pre-filled into the approval prompt:
-// execPath, extended to a second token when the program is a known multi-verb
-// tool, a second argument is present, and that argument is not a flag. Flag
-// arguments are dropped to avoid rules like [make, -j8] or [git, --no-pager] that
-// match only on incidental invocation details rather than the actual operation.
-//
-// execPath is the absolute executable path the rule pins, normally the
-// canonical path as chosen by Resolution.RulePath, so the suggested rule is
-// strict by default: it pins a specific binary rather than a name. For a
-// multiplexer shim like rustup's cargo, RulePath is the pre-symlink resolved
-// path, so the rule names the invoked tool instead of the shared shim target.
-// The user can edit it down to a bare name to allow the command however it
-// resolves. An empty execPath, as when resolution failed, falls back to argv[0]
-// as written. The multi-verb decision still reads the invoked program's
-// basename.
-func SuggestPrefix(argv []string, execPath string) []string {
-	if len(argv) == 0 {
-		return nil
-	}
-	head := execPath
-	if head == "" {
-		head = argv[0]
-	}
-	if _, ok := multiVerbTools[filepath.Base(argv[0])]; ok && len(argv) >= 2 {
-		if !strings.HasPrefix(argv[1], "-") {
-			return []string{head, argv[1]}
-		}
-	}
-
-	return []string{head}
-}
-
 // CheckProjectDivergence re-reads the project file and reports whether it
 // differs from the snapshot captured at load. current holds the on-disk bytes,
 // or nil when the file is absent. Re-reading is only to detect change; the

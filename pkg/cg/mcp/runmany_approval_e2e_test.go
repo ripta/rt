@@ -88,7 +88,7 @@ func TestRunManyBatchesOneHundredCommandsInOneRound(t *testing.T) {
 				t.Errorf("succeeded = %v, want %d", out["succeeded"], maxPoolCommands)
 			}
 
-			wantForms := (maxPoolCommands + maxFormCommands - 1) / maxFormCommands
+			wantForms := maxPoolCommands
 			messages := script.messages()
 			if len(messages) != wantForms {
 				t.Fatalf("forms shown = %d, want %d in a single round", len(messages), wantForms)
@@ -100,8 +100,8 @@ func TestRunManyBatchesOneHundredCommandsInOneRound(t *testing.T) {
 				positions[strings.SplitN(m, ":", 2)[0]] = true
 
 				n := len(listedCommands(m))
-				if n > maxFormCommands {
-					t.Errorf("a form lists %d commands, want at most %d", n, maxFormCommands)
+				if n != 1 {
+					t.Errorf("a form lists %d commands, want 1 since no two share a rule", n)
 				}
 				listed += n
 			}
@@ -269,7 +269,7 @@ var poolDeclineTests = []poolDeclineTest{
 			"true c":   accept(map[string]any{"remember": false}),
 		},
 		WantRefusal: "cg_run_many refused: command was declined at the approval prompt\n  printf b",
-		WantFile:    []string{"prefix: [echo, a]"},
+		WantFile:    []string{"exact: [echo, a]"},
 	},
 }
 

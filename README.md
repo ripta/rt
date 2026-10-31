@@ -539,8 +539,10 @@ finish, while SIGINT additionally cancels them.
 
 Every distinct command in a pool passes the approval gate below before anything
 spawns. A denial fails the whole call with nothing started, and `repeat` does
-not multiply prompts. A command behind a `wrapper` rule is judged layer by layer,
-and commands that prompt for the same rule share one form.
+not multiply prompts. A command behind a `wrapper` rule is judged layer by layer.
+Each form pre-fills a whole command, so only commands that pre-fill the same rule
+share one. That means one command spelled through different paths to the same
+program, or a wrapped command and the bare command it wraps.
 
 A blocking `cg_run`, `cg_run_many`, or `cg_wait` call sends MCP progress
 notifications while it waits. `cg_wait` sends them for a run and for a pool.
@@ -743,9 +745,11 @@ the wrapper rule pointless, and a `prefix` deny can make it dead. `cg lint`,
 `cg check`, and the `rule_warnings` field of `cg_info` report both. Warnings are
 a separate severity: a lint run with only warnings still exits 0.
 
-A prompt for a program that heads a wrapper rule pre-fills an `exact` rule of
-the whole command, and the form says so. Editing an exact rule narrows it,
-which a `prefix` rule would not. Remember never creates a `wrapper` rule.
+Every prompt pre-fills the whole command as an `exact` rule, with the path of
+the executable as the first token. For a wrapped command the form pre-fills the
+inner command. A prompt for a program that heads a wrapper rule says so in the
+rule field's description. Editing an exact rule narrows it, which a `prefix` rule
+would not. Remember never creates a `wrapper` rule.
 
 
 `enc`
