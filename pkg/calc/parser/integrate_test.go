@@ -24,6 +24,15 @@ func TestIntegrateValues(t *testing.T) {
 		{"integrate(1/(1 + x*x), x = 0..1)", 0.7853981633974483},
 		{"integrate(sqrt(x)*ln(x), x = 0..1)", -4.0 / 9},
 		{"integrate(1/sqrt(1 - x*x), x = -1..1)", 3.141592653589793},
+		{"integrate(exp(-(x**2)), x = -inf..inf)", 1.7724538509055159},
+		{"integrate(exp(-x), x = 0..inf)", 1},
+		{"integrate(1/(1 + x**2), x = -inf..0)", 1.5707963267948966},
+		{"integrate(1/(1 + x**2), x = inf..0)", -1.5707963267948966},
+		{"integrate(exp(x), x = 0..-inf)", -1},
+		{"integrate(exp(-x), x = 1..inf)", 0.36787944117144233},
+		{"integrate(exp(x), x = -inf..1)", 2.718281828459045},
+		{"integrate(1/x**2, x = 1..inf)", 1},
+		{"integrate(1/sqrt(x)*exp(-x), x = 0..inf)", 1.7724538509055159},
 		{"integrate(5, x = 2..2)", 0},
 		{"integrate(5, x = 0..2)", 10},
 		{"integrate(integrate(x*y, y = 0..1), x = 0..1)", 0.25},
@@ -88,6 +97,9 @@ func TestIntegrateSharpens(t *testing.T) {
 		{"integrate(1/sqrt(x), x = 0..1)", "2", []int{-300}},
 		{"integrate(1/(1 + x*x), x = 0..1)", "PI/4", []int{-100, -300}},
 		{"integrate(sin(x), x = 0..PI)", "2", []int{-1000}},
+		{"integrate(exp(-(x**2)), x = -inf..inf)", "sqrt(PI)", []int{-100, -300}},
+		{"integrate(exp(-x), x = 0..inf)", "1", []int{-100, -300}},
+		{"integrate(1/(1 + x**2), x = -inf..0)", "PI/2", []int{-100, -300, -1000}},
 	}
 	for _, tt := range tests {
 		tt := tt
@@ -175,8 +187,13 @@ func TestIntegrateErrors(t *testing.T) {
 		want []string
 	}{
 		{"interior pole", "integrate(1/(x - 1/2), x = 0..1)", []string{"x = 0.5", "Split the range"}},
-		{"infinite bound", "integrate(x, x = 0..inf)", []string{"infinite bound"}},
-		{"infinite low bound", "integrate(exp(x), x = -inf..0)", []string{"infinite bound"}},
+		{"same infinite bound", "integrate(x, x = inf..inf)", []string{"both bounds of integrate are infinite"}},
+		{"same negative infinite bound", "integrate(x, x = -inf..-inf)", []string{"both bounds of integrate are infinite"}},
+		{"non-decaying", "integrate(1, x = 0..inf)", []string{"did not converge", "x = 0..inf"}},
+		{"non-decaying both", "integrate(1, x = -inf..inf)", []string{"did not converge", "x = -inf..inf"}},
+		{"slow decay", "integrate(1/x, x = 1..inf)", []string{"did not converge"}},
+		{"whole line sample error", "integrate(1/x, x = -inf..inf)", []string{"x = 0", "Split the range"}},
+		{"half line sample error", "integrate(1/(x - 1), x = 0..inf)", []string{"x = 1", "Split the range"}},
 		{"assignment in body", "integrate((a = 2) + x, x = 0..1)", []string{"assignment"}},
 		{"nested pole", "integrate(integrate(1/(x - y), y = 0..1), x = 0..1)", []string{"Split the range"}},
 	}
