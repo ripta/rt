@@ -525,6 +525,11 @@ func TestParserErrors(t *testing.T) {
 			expr:    "sqrt(4",
 			wantErr: "expected ',' or ')', got EOF",
 		},
+		{
+			name:    "stray range token",
+			expr:    "1..10",
+			wantErr: "DOTDOT",
+		},
 	}
 
 	for _, tt := range tests {
