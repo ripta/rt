@@ -6,6 +6,8 @@ import (
 
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
+
+	"github.com/ripta/rt/pkg/calc/parser"
 )
 
 // NewCommand creates a new calculator command.
@@ -28,12 +30,13 @@ func NewCommand() *cobra.Command {
 			// mode 1: evaluate each arg
 			if len(args) > 0 {
 				for _, arg := range args {
-					res, err := c.Evaluate(arg)
+					ctx := parser.WithBudget(context.Background())
+					res, err := c.evaluate(ctx, arg)
 					if err != nil {
 						return err
 					}
 
-					if err := c.DisplayResult(context.Background(), res); err != nil {
+					if err := c.DisplayResult(ctx, res); err != nil {
 						return err
 					}
 

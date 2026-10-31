@@ -14,6 +14,8 @@ import (
 
 	"github.com/ripta/reals/pkg/constructive"
 	"github.com/ripta/reals/pkg/unified"
+
+	"github.com/ripta/rt/pkg/calc/parser"
 )
 
 type handleMetaCommandTest struct {
@@ -949,5 +951,30 @@ func TestShowFunctionsListsBindersGroup(t *testing.T) {
 	}
 	if !strings.Contains(string(out), "Binders:\n  sum(expr, i = a..b)") {
 		t.Errorf("listing lacks a Binders group:\n%s", out)
+	}
+}
+
+func TestSolveResultSharpens(t *testing.T) {
+	t.Parallel()
+
+	c := &Calculator{DecimalPlaces: 20}
+	res, err := c.Evaluate("solve(x**2 - 2, x = 0..2)")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := parser.WithBudget(context.Background())
+	want, err := constructive.Text(ctx, unified.Sqrt2().Constructive(), 90, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, places := range []int{20, 90} {
+		got, err := constructive.Text(ctx, res.Constructive(), places, 10)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.HasPrefix(want, got[:len(got)-1]) {
+			t.Errorf("%d places: got %s, want prefix of %s", places, got, want)
+		}
 	}
 }
