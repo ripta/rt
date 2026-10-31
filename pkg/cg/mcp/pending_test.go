@@ -320,12 +320,12 @@ func richEntry() pendingEntry {
 	e.Commands = []pendingCommand{
 		{
 			Resolution: &model.Resolution{Argv: []string{"git", "status"}, Resolved: "/usr/bin/git", Canonical: "/usr/bin/git"},
-			Suggestion: approve.Suggestion{Kind: approve.KindPrefix, Tokens: []string{"/usr/bin/git", "status"}},
+			Suggestion: approve.Suggestion{Tokens: []string{"/usr/bin/git", "status"}},
 			Prompted:   true,
 		},
 		{
 			Resolution: &model.Resolution{Argv: []string{"go", "test", "./..."}, Resolved: "/usr/bin/go"},
-			Suggestion: approve.Suggestion{Kind: approve.KindPrefix, Tokens: []string{"/usr/bin/go", "test"}},
+			Suggestion: approve.Suggestion{Tokens: []string{"/usr/bin/go", "test"}},
 		},
 	}
 	e.DivergenceSnapshot = []byte("rules: []\n")

@@ -65,6 +65,10 @@ type approvalCall struct {
 	// fails closed without it.
 	CanPrompt bool
 
+	// MultiRound reports whether the client fulfills input requests and retries on its own, which
+	// a second round needs. Older clients get one round only.
+	MultiRound bool
+
 	State     string
 	Responses mcpsdk.InputResponseMap
 }
@@ -87,6 +91,7 @@ func newApprovalCall(req *mcpsdk.CallToolRequest, tool string, in any, argvs [][
 		Env:         env,
 		Args:        args,
 		CanPrompt:   elicitationAvailable(req),
+		MultiRound:  multiRoundAvailable(req),
 	}
 	if req != nil && req.Params != nil {
 		call.State = req.Params.RequestState
@@ -312,4 +317,20 @@ func elicitationAvailable(req *mcpsdk.CallToolRequest) bool {
 	}
 	caps := req.ClientCapabilities()
 	return caps != nil && caps.Elicitation != nil
+}
+
+// multiRoundAvailable reports whether this request's client takes more than one input-required
+// round. The SDK reads the version from the request's _meta from protocol 2026-07-28 on, and from
+// the initialize handshake before that.
+//
+// A client that sent neither is treated as the newest, as the SDK's own middleware does. Sending
+// it down the one-round branch would only strip it of the second round.
+func multiRoundAvailable(req *mcpsdk.CallToolRequest) bool {
+	if req == nil {
+		return false
+	}
+
+	version := req.ProtocolVersion()
+
+	return version == "" || version >= multiRoundTripVersion
 }

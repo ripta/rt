@@ -127,33 +127,33 @@ var approvalE2ETests = []approvalE2ETest{
 	{
 		Name:     "remember writes a rule that goes live",
 		Project:  "version: 1\n",
-		Approval: accept(map[string]any{"remember": true, "rule": "[echo]"}),
+		Approval: accept(map[string]any{"remember": true, "rule": "[echo, hi]"}),
 
 		WantForms: 1,
 		WantLive:  true,
-		WantFile:  []string{"prefix: [echo]"},
+		WantFile:  []string{"exact: [echo, hi]"},
 	},
 	{
 		Name:       "divergence reload and merge keeps the disk change",
 		Project:    baseRules,
 		Edit:       editRules,
-		Approval:   accept(map[string]any{"remember": true, "rule": "[echo]"}),
+		Approval:   accept(map[string]any{"remember": true, "rule": "[echo, hi]"}),
 		Divergence: accept(map[string]any{"choice": divergeReloadMerge}),
 
 		WantForms: 2,
 		WantLive:  true,
-		WantFile:  []string{"prefix: [make]", "prefix: [npm, ci]", "prefix: [echo]"},
+		WantFile:  []string{"prefix: [make]", "prefix: [npm, ci]", "exact: [echo, hi]"},
 	},
 	{
 		Name:       "divergence skip runs the command and leaves the file",
 		Project:    baseRules,
 		Edit:       editRules,
-		Approval:   accept(map[string]any{"remember": true, "rule": "[echo]"}),
+		Approval:   accept(map[string]any{"remember": true, "rule": "[echo, hi]"}),
 		Divergence: accept(map[string]any{"choice": divergeSkip}),
 
 		WantForms:  2,
 		WantFile:   []string{"prefix: [npm, ci]"},
-		AbsentFile: []string{"prefix: [echo]"},
+		AbsentFile: []string{"exact: [echo, hi]"},
 	},
 }
 
@@ -217,7 +217,7 @@ func TestApprovalEndToEnd(t *testing.T) {
 				}
 
 				before := script.forms()
-				_, refusal, err = callGated(t, cs, "cg_run", map[string]any{"command": []string{"echo", "again"}})
+				_, refusal, err = callGated(t, cs, "cg_run", map[string]any{"command": []string{"echo", "hi"}})
 				if err != nil || refusal != "" {
 					t.Fatalf("repeat call: err=%v refusal=%q", err, refusal)
 				}
@@ -275,8 +275,8 @@ func TestApprovalEndToEndRunManyAsksOncePerDistinctCommand(t *testing.T) {
 }
 
 // TestApprovalEndToEndGroupedRound plays the client at protocol 2026-07-28 so the raw rounds are
-// visible. Two commands share a rule and one does not, so the first round carries two forms. The
-// retry answers each form by its id, and the shared rule is saved once.
+// visible. Three distinct commands carry three forms. The retry answers each form by its id, and
+// two forms edited to the same rule save it once.
 func TestApprovalEndToEndGroupedRound(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 
@@ -295,16 +295,16 @@ func TestApprovalEndToEndGroupedRound(t *testing.T) {
 	if !first.NeedsInput() {
 		t.Fatalf("first call did not ask for approval: IsError=%v, text=%q", first.IsError, resultText(first))
 	}
-	if len(first.InputRequests) != 2 {
-		t.Fatalf("forms = %d, want 2", len(first.InputRequests))
+	if len(first.InputRequests) != 3 {
+		t.Fatalf("forms = %d, want 3", len(first.InputRequests))
 	}
 
-	shared, ok := first.InputRequests["approval-1"].(*mcpsdk.ElicitParams)
+	form, ok := first.InputRequests["approval-1"].(*mcpsdk.ElicitParams)
 	if !ok {
 		t.Fatalf("approval-1 is %T, want *ElicitParams", first.InputRequests["approval-1"])
 	}
-	if want := "Approval 1 of 2: allow 2 commands in (server cwd)?\necho a\necho b"; shared.Message != want {
-		t.Errorf("approval-1 message = %q, want it to list both echo commands", shared.Message)
+	if want := "Approval 1 of 3: allow this command in (server cwd)?\necho a"; form.Message != want {
+		t.Errorf("approval-1 message = %q, want %q", form.Message, want)
 	}
 
 	retry, err := cs.CallTool(context.Background(), &mcpsdk.CallToolParams{
@@ -313,6 +313,7 @@ func TestApprovalEndToEndGroupedRound(t *testing.T) {
 		InputResponses: mcpsdk.InputResponseMap{
 			"approval-1": accept(map[string]any{"remember": true, "rule": "[echo]"}),
 			"approval-2": accept(map[string]any{"remember": false}),
+			"approval-3": accept(map[string]any{"remember": true, "rule": "[echo]"}),
 		},
 		RequestState: first.RequestState,
 	})

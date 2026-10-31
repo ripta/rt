@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -116,13 +118,77 @@ var roundTests = []roundTest{
 		WantErr:   "declined at the approval prompt",
 	},
 	{
-		Name:    "remember writes the suggested rule",
+		Name:    "remember writes a trimmed field as a prefix rule",
 		Project: "version: 1\n",
 		Argvs:   [][]string{echoHi},
 		Answers: mcpsdk.InputResponseMap{"approval-1": accept(map[string]any{"remember": true, "rule": "[echo]"})},
 
+		WantForms:  1,
+		WantFile:   []string{"prefix: [echo]"},
+		AbsentFile: []string{"exact:"},
+	},
+	{
+		Name:    "remember writes a blank field as the full command, exact",
+		Project: "version: 1\n",
+		Argvs:   [][]string{echoHi},
+		Answers: mcpsdk.InputResponseMap{"approval-1": accept(map[string]any{"remember": true})},
+
+		WantForms:  1,
+		WantFile:   []string{"exact: [", ", hi]"},
+		AbsentFile: []string{"prefix:"},
+	},
+	{
+		Name:    "remember writes a blank field as a prefix rule with the box ticked",
+		Project: "version: 1\n",
+		Argvs:   [][]string{echoHi},
+		Answers: mcpsdk.InputResponseMap{"approval-1": accept(map[string]any{"remember": true, "allow_extra_args": true})},
+
+		WantForms:  1,
+		WantFile:   []string{"prefix: [", ", hi]"},
+		AbsentFile: []string{"exact:"},
+	},
+	{
+		Name:    "a trimmed field saves a prefix rule whatever the box says",
+		Project: "version: 1\n",
+		Argvs:   [][]string{echoHi},
+		Answers: mcpsdk.InputResponseMap{"approval-1": accept(map[string]any{"remember": true, "rule": "[echo]", "allow_extra_args": false})},
+
 		WantForms: 1,
 		WantFile:  []string{"prefix: [echo]"},
+	},
+	{
+		Name:    "a rule that misses the command runs it and skips the remember with a warning",
+		Project: "version: 1\n",
+		Argvs:   [][]string{echoHi},
+		Answers: mcpsdk.InputResponseMap{"approval-1": accept(map[string]any{"remember": true, "rule": "[echo, bye]"})},
+
+		WantForms:   1,
+		WantWarning: "does not match the command `echo hi`",
+		AbsentFile:  []string{"echo"},
+	},
+	{
+		Name:    "a rule longer than the command misses it",
+		Project: "version: 1\n",
+		Argvs:   [][]string{echoHi},
+		Answers: mcpsdk.InputResponseMap{"approval-1": accept(map[string]any{"remember": true, "rule": "[echo, hi, there]"})},
+
+		WantForms:   1,
+		WantWarning: "does not match the command",
+		AbsentFile:  []string{"echo"},
+	},
+	{
+		Name:    "a rejected edit beside a declined form refuses without a second round and skips the remember",
+		Project: "version: 1\n",
+		Argvs:   [][]string{echoHi, {"printf", "x"}},
+		Answers: mcpsdk.InputResponseMap{
+			"approval-1": accept(map[string]any{"remember": true, "rule": "[echo, bye]"}),
+			"approval-2": decline(),
+		},
+
+		WantForms:      2,
+		WantErr:        "declined at the approval prompt",
+		WantErrWarning: "skipping remember: The rule [echo, bye] does not match",
+		AbsentFile:     []string{"echo"},
 	},
 	{
 		Name:    "remember keeps an edited rule",
@@ -131,17 +197,17 @@ var roundTests = []roundTest{
 		Answers: mcpsdk.InputResponseMap{"approval-1": accept(map[string]any{"remember": true, "rule": "[echo, hi]"})},
 
 		WantForms: 1,
-		WantFile:  []string{"prefix: [echo, hi]"},
+		WantFile:  []string{"exact: [echo, hi]"},
 	},
 	{
-		Name:    "a bad rule field refuses and writes nothing",
+		Name:    "a bad rule field runs the command and writes nothing",
 		Project: "version: 1\n",
 		Argvs:   [][]string{echoHi},
 		Answers: mcpsdk.InputResponseMap{"approval-1": accept(map[string]any{"remember": true, "rule": "not a list"})},
 
-		WantForms:  1,
-		WantErr:    "rule must be a YAML list",
-		AbsentFile: []string{"prefix:"},
+		WantForms:   1,
+		WantWarning: "rule must be a YAML list",
+		AbsentFile:  []string{"prefix:", "exact:"},
 	},
 	{
 		Name:    "a missing answer refuses and says to call again",
@@ -303,27 +369,27 @@ var roundTests = []roundTest{
 	{
 		Name:    "a declined group names every command it covers in call order",
 		Project: "version: 1\n",
-		Argvs:   [][]string{{"echo", "a"}, {"printf", "x"}, {"echo", "b"}},
+		Argvs:   [][]string{{"echo@1", "a"}, {"printf", "x"}, {"echo@2", "a"}},
 		Answers: mcpsdk.InputResponseMap{
 			"approval-1": decline(),
 			"approval-2": accept(map[string]any{}),
 		},
 
 		WantForms: 2,
-		WantErr:   "2 commands were declined at the approval prompt\n  echo a\n  echo b",
+		WantErr:   "2 commands were declined at the approval prompt\n  echo@1 a\n  echo@2 a",
 	},
 	{
 		Name:         "a command allowed between the calls runs while the rest of its form uses the answer",
 		Project:      "version: 1\n",
-		AllowBetween: []string{"echo", "a"},
-		Argvs:        [][]string{{"echo", "a"}, {"echo", "b"}},
+		AllowBetween: []string{"echo@1"},
+		Argvs:        [][]string{{"echo@1", "a"}, {"echo@2", "a"}},
 		Answers:      mcpsdk.InputResponseMap{"approval-1": decline()},
 
 		WantForms: 1,
-		WantErr:   "command was declined at the approval prompt\n  echo b",
+		WantErr:   "command was declined at the approval prompt\n  echo@2 a",
 	},
 	{
-		Name:         "a form whose commands are all allowed saves a widened rule",
+		Name:         "a form whose commands are all allowed saves the remembered rule",
 		Project:      "version: 1\n",
 		AllowBetween: []string{"echo", "hi"},
 		Argvs:        [][]string{echoHi},
@@ -413,10 +479,10 @@ var roundTests = []roundTest{
 			"approval-2": accept(map[string]any{"remember": true, "rule": "not a list"}),
 		},
 
-		WantForms:  2,
-		WantErr:    "rule must be a YAML list",
-		WantFile:   []string{"prefix: [echo]"},
-		AbsentFile: []string{"printf"},
+		WantForms:   2,
+		WantWarning: "rule must be a YAML list",
+		WantFile:    []string{"prefix: [echo]"},
+		AbsentFile:  []string{"printf"},
 	},
 	{
 		Name:    "a missing answer still persists another form's remember",
@@ -440,11 +506,10 @@ var roundTests = []roundTest{
 			"approval-2": accept(map[string]any{"remember": true, "rule": "not a list"}),
 		},
 
-		WantForms:      2,
-		WantErr:        "rule must be a YAML list",
-		WantErrWarning: "skipping remember: ",
-		WantFile:       []string{"prefix: [npm, ci]"},
-		AbsentFile:     []string{"prefix: [echo]"},
+		WantForms:   2,
+		WantWarning: "skipping remember: ",
+		WantFile:    []string{"prefix: [npm, ci]"},
+		AbsentFile:  []string{"prefix: [echo]"},
 	},
 	{
 		Name:       "a missing answer still reports a skipped remember",
@@ -474,7 +539,8 @@ func TestApprovalRound(t *testing.T) {
 				writeProject(t, root, test.EditFirst)
 			}
 
-			call := testCall(test.Argvs...)
+			links := newLinkedPrograms(t)
+			call := testCall(links.argvs(test.Argvs)...)
 			first, err := g.check(call)
 			if err != nil {
 				t.Fatalf("first call: %v", err)
@@ -502,7 +568,7 @@ func TestApprovalRound(t *testing.T) {
 				if test.EditFirst != "" {
 					strategy = approve.WriteOverwrite
 				}
-				if err := g.store.AppendProjectAllowPrefix(test.AllowBetween, strategy); err != nil {
+				if err := g.store.AppendProjectAllowPrefix(links.argv(test.AllowBetween), strategy); err != nil {
 					t.Fatalf("adding the allow rule: %v", err)
 				}
 			}
@@ -512,8 +578,9 @@ func TestApprovalRound(t *testing.T) {
 
 			second, err := g.check(retryCall(call, first.Pending, test.Answers))
 			if test.WantErr != "" {
-				if err == nil || !strings.Contains(err.Error(), test.WantErr) {
-					t.Fatalf("retry error = %v, want it to contain %q", err, test.WantErr)
+				wantErr := links.text(test.WantErr)
+				if err == nil || !strings.Contains(err.Error(), wantErr) {
+					t.Fatalf("retry error = %v, want it to contain %q", err, wantErr)
 				}
 				if !strings.Contains(err.Error(), test.WantErrWarning) {
 					t.Errorf("retry error = %q, want it to carry the remember warning %q", err, test.WantErrWarning)
@@ -569,13 +636,13 @@ func TestApprovalRoundRememberedRuleGoesLive(t *testing.T) {
 	}
 
 	_, err = g.check(retryCall(call, first.Pending, mcpsdk.InputResponseMap{
-		"approval-1": accept(map[string]any{"remember": true, "rule": "[echo]"}),
+		"approval-1": accept(map[string]any{"remember": true, "rule": "[echo, hi]"}),
 	}))
 	if err != nil {
 		t.Fatalf("retry: %v", err)
 	}
 
-	again, err := g.check(testCall([]string{"echo", "again"}))
+	again, err := g.check(testCall(echoHi))
 	if err != nil {
 		t.Fatalf("second command: %v", err)
 	}
@@ -750,10 +817,89 @@ func TestApprovalRoundFormOrder(t *testing.T) {
 	}
 }
 
-func echoArgvs(n int) [][]string {
+// linkedPrograms stands in for several spellings of one program. A placeholder program such as
+// "echo@2" becomes a symlink named echo in its own directory, pointing at the real echo. Every
+// spelling has the same canonical path, so commands that differ only in how the program is spelled
+// pre-fill the same rule and share one form. Their resolved paths differ, so a rule can still name
+// one spelling.
+type linkedPrograms struct {
+	t     *testing.T
+	root  string
+	paths map[string]string
+}
+
+func newLinkedPrograms(t *testing.T) *linkedPrograms {
+	t.Helper()
+
+	return &linkedPrograms{t: t, root: t.TempDir(), paths: make(map[string]string)}
+}
+
+// program returns the path for a placeholder, or the name itself when it has no "@".
+func (l *linkedPrograms) program(name string) string {
+	l.t.Helper()
+
+	base, _, linked := strings.Cut(name, "@")
+	if !linked {
+		return name
+	}
+	if path, ok := l.paths[name]; ok {
+		return path
+	}
+
+	real, err := exec.LookPath(base)
+	if err != nil {
+		l.t.Fatalf("looking up %s: %v", base, err)
+	}
+
+	dir := filepath.Join(l.root, strings.ReplaceAll(name, "@", "-"))
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		l.t.Fatalf("creating %s: %v", dir, err)
+	}
+
+	path := filepath.Join(dir, base)
+	if err := os.Symlink(real, path); err != nil {
+		l.t.Fatalf("linking %s: %v", path, err)
+	}
+
+	l.paths[name] = path
+
+	return path
+}
+
+func (l *linkedPrograms) argv(argv []string) []string {
+	if len(argv) == 0 {
+		return argv
+	}
+
+	out := slices.Clone(argv)
+	out[0] = l.program(out[0])
+
+	return out
+}
+
+func (l *linkedPrograms) argvs(argvs [][]string) [][]string {
+	out := make([][]string, len(argvs))
+	for i, argv := range argvs {
+		out[i] = l.argv(argv)
+	}
+
+	return out
+}
+
+// text replaces each placeholder in expected output with the path it stands for.
+func (l *linkedPrograms) text(s string) string {
+	for name := range l.paths {
+		s = strings.ReplaceAll(s, name, l.paths[name])
+	}
+
+	return s
+}
+
+// linkedEchoes is n commands that print the same word through n spellings of echo.
+func linkedEchoes(n int) [][]string {
 	argvs := make([][]string, n)
 	for i := range argvs {
-		argvs[i] = []string{"echo", fmt.Sprintf("c%02d", i)}
+		argvs[i] = []string{fmt.Sprintf("echo@%d", i+1), "a"}
 	}
 
 	return argvs
@@ -789,29 +935,38 @@ type groupTest struct {
 
 var groupTests = []groupTest{
 	{
-		Name:      "five commands under one prefix split into forms of at most the limit",
-		Argvs:     echoArgvs(5),
-		WantForms: slices.Collect(slices.Chunk(argvLines(echoArgvs(5)), maxFormCommands)),
+		Name:      "five spellings of one command split into forms of at most the limit",
+		Argvs:     linkedEchoes(5),
+		WantForms: slices.Collect(slices.Chunk(argvLines(linkedEchoes(5)), maxFormCommands)),
 	},
 	{
-		Name:      "commands up to the limit under one prefix share one form",
-		Argvs:     echoArgvs(maxFormCommands),
-		WantForms: [][]string{argvLines(echoArgvs(maxFormCommands))},
+		Name:      "spellings up to the limit share one form",
+		Argvs:     linkedEchoes(maxFormCommands),
+		WantForms: [][]string{argvLines(linkedEchoes(maxFormCommands))},
 	},
 	{
-		Name:  "two prefixes give two forms in first-appearance order",
-		Argvs: [][]string{{"printf", "x"}, {"echo", "a"}, {"printf", "y"}, {"echo", "b"}},
+		Name:  "two commands give two forms in first-appearance order",
+		Argvs: [][]string{{"printf@1", "x"}, {"echo@1", "a"}, {"printf@2", "x"}, {"echo@2", "a"}},
 		WantForms: [][]string{
-			{"printf x", "printf y"},
-			{"echo a", "echo b"},
+			{"printf@1 x", "printf@2 x"},
+			{"echo@1 a", "echo@2 a"},
 		},
 	},
 	{
-		Name:  "one command more than the limit gives a full form and a form of one",
-		Argvs: echoArgvs(maxFormCommands + 1),
+		Name:  "one spelling more than the limit gives a full form and a form of one",
+		Argvs: linkedEchoes(maxFormCommands + 1),
 		WantForms: [][]string{
-			argvLines(echoArgvs(maxFormCommands)),
-			argvLines(echoArgvs(maxFormCommands + 1)[maxFormCommands:]),
+			argvLines(linkedEchoes(maxFormCommands)),
+			argvLines(linkedEchoes(maxFormCommands + 1)[maxFormCommands:]),
+		},
+	},
+	{
+		Name:  "commands with different arguments do not share a form",
+		Argvs: [][]string{{"echo", "a"}, {"echo", "b"}, {"echo", "c"}},
+		WantForms: [][]string{
+			{"echo a"},
+			{"echo b"},
+			{"echo c"},
 		},
 	},
 }
@@ -821,8 +976,9 @@ func TestApprovalRoundGroupsCommandsByRule(t *testing.T) {
 		t.Run(test.Name, func(t *testing.T) {
 			t.Setenv("TMPDIR", t.TempDir())
 
+			links := newLinkedPrograms(t)
 			g := newTestGate(t, "version: 1\n", false)
-			first, err := g.check(testCall(test.Argvs...))
+			first, err := g.check(testCall(links.argvs(test.Argvs)...))
 			if err != nil || first.Pending == nil {
 				t.Fatalf("first call = %+v, %v; want input requests", first, err)
 			}
@@ -843,8 +999,13 @@ func TestApprovalRoundGroupsCommandsByRule(t *testing.T) {
 					t.Fatalf("form %s is %T, want *ElicitParams", id, first.Pending.InputRequests[id])
 				}
 
-				if got := listedCommands(form.Message); !slices.Equal(got, test.WantForms[i]) {
-					t.Errorf("form %s lists %q, want %q", id, got, test.WantForms[i])
+				want := make([]string, len(test.WantForms[i]))
+				for j, line := range test.WantForms[i] {
+					want[j] = links.text(line)
+				}
+
+				if got := listedCommands(form.Message); !slices.Equal(got, want) {
+					t.Errorf("form %s lists %q, want %q", id, got, want)
 				}
 			}
 		})
@@ -857,7 +1018,8 @@ func TestApprovalRoundRememberOnChunksWritesOneRule(t *testing.T) {
 	root := t.TempDir()
 	g := newTestGateAt(t, root, "version: 1\n", false)
 
-	call := testCall(echoArgvs(maxFormCommands + 1)...)
+	links := newLinkedPrograms(t)
+	call := testCall(links.argvs(linkedEchoes(maxFormCommands + 1))...)
 	first, err := g.check(call)
 	if err != nil || first.Pending == nil {
 		t.Fatalf("first call = %+v, %v; want input requests", first, err)
@@ -866,14 +1028,14 @@ func TestApprovalRoundRememberOnChunksWritesOneRule(t *testing.T) {
 		t.Fatalf("forms = %d, want 2", got)
 	}
 
-	remembered := accept(map[string]any{"remember": true, "rule": "[echo]"})
+	remembered := accept(map[string]any{"remember": true, "rule": "[echo, a]"})
 	_, err = g.check(retryCall(call, first.Pending, mcpsdk.InputResponseMap{"approval-1": remembered, "approval-2": remembered}))
 	if err != nil {
 		t.Fatalf("retry: %v", err)
 	}
 
 	file, _ := readProjectIfPresent(root)
-	if got := strings.Count(file, "prefix: [echo]"); got != 1 {
+	if got := strings.Count(file, "exact: [echo, a]"); got != 1 {
 		t.Errorf("rule written %d times, want once:\n%s", got, file)
 	}
 }
@@ -882,7 +1044,8 @@ func TestApprovalRoundFormsRecordedPerCommand(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 
 	g := newTestGate(t, "version: 1\n", false)
-	call := testCall([]string{"echo", "a"}, []string{"printf", "x"}, []string{"echo", "b"})
+	links := newLinkedPrograms(t)
+	call := testCall(links.argvs([][]string{{"echo@1", "a"}, {"printf", "x"}, {"echo@2", "a"}})...)
 	first, err := g.check(call)
 	if err != nil || first.Pending == nil {
 		t.Fatalf("first call = %+v, %v; want input requests", first, err)

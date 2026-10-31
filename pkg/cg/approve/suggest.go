@@ -6,15 +6,15 @@ import (
 
 // Suggestion is the allow rule an approval prompt pre-fills for a command.
 //
-// A command whose program heads a wrapper rule gets an exact rule over its whole argv.
-// Editing an exact rule narrows it. Deleting tokens from a prefix rule would widen it into
-// the over-broad rule the wrapper rule exists to avoid.
+// Every command gets its whole argv, with the path the rule pins as the first token. The kind of
+// the rule that gets saved is not part of the suggestion. It follows from the edit, which
+// CheckEdit judges. A command whose program heads a wrapper rule also carries a note, because a
+// rule for it must stay exact.
 type Suggestion struct {
-	Kind   RuleKind
 	Tokens []string
 
-	// HeadsWrapper reports that the command's program heads a wrapper rule, which is why the
-	// suggestion is exact.
+	// HeadsWrapper reports that the command's program heads a wrapper rule, so a rule for it
+	// must stay exact.
 	HeadsWrapper bool
 
 	// NearMiss is the wrapper rule that matched the command but did not peel, because the
@@ -22,15 +22,15 @@ type Suggestion struct {
 	NearMiss *Rule
 }
 
-// Suggest derives the rule pre-filled into the prompt for argv, resolved as res. A program
-// that heads a wrapper rule gets an exact rule whose first token is the path the rule pins.
-// Any other command gets SuggestPrefix.
+// Suggest derives the rule pre-filled into the prompt for argv, resolved as res. The rule is
+// the whole argv. Its first token is the path the rule pins, or argv[0] as written
+// when resolution found none.
 //
 // "Heads a wrapper rule" reads the first token the way matching does: a bare token compares
 // with the invoked basename, and a path token compares with the canonical or resolved path.
 func (rs *Ruleset) Suggest(argv []string, res *model.Resolution) Suggestion {
 	if len(argv) == 0 {
-		return Suggestion{Kind: KindPrefix}
+		return Suggestion{}
 	}
 
 	execPath := res.RulePath()
@@ -56,10 +56,6 @@ func (rs *Ruleset) Suggest(argv []string, res *model.Resolution) Suggestion {
 		}
 	}
 
-	if !heads {
-		return Suggestion{Kind: KindPrefix, Tokens: SuggestPrefix(argv, execPath)}
-	}
-
 	head := execPath
 	if head == "" {
 		head = argv[0]
@@ -67,7 +63,7 @@ func (rs *Ruleset) Suggest(argv []string, res *model.Resolution) Suggestion {
 
 	tokens := append([]string{head}, argv[1:]...)
 
-	return Suggestion{Kind: KindExact, Tokens: tokens, HeadsWrapper: true, NearMiss: near}
+	return Suggestion{Tokens: tokens, HeadsWrapper: heads, NearMiss: near}
 }
 
 // headMatches reports whether a wrapper rule's first token names the program in the forms.

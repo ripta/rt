@@ -3,6 +3,7 @@ package mcp
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -46,6 +47,17 @@ const (
 // commands take the rest, with no blank lines. A call with several approval forms leads the header
 // with its position, so every form stands alone. A lone form carries none.
 func approvalMessage(argvs [][]string, cwd string, pos, total int) string {
+	return buildApprovalMessage(argvs, cwd, pos, total, "")
+}
+
+// askAgainMessage is approvalMessage for a form the second round asks again. The position stays the
+// one the form had in the first round, so the user can tell which form this is. The suffix says
+// the command is not what changed.
+func askAgainMessage(argvs [][]string, cwd string, pos, total int) string {
+	return buildApprovalMessage(argvs, cwd, pos, total, " The remembered rule needs another look.")
+}
+
+func buildApprovalMessage(argvs [][]string, cwd string, pos, total int, suffix string) string {
 	if cwd == "" {
 		cwd = "(server cwd)"
 	}
@@ -62,6 +74,7 @@ func approvalMessage(argvs [][]string, cwd string, pos, total int) string {
 	} else {
 		fmt.Fprintf(&b, "Allow %s in %s?", what, cwd)
 	}
+	b.WriteString(suffix)
 
 	for _, argv := range argvs {
 		fmt.Fprintf(&b, "\n%s", visibleArgs(argv))
@@ -140,53 +153,101 @@ func ansiCQuote(s string) string {
 	return b.String()
 }
 
-// approvalSchema builds the elicitation form: an editable rule field pre-filled
-// with the suggested rule as a YAML flow sequence, followed by a remember
-// checkbox. path is the project rules file the remembered rule is saved to.
+// formSpec is what an approval form shows for one rule field.
 //
-// The field's title names the rule kind. The message has room for the command and nothing
-// else, because the client shows only its first visibleMessageLines lines. So what the rule
-// means goes in the field's description: that it covers an inner command, that it is exact
-// because the program heads a wrapper rule, and which wrapper rule nearly matched.
+// Suggestion is the original pre-fill. Prefill replaces it as the field's default when it is set,
+// which a second round does with the edit that failed. ExtraArgs is the allow-extra-arguments
+// box's default. Note leads the field's description, and carries why a second round was asked or
+// why the pre-fill cannot be remembered as it stands.
+type formSpec struct {
+	Suggestion approve.Suggestion
+	Prefill    []string
+	ExtraArgs  bool
+	Inner      bool
+	Note       string
+	Path       string
+}
+
+// approvalSchema builds the elicitation form: an editable rule field pre-filled
+// with the suggested rule as a YAML flow sequence, an allow-extra-arguments box, and a remember
+// checkbox. spec.Path is the project rules file the remembered rule is saved to.
+//
+// The field's title names no rule kind, because the kind follows from the edit. The message has
+// room for the command and nothing else, because the client shows only its first
+// visibleMessageLines lines. So what the rule means goes in the field's description: how the edit
+// decides the kind, that it covers an inner command, that it is exact because the program heads a
+// wrapper rule, and which wrapper rule nearly matched.
+//
+// A program that heads a wrapper rule gets no box, since its remembered rule is always exact.
 //
 // The form is a typed *jsonschema.Schema rather than a property map so
 // PropertyOrder controls the field order on the wire: a property map marshals
 // its keys alphabetically, which would float "remember" above "rule". The client
 // renders fields in wire order, so listing rule first keeps the command the
 // prompt is about at the top, above the remember toggle.
-func approvalSchema(suggestion approve.Suggestion, inner bool, path string) *jsonschema.Schema {
-	ruleDefault, _ := json.Marshal(renderFlowSeq(suggestion.Tokens))
-	return &jsonschema.Schema{
+func approvalSchema(spec formSpec) *jsonschema.Schema {
+	prefill := spec.Prefill
+	if prefill == nil {
+		prefill = spec.Suggestion.Tokens
+	}
+
+	ruleDefault, _ := json.Marshal(renderFlowSeq(prefill))
+	schema := &jsonschema.Schema{
 		Type: "object",
 		Properties: map[string]*jsonschema.Schema{
 			"rule": {
 				Type:        "string",
-				Title:       fmt.Sprintf("Allow rule (%s)", suggestion.Kind),
-				Description: ruleDescription(suggestion, inner),
+				Title:       "Allow rule",
+				Description: ruleDescription(spec),
 				Default:     ruleDefault,
 			},
 			"remember": {
 				Type:        "boolean",
 				Title:       "Remember this rule",
-				Description: fmt.Sprintf("save an allow rule to %s so it is not asked again", path),
+				Description: fmt.Sprintf("save an allow rule to %s so it is not asked again", spec.Path),
 				Default:     json.RawMessage("false"),
 			},
 		},
 		PropertyOrder: []string{"rule", "remember"},
 	}
+
+	if spec.Suggestion.HeadsWrapper {
+		return schema
+	}
+
+	schema.Properties[extraArgsField] = &jsonschema.Schema{
+		Type:        "boolean",
+		Title:       "Allow extra arguments",
+		Description: "Allow extra arguments after the unchanged command. A trimmed rule always allows them.",
+		Default:     json.RawMessage(strconv.FormatBool(spec.ExtraArgs)),
+	}
+	schema.PropertyOrder = []string{"rule", extraArgsField, "remember"}
+
+	return schema
 }
+
+// extraArgsField is the name of the allow-extra-arguments box.
+const extraArgsField = "allow_extra_args"
 
 // ruleDescription explains the rule field. The notes come first, because they say what the
 // pre-filled rule is for, and the editing hint closes the text.
-func ruleDescription(suggestion approve.Suggestion, inner bool) string {
+func ruleDescription(spec formSpec) string {
 	var b strings.Builder
 
-	if inner {
+	if spec.Note != "" {
+		b.WriteString(spec.Note)
+		b.WriteString(" ")
+	}
+
+	if spec.Inner {
 		b.WriteString("The rule covers the inner command after the wrapper. ")
 	}
 
+	suggestion := spec.Suggestion
 	if suggestion.HeadsWrapper {
-		b.WriteString("This program heads a wrapper rule, so the rule is exact and allows only this whole command. ")
+		b.WriteString("This program heads a wrapper rule, so a remembered rule is always exact and allows only this whole command. Only the first token may change. ")
+	} else {
+		b.WriteString("An exact rule fixes every argument, and its first token decides which programs it covers. Leave the rule as it is for an exact rule, tick the box for a prefix rule of the whole command, or trim it to a leading part for a prefix rule that allows any command starting with those tokens. ")
 	}
 
 	if suggestion.NearMiss != nil {
@@ -315,7 +376,7 @@ func choice(content map[string]any, key string) string {
 // parseRuleField reads the edited rule field as a YAML sequence of argv tokens,
 // falling back to the suggestion when the field is absent or blank. The flow- or
 // block-sequence YAML keeps tokens with spaces expressible via quoting without a
-// bespoke parser.
+// bespoke parser. An empty token after the first is valid, since a command can carry one.
 func parseRuleField(content map[string]any, suggestion []string) ([]string, error) {
 	raw, ok := content["rule"].(string)
 	if !ok || strings.TrimSpace(raw) == "" {
@@ -332,26 +393,76 @@ func parseRuleField(content map[string]any, suggestion []string) ([]string, erro
 	if len(tokens) == 0 {
 		return nil, fmt.Errorf("rule must have at least one token")
 	}
-	for _, t := range tokens {
-		if t == "" {
-			return nil, fmt.Errorf("rule tokens must be non-empty")
-		}
+	if tokens[0] == "" {
+		return nil, fmt.Errorf("the rule's first token must name a program")
 	}
 
 	return tokens, nil
 }
 
-// renderFlowSeq renders tokens as a YAML flow sequence ([a, b]) for the prompt's
-// pre-filled rule field, quoting tokens when needed.
+// renderFlowSeq renders tokens as a YAML flow sequence ([a, b]) for the prompt's pre-filled rule
+// field, quoting tokens when needed. An empty token renders as "" and survives parseRuleField.
 func renderFlowSeq(tokens []string) string {
-	seq := &yaml.Node{Kind: yaml.SequenceNode, Style: yaml.FlowStyle}
-	for _, t := range tokens {
-		seq.Content = append(seq.Content, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: t})
-	}
-	out, err := yaml.Marshal(seq)
-	if err != nil {
-		return strings.Join(tokens, " ")
+	parts := make([]string, len(tokens))
+	for i, t := range tokens {
+		parts[i] = renderFlowToken(t)
 	}
 
-	return strings.TrimRight(string(out), "\n")
+	return "[" + strings.Join(parts, ", ") + "]"
+}
+
+// renderFlowToken renders one token as a flow-sequence element. A token with a character that
+// needsEscape is written as a YAML double-quoted scalar with escapes, because the YAML emitter
+// passes bidi and other format characters through raw. Any other token goes through the emitter
+// inside a one-element flow sequence, so it is quoted for flow context.
+func renderFlowToken(t string) string {
+	if hasControl(t) {
+		return yamlDoubleQuote(t)
+	}
+
+	seq := &yaml.Node{Kind: yaml.SequenceNode, Style: yaml.FlowStyle}
+	seq.Content = append(seq.Content, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: t})
+
+	out, err := yaml.Marshal(seq)
+	if err != nil {
+		return yamlDoubleQuote(t)
+	}
+
+	one := strings.TrimRight(string(out), "\n")
+
+	return strings.TrimSuffix(strings.TrimPrefix(one, "["), "]")
+}
+
+// yamlDoubleQuote writes s as a YAML double-quoted scalar. Characters that needsEscape use the
+// \xXX, \uXXXX, and \UXXXXXXXX forms, so the text shows what the argument holds.
+func yamlDoubleQuote(s string) string {
+	var b strings.Builder
+	b.WriteByte('"')
+
+	for _, r := range s {
+		switch {
+		case r == '"':
+			b.WriteString(`\"`)
+		case r == '\\':
+			b.WriteString(`\\`)
+		case r == '\n':
+			b.WriteString(`\n`)
+		case r == '\r':
+			b.WriteString(`\r`)
+		case r == '\t':
+			b.WriteString(`\t`)
+		case r < 0x20:
+			fmt.Fprintf(&b, `\x%02x`, r)
+		case needsEscape(r) && r > 0xffff:
+			fmt.Fprintf(&b, `\U%08x`, r)
+		case needsEscape(r):
+			fmt.Fprintf(&b, `\u%04x`, r)
+		default:
+			b.WriteRune(r)
+		}
+	}
+
+	b.WriteByte('"')
+
+	return b.String()
 }

@@ -3,6 +3,7 @@ package mcp
 import (
 	"encoding/json"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -18,7 +19,7 @@ import (
 func TestApprovalSchemaFieldOrder(t *testing.T) {
 	t.Parallel()
 
-	raw, err := json.Marshal(approvalSchema(approve.Suggestion{Kind: approve.KindPrefix, Tokens: []string{"go", "test"}}, false, "/tmp/.cg.yaml"))
+	raw, err := json.Marshal(approvalSchema(formSpec{Suggestion: approve.Suggestion{Tokens: []string{"go", "test"}}, Path: "/tmp/.cg.yaml"}))
 	if err != nil {
 		t.Fatalf("marshalling schema: %v", err)
 	}
@@ -189,7 +190,7 @@ func TestApprovalMessage(t *testing.T) {
 func TestApprovalSchemaRememberTitle(t *testing.T) {
 	t.Parallel()
 
-	schema := approvalSchema(approve.Suggestion{Kind: approve.KindPrefix, Tokens: []string{"go", "test"}}, false, "/tmp/.cg.yaml")
+	schema := approvalSchema(formSpec{Suggestion: approve.Suggestion{Tokens: []string{"go", "test"}}, Path: "/tmp/.cg.yaml"})
 	if got := schema.Properties["remember"].Title; got != "Remember this rule" {
 		t.Errorf("remember title = %q, want %q", got, "Remember this rule")
 	}
@@ -264,4 +265,145 @@ func accept(content map[string]any) *mcpsdk.ElicitResult {
 
 func projectFile(root string) string {
 	return filepath.Join(root, ".cg.yaml")
+}
+
+type flowSeqTest struct {
+	Name   string
+	Tokens []string
+}
+
+var flowSeqTests = []flowSeqTest{
+	{Name: "plain words", Tokens: []string{"go", "test", "./..."}},
+	{Name: "a trailing empty token", Tokens: []string{"echo", ""}},
+	{Name: "an empty token inside a list", Tokens: []string{"git", "commit", "-m", ""}},
+	{Name: "a sed expression", Tokens: []string{"sed", "-E", "s/a/b/", "f.txt"}},
+	{Name: "a json object", Tokens: []string{"curl", "-d", `{"a":1}`}},
+	{Name: "a glob star", Tokens: []string{"ls", "*"}},
+	{Name: "words yaml reads as other types", Tokens: []string{"yes", "no", "null", "true", "~", "1e3", "0o17", "0x1f", "12", "1.5", ".inf"}},
+	{Name: "a comment lookalike", Tokens: []string{"echo", "#x", "a #b"}},
+	{Name: "yaml indicators", Tokens: []string{"- a", "? b", "[c]", "{d}", "e, f", "g: h", "&i", "*j", "!k", "|l", ">m", "%n", "@o", "`p"}},
+	{Name: "quotes and backslashes", Tokens: []string{`a"b`, `c'd`, `e\f`, `\`, `"`, `'`}},
+	{Name: "spaces at the edges", Tokens: []string{" a", "b ", " ", "c  d"}},
+	{Name: "newline and tab", Tokens: []string{"a\nb", "c\td", "\n", "e\r\nf"}},
+	{Name: "control characters", Tokens: []string{"\x00", "\x01a", "\x1b[31m", "\x7f", "\u0085"}},
+	{Name: "bidi override", Tokens: []string{"echo", "a\u202eb", "\u2066x\u2069"}},
+	{Name: "format characters", Tokens: []string{"a\u200bb", "\u200d", "\ufeffx", "\u00adx"}},
+	{Name: "line and paragraph separators", Tokens: []string{"a\u2028b", "c\u2029d"}},
+	{Name: "characters beyond the basic plane", Tokens: []string{"\U000e0041", "\U0001f600", "\U0001d173"}},
+	{Name: "non-ascii text", Tokens: []string{"héllo", "日本語", "👍"}},
+	{Name: "a long token", Tokens: []string{"echo", strings.Repeat("word ", 60), strings.Repeat("x", 300)}},
+}
+
+func TestRenderFlowSeqRoundTrips(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range flowSeqTests {
+		t.Run(tt.Name, func(t *testing.T) {
+			t.Parallel()
+
+			rendered := renderFlowSeq(tt.Tokens)
+
+			got, err := parseRuleField(map[string]any{"rule": rendered}, nil)
+			if err != nil {
+				t.Fatalf("parseRuleField(%q): %v", rendered, err)
+			}
+			if !slices.Equal(got, tt.Tokens) {
+				t.Errorf("round trip of %q = %q, want %q", rendered, got, tt.Tokens)
+			}
+		})
+	}
+}
+
+type flowSeqEscapeTest struct {
+	Name   string
+	Tokens []string
+	Want   string
+}
+
+var flowSeqEscapeTests = []flowSeqEscapeTest{
+	{Name: "bidi override", Tokens: []string{"a\u202eb"}, Want: `["a\u202eb"]`},
+	{Name: "zero-width space", Tokens: []string{"a\u200bb"}, Want: `["a\u200bb"]`},
+	{Name: "line separator", Tokens: []string{"a\u2028b"}, Want: `["a\u2028b"]`},
+	{Name: "newline", Tokens: []string{"a\nb"}, Want: `["a\nb"]`},
+	{Name: "escape character", Tokens: []string{"\x1b[0m"}, Want: `["\x1b[0m"]`},
+	{Name: "format character beyond the basic plane", Tokens: []string{"\U000e0041"}, Want: `["\U000e0041"]`},
+	{Name: "only the offending token is escaped", Tokens: []string{"echo", "a\u202eb"}, Want: `[echo, "a\u202eb"]`},
+	{Name: "an empty token", Tokens: []string{"git", ""}, Want: `[git, ""]`},
+}
+
+func TestRuleDefaultShowsControlCharactersEscaped(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range flowSeqEscapeTests {
+		t.Run(tt.Name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := renderFlowSeq(tt.Tokens); got != tt.Want {
+				t.Errorf("renderFlowSeq(%q) = %s, want %s", tt.Tokens, got, tt.Want)
+			}
+
+			raw, err := json.Marshal(approvalSchema(formSpec{Suggestion: approve.Suggestion{Tokens: tt.Tokens}, Path: "/tmp/.cg.yaml"}))
+			if err != nil {
+				t.Fatalf("marshalling schema: %v", err)
+			}
+
+			var schema struct {
+				Properties struct {
+					Rule struct {
+						Default string `json:"default"`
+					} `json:"rule"`
+				} `json:"properties"`
+			}
+			if err := json.Unmarshal(raw, &schema); err != nil {
+				t.Fatalf("decoding schema: %v", err)
+			}
+
+			def := schema.Properties.Rule.Default
+			if def != tt.Want {
+				t.Errorf("rule default = %s, want %s", def, tt.Want)
+			}
+			if strings.ContainsFunc(def, needsEscape) {
+				t.Errorf("rule default %q holds a raw control or format character", def)
+			}
+		})
+	}
+}
+
+func TestParseRuleFieldKeepsEmptyTokens(t *testing.T) {
+	t.Parallel()
+
+	got, err := parseRuleField(map[string]any{"rule": `[git, commit, -m, ""]`}, nil)
+	if err != nil {
+		t.Fatalf("parseRuleField: %v", err)
+	}
+	if want := []string{"git", "commit", "-m", ""}; !slices.Equal(got, want) {
+		t.Errorf("tokens = %q, want %q", got, want)
+	}
+
+	if _, err := parseRuleField(map[string]any{"rule": "[]"}, nil); err == nil {
+		t.Errorf("an empty list should fail")
+	}
+}
+
+func TestParseRuleFieldRejectsAnEmptyProgram(t *testing.T) {
+	t.Parallel()
+
+	for _, rule := range []string{`[""]`, `["", a]`} {
+		if got, err := parseRuleField(map[string]any{"rule": rule}, nil); err == nil {
+			t.Errorf("parseRuleField(%s) = %q, want an error since no program is named", rule, got)
+		}
+	}
+}
+
+func TestRuleDescriptionShowsWrapperAndNearMissNotes(t *testing.T) {
+	t.Parallel()
+
+	suggestion := approve.Suggestion{Tokens: []string{"/usr/bin/nice", "-n", "19", "--", "make"}, HeadsWrapper: true, NearMiss: &approve.Rule{}}
+
+	got := ruleDescription(formSpec{Suggestion: suggestion, Inner: true})
+	for _, want := range []string{"inner command", "heads a wrapper rule", "The wrapper rule", "stopped at the inner command's leading"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("description lacks %q:\n%s", want, got)
+		}
+	}
 }

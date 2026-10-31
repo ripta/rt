@@ -208,7 +208,7 @@ func TestElicitProbeApprovalForm(t *testing.T) {
 		t.Errorf("leads = %q, want %q", leads, want)
 	}
 
-	for _, wire := range []string{`[/usr/local/go/bin/go, test]`, `Remember this rule`, `.cg.yaml`} {
+	for _, wire := range []string{`[/usr/local/go/bin/go, test, -count=1, -run, TestCase01, ./internal/service/component01/...]`, `Remember this rule`, `.cg.yaml`} {
 		if !strings.Contains(schemas[0], wire) {
 			t.Errorf("schema lacks %q:\n%s", wire, schemas[0])
 		}
