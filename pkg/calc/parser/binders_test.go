@@ -5,9 +5,9 @@ import (
 	"testing"
 )
 
-// binderCatalog returns the shipping catalog plus test-only binders. No real
-// binder exists yet, and each parser carries its own catalog, so parallel tests
-// share nothing.
+// binderCatalog returns the shipping catalog plus test-only binders. They cover
+// the point form and infinite bounds, which the shipped binders reject.
+// Each parser carries its own catalog, so parallel tests share nothing.
 func binderCatalog() map[string]function {
 	m := make(map[string]function, len(functions)+4)
 	for k, v := range functions {

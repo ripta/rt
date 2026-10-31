@@ -117,11 +117,8 @@ func evalBody(ctx context.Context, env *Env, body Node, name string, val *unifie
 	return body.Eval(ctx, env.child(name, val))
 }
 
-func evalBound(ctx context.Context, env *Env, n Node, infinite bool) (Bound, error) {
-	if inf := infBound(n); inf != nil {
-		if !infinite {
-			return Bound{}, fmt.Errorf("%s: infinite bounds are not allowed here", inf.Tok.Pos)
-		}
+func evalBound(ctx context.Context, env *Env, n Node) (Bound, error) {
+	if infBound(n) != nil {
 		if u, ok := n.(*UnaryNode); ok && u.Op.Type == tokens.OP_MINUS {
 			return Bound{Inf: -1}, nil
 		}
@@ -135,15 +132,15 @@ func evalBound(ctx context.Context, env *Env, n Node, infinite bool) (Bound, err
 	return Bound{Value: v}, nil
 }
 
-func evalBinding(ctx context.Context, env *Env, b *BindingNode, spec *binderSpec) (Binding, error) {
+func evalBinding(ctx context.Context, env *Env, b *BindingNode) (Binding, error) {
 	out := Binding{Name: b.Name.Value, Range: b.Hi != nil}
 
 	var err error
-	if out.Lo, err = evalBound(ctx, env, b.Lo, spec.infinite && out.Range); err != nil {
+	if out.Lo, err = evalBound(ctx, env, b.Lo); err != nil {
 		return Binding{}, err
 	}
 	if out.Range {
-		if out.Hi, err = evalBound(ctx, env, b.Hi, spec.infinite); err != nil {
+		if out.Hi, err = evalBound(ctx, env, b.Hi); err != nil {
 			return Binding{}, err
 		}
 	}
