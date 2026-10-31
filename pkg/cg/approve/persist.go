@@ -67,10 +67,15 @@ func (s *Store) AppendProjectAllowExact(tokens []string, strategy WriteStrategy)
 
 // appendProjectAllow writes a remembered exact or prefix rule. It refuses a rule
 // the loader would reject, so remember never writes a file that stops loading.
+// It also refuses a rule that holds a credential-shaped token. Only the rule being
+// appended is checked. Rules already in the file are the user's and are left as they are.
 func (s *Store) appendProjectAllow(rule Rule, strategy WriteStrategy) error {
 	tokens := tokensOf(&rule)
 	if len(tokens) == 0 {
 		return fmt.Errorf("%s rule must have at least one token", rule.kind)
+	}
+	if positions := CredentialPositions(tokens); len(positions) > 0 {
+		return fmt.Errorf("refusing to remember %s: %s looks like a credential: %w", rule.kind, DescribePositions(positions), ErrCredentialToken)
 	}
 	if dashFirstToken(&rule) {
 		return fmt.Errorf("refusing to remember %s: %w", describeRule(&rule), ErrDashFirstToken)

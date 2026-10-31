@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 
@@ -17,6 +18,7 @@ const (
 	editMismatch
 	editWrapperTrim
 	editWrapperBox
+	editCredential
 )
 
 // editFailure is a remember edit the gate refused to save.
@@ -34,6 +36,10 @@ type editFailure struct {
 
 	// Missed is the command the rule does not match, set for editMismatch.
 	Missed approve.EditTarget
+
+	// Credentials are the zero-based positions of the credential-shaped tokens, set for
+	// editCredential.
+	Credentials []int
 }
 
 // editConstraints is the set of refusals a form is under, which decides the edits its note offers.
@@ -42,6 +48,11 @@ type editConstraints struct {
 	// ExactOnly means a program in the form re-executes its arguments, so only an exact,
 	// full-length rule is safe.
 	ExactOnly bool
+
+	// Credentials are the positions of the credential-shaped tokens in the submitted rule. When
+	// there are any, only unchecking remember, a hand-written rule, or a trim that drops them is
+	// accepted. A box ticked on an unchanged field and a respelled first token do not help.
+	Credentials []int
 }
 
 // extraArgs reports whether the allow-extra-arguments box was ticked. An absent field is unticked.
@@ -61,7 +72,11 @@ func (g *gate) readRemember(content map[string]any, suggestion []string, targets
 
 	tokens, err := parseRuleField(content, suggestion)
 	if err != nil {
-		return 0, nil, &editFailure{Reason: editUnparseable, Parse: err, ExtraArgs: extra}
+		return 0, nil, &editFailure{Reason: editUnparseable, Parse: scrubParse(content, err), ExtraArgs: extra}
+	}
+
+	if positions := approve.CredentialPositions(tokens); len(positions) > 0 {
+		return 0, nil, &editFailure{Reason: editCredential, Tokens: tokens, ExtraArgs: extra, Credentials: positions}
 	}
 
 	kind, rejection := g.store.CheckEdit(tokens, extra, targets)
@@ -83,12 +98,25 @@ func (g *gate) readRemember(content map[string]any, suggestion []string, targets
 	return 0, nil, failure
 }
 
+// scrubParse drops the parser's detail when the field holds a credential-shaped piece. The YAML
+// errors quote the offending text, and the note must not echo a credential.
+func scrubParse(content map[string]any, err error) error {
+	raw, _ := content["rule"].(string)
+	if !approve.CredentialText(raw) {
+		return err
+	}
+
+	return errors.New("rule must be a YAML list of tokens like [go, test]")
+}
+
 // constraintsOf works out the refusals a form is under. A rejection for a wrapper reason proves
 // the form is exact-only even when the edit changed the first token to a wrapper head.
 func (g *gate) constraintsOf(failure *editFailure, targets []approve.EditTarget) editConstraints {
 	wrapper := failure.Reason == editWrapperTrim || failure.Reason == editWrapperBox
 
-	return editConstraints{ExactOnly: wrapper || g.store.FormHeadsWrapper(targets)}
+	exact := wrapper || g.store.FormHeadsWrapper(targets) || (len(failure.Tokens) > 0 && g.store.CollidesWithWrapper(failure.Tokens[0]))
+
+	return editConstraints{ExactOnly: exact, Credentials: failure.Credentials}
 }
 
 // editNote says why an edit was not saved and which edits would be. The sentences are the same in
@@ -96,22 +124,45 @@ func (g *gate) constraintsOf(failure *editFailure, targets []approve.EditTarget)
 func (g *gate) editNote(failure *editFailure, targets []approve.EditTarget) string {
 	var why string
 
+	// readRemember reports editCredential before any other reason, so the rule tokens below hold
+	// no credential today. They are redacted anyway, so a reorder cannot make a note echo one.
 	switch failure.Reason {
 	case editUnparseable:
 		why = fmt.Sprintf("The rule field was not read: %v.", failure.Parse)
 	case editMismatch:
-		why = fmt.Sprintf("The rule %s does not match the command %s.", renderFlowSeq(failure.Tokens), describeCommand(failure.Missed.Argv))
+		why = fmt.Sprintf("The rule %s does not match the command %s.", renderFlowSeq(approve.RedactCredentials(failure.Tokens)), describeCommand(failure.Missed.Argv))
 	case editWrapperTrim:
-		why = fmt.Sprintf("The rule %s is shorter than the command. This program re-executes its arguments, so a shorter rule would allow any inner command.", renderFlowSeq(failure.Tokens))
+		why = fmt.Sprintf("The rule %s is shorter than the command. This program re-executes its arguments, so a shorter rule would allow any inner command.", renderFlowSeq(approve.RedactCredentials(failure.Tokens)))
 	case editWrapperBox:
 		why = "Allow extra arguments would save a prefix rule. This program re-executes its arguments, so a prefix rule would allow any inner command. Untick the box."
+	case editCredential:
+		why = fmt.Sprintf("The rule holds what looks like a credential at %s, so nothing was saved. The project file may be committed, and a pushed secret cannot be recalled.", approve.DescribePositions(failure.Credentials))
 	}
 
 	return why + " " + g.acceptedEdits(g.constraintsOf(failure, targets))
 }
 
-// acceptedEdits lists the edits that pass every constraint.
+// acceptedEdits lists the edits that pass every constraint. It names the credential's position and
+// never the token.
+//
+// With a credential, the list runs from the safest way out to the one that widens the rule. A
+// respelled first token and the box cannot clear a credential, so they are not offered. A form that
+// is exact-only refuses a trim as well, which leaves unchecking remember and a hand-written rule.
 func (g *gate) acceptedEdits(c editConstraints) string {
+	path := g.store.Project.Path
+
+	if len(c.Credentials) > 0 {
+		if c.ExactOnly {
+			return fmt.Sprintf("Uncheck remember, or write the rule by hand in %s. This program re-executes its arguments, so a trimmed rule is refused too. To allow the whole family of inner commands, write a wrapper rule by hand.", path)
+		}
+
+		if c.Credentials[0] == 0 {
+			return fmt.Sprintf("Uncheck remember, or write the rule by hand in %s. The first token is the credential, so no trim removes it.", path)
+		}
+
+		return fmt.Sprintf("Uncheck remember, or write the rule by hand in %s. Or trim the rule to the tokens before %s. A trim allows any command that starts with those tokens, so it widens the rule.", path, approve.DescribePositions(c.Credentials[:1]))
+	}
+
 	if c.ExactOnly {
 		return fmt.Sprintf("The accepted edits are respelling the first token and unchecking remember. To allow the whole family of inner commands, write a wrapper rule in %s by hand.", g.store.Project.Path)
 	}
@@ -119,9 +170,10 @@ func (g *gate) acceptedEdits(c editConstraints) string {
 	return "The accepted edits are leaving the rule unchanged, ticking allow extra arguments, trimming it to a leading part, respelling the first token as a bare name or a path to the same program, and unchecking remember."
 }
 
-// describeCommand renders a command for a note. It is the one place a note prints a command.
+// describeCommand renders a command for a note. It is the one place a note prints a command. A
+// credential-shaped argument is replaced, since the note reaches the agent and the tool result.
 func describeCommand(argv []string) string {
-	return "`" + visibleArgs(argv) + "`"
+	return "`" + visibleArgs(approve.RedactCredentials(argv)) + "`"
 }
 
 // prefillNote says so when the pre-filled rule cannot pass the check as it stands. That happens

@@ -166,6 +166,10 @@ type formSpec struct {
 	Inner      bool
 	Note       string
 	Path       string
+
+	// NoteNamesCredential is set when Note already says where the credential is, so the
+	// description does not repeat it.
+	NoteNamesCredential bool
 }
 
 // approvalSchema builds the elicitation form: an editable rule field pre-filled
@@ -241,6 +245,14 @@ func ruleDescription(spec formSpec) string {
 
 	if spec.Inner {
 		b.WriteString("The rule covers the inner command after the wrapper. ")
+	}
+
+	shown := spec.Prefill
+	if shown == nil {
+		shown = spec.Suggestion.Tokens
+	}
+	if positions := approve.CredentialPositions(shown); len(positions) > 0 && !spec.NoteNamesCredential {
+		fmt.Fprintf(&b, "The rule holds what looks like a credential at %s, and remember will not save it. ", approve.DescribePositions(positions))
 	}
 
 	suggestion := spec.Suggestion

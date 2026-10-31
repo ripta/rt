@@ -779,6 +779,23 @@ and the tool result warns with the same note. A rejected edit beside a declined
 form, or one that would be skipped anyway, also runs or refuses without a second
 round.
 
+Remember refuses a rule that holds a credential-shaped token. The project file
+may be committed, and a secret that is pushed cannot be recalled. The check
+reads shapes: the value of an `Authorization`, `Proxy-Authorization`, or
+`Cookie` header, a `Bearer` value, URL userinfo such as `user:password@`, and
+known token prefixes such as `ghp_`, `github_pat_`, `sk-`, `AKIA`, and `xox`.
+When the pre-filled rule has such a token, the field's description names its
+position. When a remembered rule has one, nothing is saved. The edit goes
+through the second round, or the legacy warning, with a note that names the
+position and never the token. The note lists unchecking remember, then writing
+the rule by hand, then trimming the rule to the tokens before the credential. A
+trim widens the rule. The project-file writer refuses the same tokens.
+
+The check misses what it has no shape for, such as `mysql -phunter2`,
+`--password hunter2`, `curl -u user:pass`, a token in a query parameter, a
+`Bearer` value with no digit, and an opaque value. No warning does not mean a
+rule is free of secrets. Read the rule before remembering it.
+
 
 `enc`
 ----
