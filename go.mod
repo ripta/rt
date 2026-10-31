@@ -17,7 +17,7 @@ require (
 	github.com/pmezard/go-difflib v1.0.0
 	github.com/r3labs/diff/v3 v3.0.2
 	github.com/ripta/hypercmd v0.8.0
-	github.com/ripta/reals v0.0.0-20261014080722-f0d63a14dcbb
+	github.com/ripta/reals v0.0.0-20261017073537-75a8bc8755d4
 	github.com/ripta/unihan v0.2.0
 	github.com/rogpeppe/go-internal v1.16.0
 	github.com/spf13/cobra v1.10.2

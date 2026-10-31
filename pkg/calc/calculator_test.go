@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"math/big"
 	"os"
 	"path/filepath"
 	"strings"
@@ -892,6 +893,41 @@ func TestDisplayResultRenderFailure(t *testing.T) {
 	}
 	if out != "" {
 		t.Fatalf("stdout = %q, want nothing printed", out)
+	}
+}
+
+func TestDisplayResultApproximationCallback(t *testing.T) {
+	c := &Calculator{DecimalPlaces: 30}
+
+	want, err := c.Evaluate("√2")
+	if err != nil {
+		t.Fatalf("Evaluate: %v", err)
+	}
+
+	inner := want.Constructive()
+	calls := 0
+	cb := constructive.FromApproximation("callback-sqrt2", func(ctx context.Context, p int) (*big.Int, error) {
+		calls++
+		return constructive.Approximate(ctx, inner, p)
+	})
+	got := unified.New(cb, nil)
+
+	wantOut := captureStdout(t, func() {
+		if err := c.DisplayResult(context.Background(), want); err != nil {
+			t.Fatalf("DisplayResult(sqrt): %v", err)
+		}
+	})
+	gotOut := captureStdout(t, func() {
+		if err := c.DisplayResult(context.Background(), got); err != nil {
+			t.Fatalf("DisplayResult(callback): %v", err)
+		}
+	})
+
+	if gotOut != wantOut {
+		t.Fatalf("callback rendered %q, want %q", gotOut, wantOut)
+	}
+	if calls == 0 {
+		t.Fatal("callback was never called")
 	}
 }
 
