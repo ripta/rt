@@ -17,6 +17,9 @@ import (
 // implementations that decide irrational operands at a binary precision can read
 // env.precision. name, group, signature, and summary drive the discoverability
 // listing; group orders the catalog and signature/summary are human-facing.
+//
+// A non-nil binder marks a binder: its last argument is a binding, and it
+// evaluates its other arguments itself. Arity counts the binding argument.
 type function struct {
 	name      string
 	group     string
@@ -24,7 +27,22 @@ type function struct {
 	summary   string
 	minArgs   int
 	maxArgs   int
+	binder    *binderSpec
 	fn        func(ctx context.Context, env *Env, args []*unified.Real) (*unified.Real, error)
+}
+
+// bindForm is a set of binding argument forms.
+type bindForm int
+
+const (
+	bindPoint bindForm = 1 << iota
+	bindRange
+)
+
+// binderSpec describes what a binder accepts as its binding argument.
+type binderSpec struct {
+	forms    bindForm
+	infinite bool
 }
 
 // functionCatalog is the source of truth for the function registry. Entries are

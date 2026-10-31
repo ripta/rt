@@ -24,12 +24,17 @@ type P struct {
 	err  error
 
 	buf []tokens.Token
+
+	// catalog is the function table consulted for call checks. Tests substitute their own.
+	catalog map[string]function
 }
 
 func New(name, src string) *P {
 	return &P{
 		lex: lexer.New(name, src),
 		fn:  parseInit,
+
+		catalog: functions,
 	}
 }
 
@@ -71,6 +76,11 @@ func parseExpr(p *P) parsingState {
 		return nil
 	}
 
+	if err := checkInf(node); err != nil {
+		p.err = err
+		return nil
+	}
+
 	p.root = node
 	return nil
 }
@@ -102,6 +112,13 @@ func (p *P) parseAssignment() (Node, error) {
 		} else {
 			break
 		}
+	}
+
+	if inf, ok := node.(*InfNode); ok {
+		if p.peek().Type == tokens.ASSIGN {
+			return nil, p.errorf(inf.Tok, "%s", errInfReserved)
+		}
+		return left, nil
 	}
 
 	ident, ok := node.(*IdentNode)
@@ -305,6 +322,8 @@ func (p *P) parsePrimary() (Node, error) {
 			if err != nil {
 				return nil, err
 			}
+		} else if tok.Value == infName {
+			node = &InfNode{Tok: tok}
 		} else {
 			node = &IdentNode{Name: tok}
 		}
@@ -345,11 +364,11 @@ func (p *P) parseCall(name tokens.Token) (Node, error) {
 	var args []Node
 	if p.peek().Type == tokens.RPAREN {
 		p.next()
-		return &CallNode{Func: name, Args: args}, nil
+		return p.finishCall(name, args)
 	}
 
 	for {
-		arg, err := p.parseAssignment()
+		arg, err := p.parseArgument()
 		if err != nil {
 			return nil, err
 		}
@@ -363,11 +382,136 @@ func (p *P) parseCall(name tokens.Token) (Node, error) {
 		case tokens.COMMA:
 			continue
 		case tokens.RPAREN:
-			return &CallNode{Func: name, Args: args}, nil
+			return p.finishCall(name, args)
 		default:
 			return nil, p.errorf(tok, "expected ',' or ')', got %s", tok.Type)
 		}
 	}
+}
+
+// parseArgument parses one call argument. An identifier directly followed by '='
+// starts a binding. Anything else is an ordinary expression, so a parenthesized
+// assignment stays an assignment.
+func (p *P) parseArgument() (Node, error) {
+	tok := p.next()
+	if p.err != nil {
+		return nil, p.err
+	}
+	if tok.Type == tokens.IDENT {
+		isBinding := p.peek().Type == tokens.ASSIGN
+		if p.err != nil {
+			return nil, p.err
+		}
+		if isBinding {
+			return p.parseBinding(tok)
+		}
+	}
+	p.unread(tok)
+
+	return p.parseAssignment()
+}
+
+// parseBinding parses the rest of a binding argument after its name. Bounds and
+// point values stop at the additive level, so a bare assignment is not one.
+func (p *P) parseBinding(name tokens.Token) (Node, error) {
+	p.next() // consume =
+
+	switch {
+	case name.Value == infName:
+		return nil, p.errorf(name, "%s", errInfReserved)
+	case isConstantName(name.Value):
+		return nil, p.errorf(name, "cannot bind constant %q", name.Value)
+	case strings.HasPrefix(name.Value, "$"):
+		return nil, p.errorf(name, "cannot bind result history name %q", name.Value)
+	}
+
+	lo, err := p.parseAdditive()
+	if err != nil {
+		return nil, err
+	}
+
+	b := &BindingNode{Name: name, Lo: lo}
+	if p.peek().Type == tokens.DOTDOT {
+		p.next()
+		b.Hi, err = p.parseAdditive()
+		if err != nil {
+			return nil, err
+		}
+	}
+	if p.err != nil {
+		return nil, p.err
+	}
+
+	return b, nil
+}
+
+// finishCall checks a parsed call against the catalog, so that every call error
+// is reported before any part of the line runs.
+func (p *P) finishCall(name tokens.Token, args []Node) (Node, error) {
+	call := &CallNode{Func: name, Args: args}
+
+	fn, ok := p.catalog[name.Value]
+	if !ok {
+		return nil, p.errorf(name, "unknown function %q", name.Value)
+	}
+
+	var binding *BindingNode
+	for i, a := range args {
+		b, ok := a.(*BindingNode)
+		if !ok {
+			continue
+		}
+		if fn.binder == nil {
+			return nil, p.errorf(b.Name, "%s is not a binder, so it cannot take the binding %s = ...; to assign inside a call, parenthesize it: %s((%s = ...))", name.Value, b.Name.Value, name.Value, b.Name.Value)
+		}
+		if i != len(args)-1 {
+			return nil, p.errorf(b.Name, "the binding argument must be the last argument of %s", name.Value)
+		}
+		binding = b
+	}
+
+	if fn.binder != nil {
+		if binding == nil {
+			return nil, p.errorf(name, "%s needs a binding argument, as in %s", name.Value, fn.signature)
+		}
+		if err := p.checkBinding(name, fn, binding); err != nil {
+			return nil, err
+		}
+	}
+
+	if len(args) < fn.minArgs || (fn.maxArgs >= 0 && len(args) > fn.maxArgs) {
+		return nil, p.errorf(name, "%s %s", name.Value, arityError(fn, len(args)))
+	}
+
+	if fn.binder != nil {
+		for _, body := range args[:len(args)-1] {
+			if a := findAssign(body); a != nil {
+				return nil, p.errorf(a.Name, "assignment is not allowed inside the body of %s", name.Value)
+			}
+		}
+	}
+
+	return call, nil
+}
+
+func (p *P) checkBinding(name tokens.Token, fn function, b *BindingNode) error {
+	isRange := b.Hi != nil
+	switch {
+	case isRange && fn.binder.forms&bindRange == 0:
+		return p.errorf(b.Name, "%s takes a point binding (%s = x), not a range", name.Value, b.Name.Value)
+	case !isRange && fn.binder.forms&bindPoint == 0:
+		return p.errorf(b.Name, "%s takes a range binding (%s = lo..hi), not a point", name.Value, b.Name.Value)
+	}
+
+	if !fn.binder.infinite {
+		for _, bound := range []Node{b.Lo, b.Hi} {
+			if inf := infBound(bound); inf != nil {
+				return p.errorf(inf.Tok, "%s does not accept an infinite bound", name.Value)
+			}
+		}
+	}
+
+	return nil
 }
 
 func (p *P) parseNumber(tok tokens.Token) (*unified.Real, error) {
@@ -441,4 +585,85 @@ func (p *P) errorf(tok tokens.Token, format string, args ...any) error {
 	}
 
 	return fmt.Errorf("%s", msg)
+}
+
+const infName = "inf"
+
+var errInfReserved = errors.New("inf is only valid as a range bound")
+
+func isConstantName(name string) bool {
+	_, ok := transcendentalConstants[name]
+	return ok
+}
+
+// infBound returns the InfNode when n is inf or -inf, and nil otherwise.
+func infBound(n Node) *InfNode {
+	if u, ok := n.(*UnaryNode); ok && u.Op.Type == tokens.OP_MINUS {
+		n = u.Expr
+	}
+	inf, _ := n.(*InfNode)
+	return inf
+}
+
+// children returns the direct sub-nodes of n.
+func children(n Node) []Node {
+	switch n := n.(type) {
+	case *BinaryNode:
+		return []Node{n.Left, n.Right}
+	case *UnaryNode:
+		return []Node{n.Expr}
+	case *CallNode:
+		return n.Args
+	case *AssignNode:
+		return []Node{n.Value}
+	case *CommentNode:
+		return []Node{n.Expr}
+	case *BindingNode:
+		if n.Hi == nil {
+			return []Node{n.Lo}
+		}
+		return []Node{n.Lo, n.Hi}
+	}
+	return nil
+}
+
+// findAssign returns the first AssignNode anywhere within n.
+func findAssign(n Node) *AssignNode {
+	if a, ok := n.(*AssignNode); ok {
+		return a
+	}
+	for _, c := range children(n) {
+		if a := findAssign(c); a != nil {
+			return a
+		}
+	}
+	return nil
+}
+
+// checkInf rejects every inf that is not the whole of a range bound.
+func checkInf(n Node) error {
+	if b, ok := n.(*BindingNode); ok {
+		bounds := []Node{b.Lo}
+		if b.Hi != nil {
+			bounds = []Node{b.Lo, b.Hi}
+		}
+		for _, bound := range bounds {
+			if b.Hi != nil && infBound(bound) != nil {
+				continue
+			}
+			if err := checkInf(bound); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	if inf, ok := n.(*InfNode); ok {
+		return fmt.Errorf("%s: %w", inf.Tok.Pos, errInfReserved)
+	}
+	for _, c := range children(n) {
+		if err := checkInf(c); err != nil {
+			return err
+		}
+	}
+	return nil
 }

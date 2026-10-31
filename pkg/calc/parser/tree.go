@@ -51,6 +51,8 @@ func convertDecimalPlacesToPrecision(decimalPlaces int) int {
 	return -(decimalPlaces*332193 + 99999) / 100000
 }
 
+// transcendentalConstants is the one list of immutable constant names. NewEnv seeds
+// from it and the parser refuses to bind these names.
 var transcendentalConstants = map[string]func() *unified.Real{
 	"E":     unified.E,
 	"PI":    unified.Pi,
@@ -259,13 +261,14 @@ type CallNode struct {
 }
 
 func (n *CallNode) Eval(ctx context.Context, env *Env) (*unified.Real, error) {
+	// The parser has already checked the name and arity. Only a hand-built tree can fail here.
 	fn, ok := functions[n.Func.Value]
 	if !ok {
 		return nil, fmt.Errorf("%s: unknown function %q", n.Func.Pos, n.Func.Value)
 	}
 
-	if len(n.Args) < fn.minArgs || (fn.maxArgs >= 0 && len(n.Args) > fn.maxArgs) {
-		return nil, fmt.Errorf("%s: %s %s", n.Func.Pos, n.Func.Value, arityError(fn, len(n.Args)))
+	if fn.binder != nil {
+		return nil, fmt.Errorf("%s: binder %s cannot be evaluated yet", n.Func.Pos, n.Func.Value)
 	}
 
 	args := make([]*unified.Real, len(n.Args))
@@ -282,6 +285,27 @@ func (n *CallNode) Eval(ctx context.Context, env *Env) (*unified.Real, error) {
 		return nil, fmt.Errorf("%s: %w", n.Func.Pos, domainError(ctx, n.Func.Value, args, env.precision, err))
 	}
 	return result, nil
+}
+
+// BindingNode is a binding argument: a point binding when Hi is nil, otherwise a range binding.
+// The parser accepts it only as the last argument of a binder call.
+type BindingNode struct {
+	Name tokens.Token
+	Lo   Node
+	Hi   Node
+}
+
+func (n *BindingNode) Eval(context.Context, *Env) (*unified.Real, error) {
+	return nil, fmt.Errorf("%s: binding %s is only valid as an argument to a binder", n.Name.Pos, n.Name.Value)
+}
+
+// InfNode is the reserved word inf. The parser accepts it only as a range bound.
+type InfNode struct {
+	Tok tokens.Token
+}
+
+func (n *InfNode) Eval(context.Context, *Env) (*unified.Real, error) {
+	return nil, fmt.Errorf("%s: inf is only valid as a range bound", n.Tok.Pos)
 }
 
 type AssignNode struct {
