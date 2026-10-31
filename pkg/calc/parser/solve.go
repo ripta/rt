@@ -24,6 +24,13 @@ const (
 
 	// solveScanCells is the number of equal cells the failure-path scan splits a bracket into.
 	solveScanCells = 16
+
+	// solveMaxSteps is the number of doublings the point form's search tries on each side of the
+	// guess.
+	solveMaxSteps = 16
+
+	// solveStepShift sets the first search step to max(|x0|, 1) / 2^solveStepShift.
+	solveStepShift = 6
 )
 
 var errNearZero = errors.New("indistinguishable from zero")
@@ -51,6 +58,16 @@ func nearZeroSign(ctx context.Context, v *unified.Real, p int) (int, error) {
 }
 
 func solveBinder(ctx context.Context, env *Env, body []Node, bind Binding) (*unified.Real, error) {
+	s := &solveRoot{
+		env:  snapshotEnv(env, body[0], bind.Name),
+		body: body[0],
+		name: bind.Name,
+	}
+
+	if !bind.Range {
+		return s.fromGuess(ctx, bind.Lo.Value)
+	}
+
 	a, err := approxRat(ctx, bind.Lo.Value, env.precision)
 	if err != nil {
 		return nil, err
@@ -62,16 +79,7 @@ func solveBinder(ctx context.Context, env *Env, body []Node, bind Binding) (*uni
 	if a.Cmp(b) > 0 {
 		a, b = b, a
 	}
-
-	s := &solveRoot{
-		env:  snapshotEnv(env, body[0], bind.Name),
-		body: body[0],
-		name: bind.Name,
-		a:    a,
-		b:    b,
-		from: a,
-		to:   b,
-	}
+	s.a, s.b, s.from, s.to = a, b, a, b
 
 	fa, sa, err := s.endpoint(ctx, a)
 	if err != nil {
@@ -90,19 +98,112 @@ func solveBinder(ctx context.Context, env *Env, body []Node, bind Binding) (*uni
 	if sa == sb {
 		return nil, s.noSignChange(ctx, fa, fb, sa)
 	}
+
+	return s.finish(ctx, fa, fb, sa)
+}
+
+// finish narrows the bracket [a, b], whose body has sign sa at a and the opposite sign at b, and
+// returns the lazy root.
+func (s *solveRoot) finish(ctx context.Context, fa, fb *unified.Real, sa int) (*unified.Real, error) {
+	prec := s.env.precision
 	s.sign = sa
 
-	if err := s.refine(ctx, env.precision); err != nil {
+	if err := s.refine(ctx, prec); err != nil {
 		return nil, err
 	}
 	if s.exact != nil {
 		return ratReal(s.exact), nil
 	}
-	if err := s.slopeCheck(ctx, fa, fb, env.precision); err != nil {
+	if err := s.slopeCheck(ctx, fa, fb, prec); err != nil {
 		return nil, err
 	}
 
 	return unified.New(constructive.FromApproximation("solve", s.approximate), nil), nil
+}
+
+// fromGuess searches outward from x0 for a sign change and solves in the bracket it finds.
+//
+// Probes sit at x0 + h*2^k and x0 - h*2^k, alternating sides, nearest first. Each probe is
+// compared with the previous good probe on its side, which starts at x0. The first change found
+// is the nearest to the guess on its side. A probe where the body fails with an ordinary error, or
+// stays indistinguishable from zero, is skipped.
+func (s *solveRoot) fromGuess(ctx context.Context, guess *unified.Real) (*unified.Real, error) {
+	x0, err := approxRat(ctx, guess, s.env.precision)
+	if err != nil {
+		return nil, err
+	}
+
+	f0, sign0, err := s.signOf(ctx, x0)
+	if errors.Is(err, errNearZero) {
+		return nil, s.guessNearZero(x0)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if sign0 == 0 {
+		return ratReal(x0), nil
+	}
+
+	h := new(big.Rat).Abs(x0)
+	if h.Cmp(big.NewRat(1, 1)) < 0 {
+		h.SetInt64(1)
+	}
+	h.Mul(h, ratPow2(-solveStepShift))
+
+	type probe struct {
+		x    *big.Rat
+		f    *unified.Real
+		sign int
+	}
+	prev := [2]probe{{x0, f0, sign0}, {x0, f0, sign0}}
+	step := new(big.Rat).Set(h)
+	skipped := false
+	for k := 0; k <= solveMaxSteps; k++ {
+		for side := range prev {
+			x := new(big.Rat)
+			if side == 0 {
+				x.Add(x0, step)
+			} else {
+				x.Sub(x0, step)
+			}
+
+			f, sign, err := s.signOf(ctx, x)
+			if err != nil {
+				if isStop(err) {
+					return nil, err
+				}
+				skipped = true
+				continue
+			}
+			if sign == 0 {
+				return ratReal(x), nil
+			}
+
+			p := prev[side]
+			if sign == p.sign {
+				prev[side] = probe{x, f, sign}
+				continue
+			}
+
+			lo, hi := p, probe{x, f, sign}
+			if side == 1 {
+				lo, hi = hi, lo
+			}
+			s.a, s.b, s.from, s.to = lo.x, hi.x, lo.x, hi.x
+			return s.finish(ctx, lo.f, hi.f, lo.sign)
+		}
+		step.Mul(step, big.NewRat(2, 1))
+	}
+
+	msg := fmt.Sprintf("no sign change found near %s = %s within %d doublings. Give a range, such as %s = a..b", s.name, fmtRat(x0), solveMaxSteps, s.name)
+	if skipped {
+		msg += ". Some probes failed or were too close to zero and were skipped, so a root may be hidden there"
+	}
+	return nil, errors.New(msg)
+}
+
+func (s *solveRoot) guessNearZero(x *big.Rat) error {
+	return fmt.Errorf("the body at %s = %s is too close to zero to tell its sign. Move the guess away from it", s.name, fmtRat(x))
 }
 
 // solveRoot is a root of the body in a bracket.
@@ -129,14 +230,21 @@ type solveRoot struct {
 	exact    *big.Rat
 }
 
-// endpoint evaluates the body at x and returns its sign. The sign is 0 only for an exact zero.
-func (s *solveRoot) endpoint(ctx context.Context, x *big.Rat) (*unified.Real, int, error) {
+// signOf evaluates the body at x and returns its sign. The sign is 0 only for an exact zero. It
+// returns errNearZero when the sign cannot be told.
+func (s *solveRoot) signOf(ctx context.Context, x *big.Rat) (*unified.Real, int, error) {
 	v, err := evalBody(ctx, s.env, s.body, s.name, ratReal(x))
 	if err != nil {
 		return nil, 0, err
 	}
 
 	sign, err := nearZeroSign(ctx, v, s.env.precision)
+	return v, sign, err
+}
+
+// endpoint is signOf for a range bound, with a near-zero error that names the bound.
+func (s *solveRoot) endpoint(ctx context.Context, x *big.Rat) (*unified.Real, int, error) {
+	v, sign, err := s.signOf(ctx, x)
 	if errors.Is(err, errNearZero) {
 		return nil, 0, fmt.Errorf("the body at %s = %s is too close to zero to tell its sign. Move the bound away from it", s.name, fmtRat(x))
 	}

@@ -928,6 +928,7 @@ var examples = []example{
 	{"Binders", "sum(i**2, i = 1..10)", "sum over integer bounds; the index is local to the call"},
 	{"Binders", "product(i, i = 1..5)", "product over integer bounds"},
 	{"Binders", "solve(x**2 - 2, x = 0..2)", "a root of a continuous expression in a bracket that changes its sign"},
+	{"Binders", "solve(cos(x) - x, x = 1)", "the root of an expression nearest a guess"},
 
 	{"Variables", "r = 3", "assign a name"},
 	{"Variables", "PI * r ** 2", "use it later"},

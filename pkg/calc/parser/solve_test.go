@@ -95,7 +95,6 @@ func TestSolveErrors(t *testing.T) {
 		{"small jump", "solve(floor(x) + x - 1.5, x = 0..2)", []string{"pole or jump"}},
 		{"infinite bound", "solve(x, x = 0..inf)", []string{"infinite bound"}},
 		{"infinite low bound", "solve(x, x = -inf..1)", []string{"infinite bound"}},
-		{"point form", "solve(x - 1, x = 1)", []string{"range binding"}},
 		{"assignment in body", "solve((a = 2) + x, x = 0..1)", []string{"assignment"}},
 	}
 	for _, tt := range tests {
@@ -314,5 +313,105 @@ func TestSolveUndecidableSignErrors(t *testing.T) {
 	_, err := evalShipping(context.Background(), src, NewEnv())
 	if err == nil || !strings.Contains(err.Error(), "cannot tell the sign") {
 		t.Errorf("err = %v, want an undecided-sign error", err)
+	}
+}
+
+func TestSolveFromGuess(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		src  string
+		want float64
+	}{
+		{"solve(cos(x) - x, x = 1)", 0.7390851332151607},
+		{"solve(x - 3, x = 3)", 3},
+		{"solve(x**2 - 1, x = 0.9)", 1},
+		{"solve(x**2 - 1, x = -0.9)", -1},
+		{"solve(x**2 - 2, x = 1)", 1.4142135623730951},
+		{"solve(x - 1000, x = 0)", 1000},
+		{"solve(sqrt(x) - 1, x = 0)", 1},
+		{"solve(sqrt(x) - 2, x = 0)", 4},
+		{"solve(sqrt(x) - 1.1, x = 0)", 1.21},
+		{"solve(x**3, x = 2)", 0},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.src, func(t *testing.T) {
+			t.Parallel()
+			got, err := evalFloat(t, context.Background(), tt.src, NewEnv())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if d := got - tt.want; d > 1e-9 || d < -1e-9 {
+				t.Errorf("got %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSolveFromGuessExact(t *testing.T) {
+	t.Parallel()
+
+	got, err := evalShipping(context.Background(), "solve(x - 1, x = 1)", NewEnv())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "1" {
+		t.Errorf("got %q, want 1", got)
+	}
+}
+
+func TestSolveFromGuessErrors(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		src  string
+		want []string
+	}{
+		{"no root", "solve(x**2 + 1, x = 0)", []string{"no sign change found near x = 0", "Give a range"}},
+		{"fast-growing body", "solve(exp(x) + 1, x = 0)", []string{"no sign change found near x = 0 within 16 doublings", "Give a range"}},
+		{"skipped probes", "solve(ln(x), x = 5)", []string{"no sign change found", "were skipped", "hidden"}},
+		{"near-zero guess", "solve(sin(x), x = 0)", []string{"too close to zero", "x = 0", "Move the guess"}},
+		{"reciprocal pole", "solve(1/x, x = 0.7)", []string{"pole or jump"}},
+		{"tan pole", "solve(tan(x), x = 1.5)", []string{"pole or jump"}},
+		{"infinite guess", "solve(x, x = inf)", []string{"inf"}},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := evalShipping(context.Background(), tt.src, NewEnv())
+			if err == nil {
+				t.Fatal("no error")
+			}
+			for _, w := range tt.want {
+				if !strings.Contains(err.Error(), w) {
+					t.Errorf("err = %q, want containing %q", err, w)
+				}
+			}
+		})
+	}
+}
+
+func TestSolveFromGuessBudgetAndCancel(t *testing.T) {
+	t.Parallel()
+
+	_, err := evalShipping(withBudgetLimit(context.Background(), 4), "solve(cos(x) - x, x = 1)", NewEnv())
+	if !errors.Is(err, ErrEvaluationBudget) {
+		t.Errorf("err = %v, want budget error", err)
+	}
+
+	// The search keeps probing past skipped domain errors, so a budget must still stop it.
+	_, err = evalShipping(withBudgetLimit(context.Background(), 20), "solve(x**2 + 1, x = 0)", NewEnv())
+	if !errors.Is(err, ErrEvaluationBudget) {
+		t.Errorf("search: err = %v, want budget error", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err = evalShipping(ctx, "solve(cos(x) - x, x = 1)", NewEnv())
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("err = %v, want cancellation", err)
 	}
 }
