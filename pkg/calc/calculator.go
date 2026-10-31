@@ -929,6 +929,8 @@ var examples = []example{
 	{"Binders", "product(i, i = 1..5)", "product over integer bounds"},
 	{"Binders", "solve(x**2 - 2, x = 0..2)", "a root of a continuous expression in a bracket that changes its sign"},
 	{"Binders", "solve(cos(x) - x, x = 1)", "the root of an expression nearest a guess"},
+	{"Binders", "integrate(sin(x), x = 0..PI)", "an estimate of a definite integral; split the range at an interior singularity"},
+	{"Binders", "integrate(1/sqrt(x), x = 0..1)", "endpoints are never sampled, so an endpoint singularity is fine"},
 
 	{"Variables", "r = 3", "assign a name"},
 	{"Variables", "PI * r ** 2", "use it later"},
