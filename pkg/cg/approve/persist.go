@@ -60,7 +60,7 @@ func (s *Store) AppendProjectAllowPrefix(tokens []string, strategy WriteStrategy
 
 // AppendProjectAllowExact appends an exact allow rule the same way
 // AppendProjectAllowPrefix appends a prefix rule. It serves a prompt that
-// pre-fills the whole argv, where editing the rule narrows it.
+// pre-fills the whole argv, where an unchanged field stays exact.
 func (s *Store) AppendProjectAllowExact(tokens []string, strategy WriteStrategy) error {
 	return s.appendProjectAllow(Rule{Exact: slices.Clone(tokens), kind: KindExact}, strategy)
 }

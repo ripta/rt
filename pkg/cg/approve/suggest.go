@@ -6,10 +6,11 @@ import (
 
 // Suggestion is the allow rule an approval prompt pre-fills for a command.
 //
-// Every command gets its whole argv, with the path the rule pins as the first token. A command
-// whose program heads a wrapper rule also carries a note, because a rule for it must stay exact.
+// Every command gets its whole argv, with the path the rule pins as the first token. The kind of
+// the rule that gets saved is not part of the suggestion. It follows from the edit, which
+// CheckEdit judges. A command whose program heads a wrapper rule also carries a note, because a
+// rule for it must stay exact.
 type Suggestion struct {
-	Kind   RuleKind
 	Tokens []string
 
 	// HeadsWrapper reports that the command's program heads a wrapper rule, so a rule for it
@@ -22,14 +23,14 @@ type Suggestion struct {
 }
 
 // Suggest derives the rule pre-filled into the prompt for argv, resolved as res. The rule is
-// exact over the whole argv. Its first token is the path the rule pins, or argv[0] as written
+// the whole argv. Its first token is the path the rule pins, or argv[0] as written
 // when resolution found none.
 //
 // "Heads a wrapper rule" reads the first token the way matching does: a bare token compares
 // with the invoked basename, and a path token compares with the canonical or resolved path.
 func (rs *Ruleset) Suggest(argv []string, res *model.Resolution) Suggestion {
 	if len(argv) == 0 {
-		return Suggestion{Kind: KindExact}
+		return Suggestion{}
 	}
 
 	execPath := res.RulePath()
@@ -62,7 +63,7 @@ func (rs *Ruleset) Suggest(argv []string, res *model.Resolution) Suggestion {
 
 	tokens := append([]string{head}, argv[1:]...)
 
-	return Suggestion{Kind: KindExact, Tokens: tokens, HeadsWrapper: heads, NearMiss: near}
+	return Suggestion{Tokens: tokens, HeadsWrapper: heads, NearMiss: near}
 }
 
 // headMatches reports whether a wrapper rule's first token names the program in the forms.

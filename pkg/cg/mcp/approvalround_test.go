@@ -118,13 +118,77 @@ var roundTests = []roundTest{
 		WantErr:   "declined at the approval prompt",
 	},
 	{
-		Name:    "remember writes the suggested rule",
+		Name:    "remember writes a trimmed field as a prefix rule",
 		Project: "version: 1\n",
 		Argvs:   [][]string{echoHi},
 		Answers: mcpsdk.InputResponseMap{"approval-1": accept(map[string]any{"remember": true, "rule": "[echo]"})},
 
+		WantForms:  1,
+		WantFile:   []string{"prefix: [echo]"},
+		AbsentFile: []string{"exact:"},
+	},
+	{
+		Name:    "remember writes a blank field as the full command, exact",
+		Project: "version: 1\n",
+		Argvs:   [][]string{echoHi},
+		Answers: mcpsdk.InputResponseMap{"approval-1": accept(map[string]any{"remember": true})},
+
+		WantForms:  1,
+		WantFile:   []string{"exact: [", ", hi]"},
+		AbsentFile: []string{"prefix:"},
+	},
+	{
+		Name:    "remember writes a blank field as a prefix rule with the box ticked",
+		Project: "version: 1\n",
+		Argvs:   [][]string{echoHi},
+		Answers: mcpsdk.InputResponseMap{"approval-1": accept(map[string]any{"remember": true, "allow_extra_args": true})},
+
+		WantForms:  1,
+		WantFile:   []string{"prefix: [", ", hi]"},
+		AbsentFile: []string{"exact:"},
+	},
+	{
+		Name:    "a trimmed field saves a prefix rule whatever the box says",
+		Project: "version: 1\n",
+		Argvs:   [][]string{echoHi},
+		Answers: mcpsdk.InputResponseMap{"approval-1": accept(map[string]any{"remember": true, "rule": "[echo]", "allow_extra_args": false})},
+
 		WantForms: 1,
-		WantFile:  []string{"exact: [echo]"},
+		WantFile:  []string{"prefix: [echo]"},
+	},
+	{
+		Name:    "a rule that misses the command runs it and skips the remember with a warning",
+		Project: "version: 1\n",
+		Argvs:   [][]string{echoHi},
+		Answers: mcpsdk.InputResponseMap{"approval-1": accept(map[string]any{"remember": true, "rule": "[echo, bye]"})},
+
+		WantForms:   1,
+		WantWarning: "does not match the command `echo hi`",
+		AbsentFile:  []string{"echo"},
+	},
+	{
+		Name:    "a rule longer than the command misses it",
+		Project: "version: 1\n",
+		Argvs:   [][]string{echoHi},
+		Answers: mcpsdk.InputResponseMap{"approval-1": accept(map[string]any{"remember": true, "rule": "[echo, hi, there]"})},
+
+		WantForms:   1,
+		WantWarning: "does not match the command",
+		AbsentFile:  []string{"echo"},
+	},
+	{
+		Name:    "a rejected edit beside a declined form refuses without a second round and skips the remember",
+		Project: "version: 1\n",
+		Argvs:   [][]string{echoHi, {"printf", "x"}},
+		Answers: mcpsdk.InputResponseMap{
+			"approval-1": accept(map[string]any{"remember": true, "rule": "[echo, bye]"}),
+			"approval-2": decline(),
+		},
+
+		WantForms:      2,
+		WantErr:        "declined at the approval prompt",
+		WantErrWarning: "skipping remember: The rule [echo, bye] does not match",
+		AbsentFile:     []string{"echo"},
 	},
 	{
 		Name:    "remember keeps an edited rule",
@@ -136,14 +200,14 @@ var roundTests = []roundTest{
 		WantFile:  []string{"exact: [echo, hi]"},
 	},
 	{
-		Name:    "a bad rule field refuses and writes nothing",
+		Name:    "a bad rule field runs the command and writes nothing",
 		Project: "version: 1\n",
 		Argvs:   [][]string{echoHi},
 		Answers: mcpsdk.InputResponseMap{"approval-1": accept(map[string]any{"remember": true, "rule": "not a list"})},
 
-		WantForms:  1,
-		WantErr:    "rule must be a YAML list",
-		AbsentFile: []string{"prefix:"},
+		WantForms:   1,
+		WantWarning: "rule must be a YAML list",
+		AbsentFile:  []string{"prefix:", "exact:"},
 	},
 	{
 		Name:    "a missing answer refuses and says to call again",
@@ -175,7 +239,7 @@ var roundTests = []roundTest{
 
 		WantForms:   1,
 		WantDiverge: true,
-		WantFile:    []string{"prefix: [make]", "prefix: [npm, ci]", "exact: [echo]"},
+		WantFile:    []string{"prefix: [make]", "prefix: [npm, ci]", "prefix: [echo]"},
 	},
 	{
 		Name:      "divergence overwrite drops the disk change",
@@ -189,7 +253,7 @@ var roundTests = []roundTest{
 
 		WantForms:   1,
 		WantDiverge: true,
-		WantFile:    []string{"prefix: [make]", "exact: [echo]"},
+		WantFile:    []string{"prefix: [make]", "prefix: [echo]"},
 		AbsentFile:  []string{"npm"},
 	},
 	{
@@ -205,7 +269,7 @@ var roundTests = []roundTest{
 		WantForms:   1,
 		WantDiverge: true,
 		WantFile:    []string{"prefix: [npm, ci]"},
-		AbsentFile:  []string{"exact: [echo]"},
+		AbsentFile:  []string{"prefix: [echo]"},
 	},
 	{
 		Name:      "a declined divergence form skips the remember",
@@ -219,7 +283,7 @@ var roundTests = []roundTest{
 
 		WantForms:   1,
 		WantDiverge: true,
-		AbsentFile:  []string{"exact: [echo]"},
+		AbsentFile:  []string{"prefix: [echo]"},
 	},
 	{
 		Name:      "a missing divergence answer skips the remember with a warning",
@@ -231,7 +295,7 @@ var roundTests = []roundTest{
 		WantForms:   1,
 		WantDiverge: true,
 		WantWarning: "did not answer the divergence prompt",
-		AbsentFile:  []string{"exact: [echo]"},
+		AbsentFile:  []string{"prefix: [echo]"},
 	},
 	{
 		Name:      "the divergence choice is ignored when nothing is remembered",
@@ -246,7 +310,7 @@ var roundTests = []roundTest{
 		WantForms:   1,
 		WantDiverge: true,
 		WantFile:    []string{"prefix: [npm, ci]"},
-		AbsentFile:  []string{"exact: [echo]"},
+		AbsentFile:  []string{"prefix: [echo]"},
 	},
 	{
 		Name:       "a change after an undiverged first call skips the remember",
@@ -258,7 +322,7 @@ var roundTests = []roundTest{
 		WantForms:   1,
 		WantWarning: "changed on disk since the approval was requested",
 		WantFile:    []string{"prefix: [npm, ci]"},
-		AbsentFile:  []string{"exact: [echo]"},
+		AbsentFile:  []string{"prefix: [echo]"},
 	},
 	{
 		Name:       "a change after a diverged first call skips the remember",
@@ -275,7 +339,7 @@ var roundTests = []roundTest{
 		WantDiverge: true,
 		WantWarning: "changed on disk since the approval was requested",
 		WantFile:    []string{"prefix: [yarn]"},
-		AbsentFile:  []string{"exact: [echo]"},
+		AbsentFile:  []string{"prefix: [echo]"},
 	},
 	{
 		Name:    "two remembered rules land in one round",
@@ -287,7 +351,7 @@ var roundTests = []roundTest{
 		},
 
 		WantForms: 2,
-		WantFile:  []string{"exact: [echo]", "exact: [printf]"},
+		WantFile:  []string{"prefix: [echo]", "prefix: [printf]"},
 	},
 	{
 		Name:    "a decline still persists another form's remember",
@@ -300,7 +364,7 @@ var roundTests = []roundTest{
 
 		WantForms: 2,
 		WantErr:   "declined at the approval prompt",
-		WantFile:  []string{"exact: [echo]"},
+		WantFile:  []string{"prefix: [echo]"},
 	},
 	{
 		Name:    "a declined group names every command it covers in call order",
@@ -332,7 +396,7 @@ var roundTests = []roundTest{
 		Answers:      mcpsdk.InputResponseMap{"approval-1": accept(map[string]any{"remember": true, "rule": "[echo]"})},
 
 		WantForms: 1,
-		WantFile:  []string{"prefix: [echo, hi]", "exact: [echo]"},
+		WantFile:  []string{"prefix: [echo, hi]", "prefix: [echo]"},
 	},
 	{
 		Name:         "a declined form whose commands are all allowed refuses nothing and saves nothing",
@@ -342,7 +406,7 @@ var roundTests = []roundTest{
 		Answers:      mcpsdk.InputResponseMap{"approval-1": decline()},
 
 		WantForms:  1,
-		AbsentFile: []string{"exact: [echo]\n"},
+		AbsentFile: []string{"prefix: [echo]\n"},
 	},
 	{
 		Name:         "a missing answer on a form whose commands are all allowed refuses nothing",
@@ -371,7 +435,7 @@ var roundTests = []roundTest{
 		Answers:      mcpsdk.InputResponseMap{"approval-1": accept(map[string]any{"remember": true, "rule": "[echo]"})},
 
 		WantForms: 1,
-		WantFile:  []string{"prefix: [printf]", "exact: [echo]"},
+		WantFile:  []string{"prefix: [printf]", "prefix: [echo]"},
 	},
 	{
 		Name:         "a diverged entry skips after a cg write",
@@ -387,7 +451,7 @@ var roundTests = []roundTest{
 		WantForms:   1,
 		WantDiverge: true,
 		WantWarning: "changed on disk since the approval was requested; " + pendingAdvice,
-		AbsentFile:  []string{"exact: [echo]"},
+		AbsentFile:  []string{"prefix: [echo]"},
 	},
 	{
 		Name:         "a skipped remember on a form whose commands ran does not say to call again",
@@ -404,7 +468,7 @@ var roundTests = []roundTest{
 		WantDiverge:  true,
 		WantWarning:  "rule [echo] was not saved because ",
 		WantNoAdvice: true,
-		AbsentFile:   []string{"exact: [echo]\n"},
+		AbsentFile:   []string{"prefix: [echo]\n"},
 	},
 	{
 		Name:    "a bad rule field still persists another form's remember",
@@ -415,10 +479,10 @@ var roundTests = []roundTest{
 			"approval-2": accept(map[string]any{"remember": true, "rule": "not a list"}),
 		},
 
-		WantForms:  2,
-		WantErr:    "rule must be a YAML list",
-		WantFile:   []string{"exact: [echo]"},
-		AbsentFile: []string{"printf"},
+		WantForms:   2,
+		WantWarning: "rule must be a YAML list",
+		WantFile:    []string{"prefix: [echo]"},
+		AbsentFile:  []string{"printf"},
 	},
 	{
 		Name:    "a missing answer still persists another form's remember",
@@ -430,7 +494,7 @@ var roundTests = []roundTest{
 
 		WantForms: 2,
 		WantErr:   "call the tool again",
-		WantFile:  []string{"exact: [printf]"},
+		WantFile:  []string{"prefix: [printf]"},
 	},
 	{
 		Name:       "a bad rule field still reports a skipped remember",
@@ -442,11 +506,10 @@ var roundTests = []roundTest{
 			"approval-2": accept(map[string]any{"remember": true, "rule": "not a list"}),
 		},
 
-		WantForms:      2,
-		WantErr:        "rule must be a YAML list",
-		WantErrWarning: "skipping remember: ",
-		WantFile:       []string{"prefix: [npm, ci]"},
-		AbsentFile:     []string{"exact: [echo]"},
+		WantForms:   2,
+		WantWarning: "skipping remember: ",
+		WantFile:    []string{"prefix: [npm, ci]"},
+		AbsentFile:  []string{"prefix: [echo]"},
 	},
 	{
 		Name:       "a missing answer still reports a skipped remember",
@@ -461,7 +524,7 @@ var roundTests = []roundTest{
 		WantErr:        `no answer for input request "approval-1"`,
 		WantErrWarning: "skipping remember: ",
 		WantFile:       []string{"prefix: [npm, ci]"},
-		AbsentFile:     []string{"exact: [printf]"},
+		AbsentFile:     []string{"prefix: [printf]"},
 	},
 }
 

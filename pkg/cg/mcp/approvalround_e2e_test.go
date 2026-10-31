@@ -325,7 +325,7 @@ func TestApprovalEndToEndGroupedRound(t *testing.T) {
 	}
 
 	file, _ := readProjectIfPresent(root)
-	if got := strings.Count(file, "exact: [echo]"); got != 1 {
+	if got := strings.Count(file, "prefix: [echo]"); got != 1 {
 		t.Errorf("rule written %d times, want once:\n%s", got, file)
 	}
 }

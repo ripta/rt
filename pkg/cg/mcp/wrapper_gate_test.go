@@ -11,7 +11,6 @@ import (
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/ripta/rt/pkg/cg/approve"
 	"github.com/ripta/rt/pkg/cg/model"
 )
 
@@ -204,10 +203,9 @@ var wrappedRememberTests = []struct {
 		WantPin:  func(wrapperEnv) string { return "" },
 	},
 	{
-		Name:     "a remembered rule that does not match the layer pins the shown path",
-		Content:  map[string]any{"remember": true, "rule": "[other]"},
-		WantFile: "exact: [other]",
-		WantPin:  func(w wrapperEnv) string { return w.Tool },
+		Name:    "a remembered rule that does not match the layer is skipped and the shown path stays pinned",
+		Content: map[string]any{"remember": true, "rule": "[other]"},
+		WantPin: func(w wrapperEnv) string { return w.Tool },
 	},
 }
 
@@ -219,7 +217,7 @@ func TestWrappedCommandApprovalRound(t *testing.T) {
 			g, call, pending, root := wrappedRound(t, w, w.rules(), argv)
 
 			form := formJSON(t, pending, "approval-1")
-			for _, want := range []string{"Allow rule (exact)", "inner command", "wrap tool x"} {
+			for _, want := range []string{"Allow rule", "An exact rule fixes every argument", "inner command", "wrap tool x"} {
 				if !strings.Contains(form, want) {
 					t.Errorf("form lacks %q:\n%s", want, form)
 				}
@@ -271,7 +269,7 @@ func TestWrapperProgramPromptSuggestsExactRule(t *testing.T) {
 	g, call, pending, root := wrappedRound(t, w, rules, argv)
 
 	form := formJSON(t, pending, "approval-1")
-	for _, want := range []string{"Allow rule (exact)", "heads a wrapper rule", "allows only this whole command"} {
+	for _, want := range []string{"Allow rule", "heads a wrapper rule", "always exact", "allows only this whole command"} {
 		if !strings.Contains(form, want) {
 			t.Errorf("form lacks %q:\n%s", want, form)
 		}
@@ -314,14 +312,14 @@ func TestGuardCasePromptNamesTheNearMissRule(t *testing.T) {
 	_, _, pending, _ := wrappedRound(t, w, rules, []string{"wrap", "-n", "19", "--", "tool"})
 
 	form := formJSON(t, pending, "approval-1")
-	for _, want := range []string{"Allow rule (exact)", "heads a wrapper rule", "stopped at the inner command's leading", "add a second wrapper rule ending in --", "wrapper [" + w.Wrap + ", -n, 19]"} {
+	for _, want := range []string{"Allow rule", "heads a wrapper rule", "stopped at the inner command's leading", "add a second wrapper rule ending in --", "wrapper [" + w.Wrap + ", -n, 19]"} {
 		if !strings.Contains(form, want) {
 			t.Errorf("form lacks %q:\n%s", want, form)
 		}
 	}
 }
 
-func TestRememberRefusesALeadingDashRule(t *testing.T) {
+func TestRememberDoesNotWriteALeadingDashRule(t *testing.T) {
 	w := newWrapperEnv(t)
 	g, call, pending, root := wrappedRound(t, w, w.rules(), []string{"wrap", "tool"})
 
@@ -330,8 +328,8 @@ func TestRememberRefusesALeadingDashRule(t *testing.T) {
 	if err != nil {
 		t.Fatalf("retry: %v", err)
 	}
-	if !strings.Contains(second.Warning, "refusing to remember") {
-		t.Errorf("warning = %q, want the refusal to write the rule", second.Warning)
+	if !strings.Contains(second.Warning, "does not match the command") {
+		t.Errorf("warning = %q, want the rule to be rejected against the command", second.Warning)
 	}
 
 	written, _ := readProjectIfPresent(root)
@@ -390,12 +388,6 @@ func TestPlanFormsKeysOnTheWholeArgv(t *testing.T) {
 	forms := planForms(g.store.Ruleset(), []int{0, 1, 2}, targets)
 	if len(forms) != 3 {
 		t.Fatalf("forms = %d, want one per distinct argv", len(forms))
-	}
-
-	for i, form := range forms {
-		if form.Suggestion.Kind != approve.KindExact {
-			t.Errorf("form %d kind = %v, want exact", i, form.Suggestion.Kind)
-		}
 	}
 
 	heads := []bool{forms[0].Suggestion.HeadsWrapper, forms[1].Suggestion.HeadsWrapper, forms[2].Suggestion.HeadsWrapper}

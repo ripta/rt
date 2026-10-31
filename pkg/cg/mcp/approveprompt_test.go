@@ -19,7 +19,7 @@ import (
 func TestApprovalSchemaFieldOrder(t *testing.T) {
 	t.Parallel()
 
-	raw, err := json.Marshal(approvalSchema(approve.Suggestion{Kind: approve.KindPrefix, Tokens: []string{"go", "test"}}, false, "/tmp/.cg.yaml"))
+	raw, err := json.Marshal(approvalSchema(formSpec{Suggestion: approve.Suggestion{Tokens: []string{"go", "test"}}, Path: "/tmp/.cg.yaml"}))
 	if err != nil {
 		t.Fatalf("marshalling schema: %v", err)
 	}
@@ -190,7 +190,7 @@ func TestApprovalMessage(t *testing.T) {
 func TestApprovalSchemaRememberTitle(t *testing.T) {
 	t.Parallel()
 
-	schema := approvalSchema(approve.Suggestion{Kind: approve.KindPrefix, Tokens: []string{"go", "test"}}, false, "/tmp/.cg.yaml")
+	schema := approvalSchema(formSpec{Suggestion: approve.Suggestion{Tokens: []string{"go", "test"}}, Path: "/tmp/.cg.yaml"})
 	if got := schema.Properties["remember"].Title; got != "Remember this rule" {
 		t.Errorf("remember title = %q, want %q", got, "Remember this rule")
 	}
@@ -342,7 +342,7 @@ func TestRuleDefaultShowsControlCharactersEscaped(t *testing.T) {
 				t.Errorf("renderFlowSeq(%q) = %s, want %s", tt.Tokens, got, tt.Want)
 			}
 
-			raw, err := json.Marshal(approvalSchema(approve.Suggestion{Kind: approve.KindExact, Tokens: tt.Tokens}, false, "/tmp/.cg.yaml"))
+			raw, err := json.Marshal(approvalSchema(formSpec{Suggestion: approve.Suggestion{Tokens: tt.Tokens}, Path: "/tmp/.cg.yaml"}))
 			if err != nil {
 				t.Fatalf("marshalling schema: %v", err)
 			}
@@ -398,9 +398,9 @@ func TestParseRuleFieldRejectsAnEmptyProgram(t *testing.T) {
 func TestRuleDescriptionShowsWrapperAndNearMissNotes(t *testing.T) {
 	t.Parallel()
 
-	suggestion := approve.Suggestion{Kind: approve.KindExact, Tokens: []string{"/usr/bin/nice", "-n", "19", "--", "make"}, HeadsWrapper: true, NearMiss: &approve.Rule{}}
+	suggestion := approve.Suggestion{Tokens: []string{"/usr/bin/nice", "-n", "19", "--", "make"}, HeadsWrapper: true, NearMiss: &approve.Rule{}}
 
-	got := ruleDescription(suggestion, true)
+	got := ruleDescription(formSpec{Suggestion: suggestion, Inner: true})
 	for _, want := range []string{"inner command", "heads a wrapper rule", "The wrapper rule", "stopped at the inner command's leading"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("description lacks %q:\n%s", want, got)

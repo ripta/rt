@@ -745,11 +745,39 @@ the wrapper rule pointless, and a `prefix` deny can make it dead. `cg lint`,
 `cg check`, and the `rule_warnings` field of `cg_info` report both. Warnings are
 a separate severity: a lint run with only warnings still exits 0.
 
-Every prompt pre-fills the whole command as an `exact` rule, with the path of
-the executable as the first token. For a wrapped command the form pre-fills the
-inner command. A prompt for a program that heads a wrapper rule says so in the
-rule field's description. Editing an exact rule narrows it, which a `prefix` rule
-would not. Remember never creates a `wrapper` rule.
+Every prompt pre-fills the whole command, with the path of the executable as the
+first token. For a wrapped command the form pre-fills the inner command.
+
+The edit decides the kind of the remembered rule. Cg checks the field against
+the command the way it checks a rule from the project file. An unchanged field
+is an `exact` rule. It fixes every argument, and its first token decides which
+programs it covers. The "allow extra arguments" box saves an unchanged field as
+a `prefix` rule instead. A field trimmed to a leading part is a `prefix` rule,
+whatever the box says. The first token may be the bare program name, the
+resolved path, the canonical path, or a project-relative path. A field that
+changes a later token, or adds one, matches nothing and is not saved.
+
+When the executable has no canonical path, the pre-filled rule cannot match.
+The form says so and names the bare-name edit that does.
+
+A prompt for a program that heads a wrapper rule says so in the rule field's
+description. Its remembered rule is always `exact`, so the form has no box. A
+trimmed field is rejected, and so is a respelled first token that names a
+wrapper program. The accepted edits are a first-token respelling or unchecking
+remember. Write a `wrapper` rule by hand for the family. Remember never creates
+a `wrapper` rule.
+
+A rejected edit is asked about again on a client at protocol 2026-07-28 or
+later. The second round shows only the failed forms. Each carries a note that
+names the accepted edits and the command the edit misses. Nothing runs and
+nothing is written until the second round resolves. Then every remembered rule
+is written at once. Unchecking remember runs the command without saving. Decline
+or cancel refuses it. A further failed edit asks again.
+
+An older client gets no second round. The command runs, the remember is skipped,
+and the tool result warns with the same note. A rejected edit beside a declined
+form, or one that would be skipped anyway, also runs or refuses without a second
+round.
 
 
 `enc`

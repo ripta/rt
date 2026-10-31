@@ -37,8 +37,8 @@ var ErrPendingApproval = fmt.Errorf("approval is no longer pending; call the too
 type pendingCommand struct {
 	Resolution *model.Resolution
 
-	// Suggestion is the rule the form pre-filled. Its kind travels with its tokens, since the
-	// retry writes the rule with the writer for that kind.
+	// Suggestion is the rule the form pre-filled. The retry checks the user's edit against the
+	// command and infers the kind from it, so no kind is stored here.
 	Suggestion approve.Suggestion
 
 	// PromptOffset is the offset into the typed argv of the command the form asked about. It is
@@ -96,6 +96,10 @@ type pendingEntry struct {
 	// DivergenceSnapshot says nothing. The retry skips the remember.
 	Unreadable bool
 
+	// Carry is set on an entry minted for a later round. It holds what the earlier rounds
+	// settled, so the later one asks only about the forms that still need an answer.
+	Carry *carriedRound
+
 	expires time.Time
 }
 
@@ -137,6 +141,7 @@ func (s *pendingStore) add(e pendingEntry) (string, error) {
 	stored.Args = slices.Clone(e.Args)
 	stored.Commands = cloneCommands(e.Commands)
 	stored.DivergenceSnapshot = slices.Clone(e.DivergenceSnapshot)
+	stored.Carry = e.Carry.clone()
 	stored.expires = s.clock().Add(pendingTTL)
 
 	s.mu.Lock()
@@ -247,6 +252,69 @@ func cloneArgvs(argvs [][]string) [][]string {
 	out := make([][]string, len(argvs))
 	for i, argv := range argvs {
 		out[i] = slices.Clone(argv)
+	}
+
+	return out
+}
+
+// carriedRound is what an input-required round hands to the next one. Commands, Argvs, and the
+// call's arguments already ride in the entry itself, so this holds only the answers.
+//
+// Nothing runs and nothing is written between rounds. Rules, Strategy, and Notes wait here until
+// the last round resolves, which then writes every remember at once.
+type carriedRound struct {
+	// Rules are the remembers that passed so far. Their retryable flags are kept.
+	Rules []rememberRule
+
+	// Notes are the warnings earlier rounds produced for the final result.
+	Notes []string
+
+	// Strategy is the divergence answer. It is meaningful only when the entry Diverged, and the
+	// later round has no divergence form to read it from.
+	Strategy approve.WriteStrategy
+
+	// Approved holds the indexes of the commands an earlier round actually got an accept for. A
+	// command the later round still needs, but that is neither here nor in a failed form, was
+	// allowed by a rule when the earlier round ran. Nobody approved it.
+	Approved []int
+
+	// Failed maps the id of each form the round asks again to what that form shows.
+	Failed map[string]askAgain
+}
+
+// askAgain is what a form asked again shows.
+type askAgain struct {
+	// Prefill is the failed edit, or nil when the field holds the original suggestion.
+	Prefill []string
+
+	// ExtraArgs is the allow-extra-arguments box as the user left it.
+	ExtraArgs bool
+
+	// Note says why the edit failed.
+	Note string
+}
+
+func (c *carriedRound) clone() *carriedRound {
+	if c == nil {
+		return nil
+	}
+
+	out := &carriedRound{
+		Rules:    make([]rememberRule, len(c.Rules)),
+		Notes:    slices.Clone(c.Notes),
+		Strategy: c.Strategy,
+		Approved: slices.Clone(c.Approved),
+		Failed:   make(map[string]askAgain, len(c.Failed)),
+	}
+
+	for i, rule := range c.Rules {
+		out.Rules[i] = rule
+		out.Rules[i].Tokens = slices.Clone(rule.Tokens)
+	}
+
+	for id, again := range c.Failed {
+		again.Prefill = slices.Clone(again.Prefill)
+		out.Failed[id] = again
 	}
 
 	return out

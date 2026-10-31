@@ -56,10 +56,14 @@ func promptTargetOf(call approvalCall, i int, v approve.Verdict) promptTarget {
 	return promptTarget{Argv: call.Argvs[i], Resolution: call.Resolutions[i]}
 }
 
-// planForms groups the commands that need a prompt by their suggested rule, kind and tokens
-// together. Groups come in the order their first command appears, commands keep call order inside
-// a group, and a group longer than maxFormCommands splits into consecutive forms under the same
-// rule.
+// planForms groups the commands that need a prompt by their suggested rule. Groups come in the
+// order their first command appears, commands keep call order inside a group, and a group longer
+// than maxFormCommands splits into consecutive forms under the same rule.
+//
+// Whether the program heads a wrapper rule is part of the key. Two spellings of one path can differ
+// in that, since a wrapper rule may name one spelling. A form then never mixes a command whose
+// remembered rule must stay exact with one whose rule need not, so the box is shown or omitted for
+// the whole form.
 func planForms(rs *approve.Ruleset, needs []int, targets map[int]promptTarget) []approvalForm {
 	var groups []approvalForm
 	index := make(map[string]int)
@@ -67,7 +71,7 @@ func planForms(rs *approve.Ruleset, needs []int, targets map[int]promptTarget) [
 	for _, i := range needs {
 		target := targets[i]
 		suggestion := rs.Suggest(target.Argv, target.Resolution)
-		key := fmt.Sprintf("%d\x00%s", suggestion.Kind, strings.Join(suggestion.Tokens, "\x00"))
+		key := fmt.Sprintf("%t\x00%s", suggestion.HeadsWrapper, strings.Join(suggestion.Tokens, "\x00"))
 
 		at, ok := index[key]
 		if !ok {
@@ -126,8 +130,10 @@ func (g *gate) request(call approvalCall, needs []int, verdicts []approve.Verdic
 		id := approvalID(pos, len(plan))
 
 		argvs := make([][]string, len(form.Commands))
+		formTargets := make([]approve.EditTarget, len(form.Commands))
 		for j, i := range form.Commands {
 			argvs[j] = call.Argvs[i]
+			formTargets[j] = approve.EditTarget{Argv: targets[i].Argv, Resolution: targets[i].Resolution}
 			commands[i].Prompted = true
 			commands[i].Suggestion = form.Suggestion
 			commands[i].PromptOffset = targets[i].Offset
@@ -135,8 +141,13 @@ func (g *gate) request(call approvalCall, needs []int, verdicts []approve.Verdic
 		}
 
 		forms[id] = &mcpsdk.ElicitParams{
-			Message:         approvalMessage(argvs, call.Cwd, pos+1, len(plan)),
-			RequestedSchema: approvalSchema(form.Suggestion, form.Inner, g.store.Project.Path),
+			Message: approvalMessage(argvs, call.Cwd, pos+1, len(plan)),
+			RequestedSchema: approvalSchema(formSpec{
+				Suggestion: form.Suggestion,
+				Inner:      form.Inner,
+				Note:       g.prefillNote(form.Suggestion, formTargets),
+				Path:       g.store.Project.Path,
+			}),
 		}
 	}
 
@@ -173,10 +184,16 @@ func (g *gate) request(call approvalCall, needs []int, verdicts []approve.Verdic
 // against a state that no longer holds. They are prompted again on the next call.
 //
 // Past that check, each form is read once through the ids the pending entry recorded. A decline,
-// cancel, missing answer, or malformed rule on a form with commands that still need a prompt
-// refuses the call, but only after every accepted form's remember has been persisted, so a user
-// who approved one form with remember checked does not lose that rule to a problem with another.
-// The first answer error is the one reported. Refusal always comes before any spawn.
+// cancel, or missing answer on a form with commands that still need a prompt refuses the call, but
+// only after every accepted form's remember has been persisted, so a user who approved one form
+// with remember checked does not lose that rule to a problem with another. The first answer error
+// is the one reported. Refusal always comes before any spawn.
+//
+// A remember is saved only when the edit matches every command in its form. An edit that does not
+// match, or that is not a rule at all, is a failed edit. On a client that takes more than one
+// round, failed edits on accepted forms ask again in a second round, and nothing is persisted or
+// run until that round resolves. Otherwise the commands run and the failed remembers are skipped
+// with a warning. A decline or an answer error beside a failed edit refuses without asking again.
 //
 // A form whose commands are all allowed now gates nothing. Its answer is read only for the
 // remember, and a problem with it becomes a warning instead of a refusal.
@@ -209,12 +226,35 @@ func (g *gate) answer(call approvalCall, entry *pendingEntry, needs []int, verdi
 	var declined []int
 	var rules []rememberRule
 	var notes []string
+	var failed []failedEdit
+	var approved []int
 	var answerErr error
+
+	if entry.Carry != nil {
+		rules = entry.Carry.Rules
+		notes = entry.Carry.Notes
+		approved = slices.Clone(entry.Carry.Approved)
+
+		for _, i := range needs {
+			if _, again := entry.Carry.Failed[entry.Commands[i].Form]; again || slices.Contains(approved, i) {
+				continue
+			}
+
+			return gateOutcome{}, &pendingRefusal{msg: fmt.Sprintf("%s refused: the command `%s` was not approved in the earlier round and the rules changed since; %s", call.Tool, visibleArgs(call.Argvs[i]), pendingAdvice)}
+		}
+	}
 
 	formIDs, members := entryForms(entry)
 	for _, id := range formIDs {
+		if entry.Carry != nil {
+			if _, again := entry.Carry.Failed[id]; !again {
+				continue
+			}
+		}
+
 		asking := slices.DeleteFunc(slices.Clone(members[id]), func(i int) bool { return !needed[i] })
 		suggestion := entry.Commands[members[id][0]].Suggestion
+		targets := entry.formTargets(call, members[id])
 
 		res, err := elicitAnswer(call.Responses, id)
 		if len(asking) == 0 {
@@ -222,13 +262,13 @@ func (g *gate) answer(call approvalCall, entry *pendingEntry, needs []int, verdi
 				continue
 			}
 
-			tokens, err := parseRuleField(res.Content, suggestion.Tokens)
-			if err != nil {
-				notes = append(notes, fmt.Sprintf("skipping remember: %v", err))
+			kind, tokens, failure := g.readRemember(res.Content, suggestion.Tokens, targets)
+			if failure != nil {
+				notes = append(notes, skippedEdit(g.editNote(failure, targets)))
 				continue
 			}
 
-			rules = addRememberRule(rules, suggestion.Kind, tokens, false)
+			rules = addRememberRule(rules, kind, tokens, false)
 			continue
 		}
 
@@ -250,18 +290,29 @@ func (g *gate) answer(call approvalCall, entry *pendingEntry, needs []int, verdi
 		}
 
 		if !remember(res.Content) {
+			approved = append(approved, asking...)
 			continue
 		}
 
-		tokens, err := parseRuleField(res.Content, suggestion.Tokens)
-		if err != nil {
-			if answerErr == nil {
-				answerErr = err
-			}
+		kind, tokens, failure := g.readRemember(res.Content, suggestion.Tokens, targets)
+		if failure != nil {
+			failed = append(failed, failedEdit{ID: id, Asking: asking, Targets: targets, Failure: failure})
 			continue
 		}
 
-		rules = addRememberRule(rules, suggestion.Kind, tokens, true)
+		approved = append(approved, asking...)
+		rules = addRememberRule(rules, kind, tokens, true)
+	}
+
+	refusing := answerErr != nil || len(declined) > 0
+	if len(failed) > 0 && !refusing && call.MultiRound {
+		if plan := g.planWrite(entry, call.Responses); plan.Skip == nil {
+			return g.askAgain(call, entry, formIDs, failed, rules, notes, approved, plan.Strategy)
+		}
+	}
+
+	for _, f := range failed {
+		notes = append(notes, skippedEdit(g.editNote(f.Failure, f.Targets)))
 	}
 
 	// The refusals below still carry the remember warning. The rules from the accepted forms were
@@ -292,6 +343,78 @@ func (g *gate) answer(call approvalCall, entry *pendingEntry, needs []int, verdi
 	return gateOutcome{Warning: warning}, nil
 }
 
+// failedEdit is a form whose remember the gate could not save as submitted.
+type failedEdit struct {
+	ID      string
+	Asking  []int
+	Targets []approve.EditTarget
+	Failure *editFailure
+}
+
+// askAgain ends a retry whose remember edits failed with a second input-required round. It shows
+// only the failed forms, each at the position it had in the first round, and stores everything the
+// first round settled under a fresh nonce. The old nonce was spent when the entry was redeemed.
+//
+// Nothing runs and nothing is written. The commands spawn, and every remember lands in one write,
+// after the last round resolves.
+func (g *gate) askAgain(call approvalCall, entry *pendingEntry, formIDs []string, failed []failedEdit, rules []rememberRule, notes []string, approved []int, strategy approve.WriteStrategy) (gateOutcome, error) {
+	carry := &carriedRound{
+		Rules:    rules,
+		Notes:    notes,
+		Approved: approved,
+		Strategy: strategy,
+		Failed:   make(map[string]askAgain, len(failed)),
+	}
+
+	forms := make(mcpsdk.InputRequestMap, len(failed))
+	for _, f := range failed {
+		again := askAgain{ExtraArgs: f.Failure.ExtraArgs, Note: g.editNote(f.Failure, f.Targets)}
+		if f.Failure.Tokens != nil {
+			again.Prefill = f.Failure.Tokens
+			again.Note += " The field holds the edit that failed."
+		} else {
+			again.Note += " The field holds the original command."
+		}
+
+		carry.Failed[f.ID] = again
+
+		argvs := make([][]string, len(f.Asking))
+		for j, i := range f.Asking {
+			argvs[j] = call.Argvs[i]
+		}
+
+		inner := slices.ContainsFunc(f.Asking, func(i int) bool { return entry.Commands[i].PromptOffset > 0 })
+		suggestion := entry.Commands[f.Asking[0]].Suggestion
+
+		forms[f.ID] = &mcpsdk.ElicitParams{
+			Message: askAgainMessage(argvs, call.Cwd, slices.Index(formIDs, f.ID)+1, len(formIDs)),
+			RequestedSchema: approvalSchema(formSpec{
+				Suggestion: suggestion,
+				Prefill:    again.Prefill,
+				ExtraArgs:  again.ExtraArgs,
+				Inner:      inner,
+				Note:       again.Note,
+				Path:       g.store.Project.Path,
+			}),
+		}
+	}
+
+	next := *entry
+	next.Carry = carry
+
+	nonce, err := g.pending().add(next)
+	if err != nil {
+		return gateOutcome{}, fmt.Errorf("%s refused: %w", call.Tool, err)
+	}
+
+	return gateOutcome{Pending: &mcpsdk.CallToolResult{InputRequests: forms, RequestState: nonce}}, nil
+}
+
+// skippedEdit words the warning for a failed edit that is not asked about again.
+func skippedEdit(note string) string {
+	return "skipping remember: " + note
+}
+
 // entryForms lists the approval form ids of a pending entry in form order, with the commands each
 // one covered. Ids are zero-padded, so sorting them lexically sorts them numerically.
 func entryForms(entry *pendingEntry) ([]string, map[string][]int) {
@@ -307,7 +430,7 @@ func entryForms(entry *pendingEntry) ([]string, map[string][]int) {
 	return ids, members
 }
 
-// rememberRule is a rule a user asked to save, of the kind the form suggested.
+// rememberRule is a rule a user asked to save, of the kind inferred from the edit.
 //
 // Retryable reports whether any form that asked for it still held a command needing a prompt.
 // Calling the tool again offers such a rule afresh. For any other rule the commands no longer
@@ -338,6 +461,34 @@ func addRememberRule(rules []rememberRule, kind approve.RuleKind, tokens []strin
 // divergence still lets the run proceed. It returns a diagnostic the caller surfaces in the tool
 // result, or empty on success, rather than writing to the server's stderr, which an MCP host
 // would bleed onto the screen.
+func (g *gate) persistRemembered(call approvalCall, entry *pendingEntry, rules []rememberRule) string {
+	if len(rules) == 0 {
+		return ""
+	}
+
+	plan := g.planWrite(entry, call.Responses)
+	if plan.Skip != nil {
+		return plan.Skip(rules)
+	}
+
+	var failures []string
+	for _, rule := range rules {
+		if err := g.writeRemembered(rule, plan.Strategy); err != nil {
+			failures = append(failures, rememberFailure(g.store.Project.Path, rule, err))
+		}
+	}
+
+	return strings.Join(failures, "; ")
+}
+
+// writePlan is how a round's remembers would be written. Skip is nil when they can be, and
+// otherwise words the skip for a set of rules.
+type writePlan struct {
+	Strategy approve.WriteStrategy
+	Skip     func(rules []rememberRule) string
+}
+
+// planWrite decides whether the round's remembers can be written, and how.
 //
 // The file on disk must still be what the first round saw. Otherwise the user's choice describes
 // a file that no longer exists, and an unreviewed change is never adopted.
@@ -346,19 +497,24 @@ func addRememberRule(rules []rememberRule, kind approve.RuleKind, tokens []strin
 // snapshot. A rule that cg itself wrote between the two calls moves that snapshot, and skipping
 // for it would drop a remember the user asked for. A round that showed a diff keeps the stricter
 // check, since the user's choice describes that diff.
-func (g *gate) persistRemembered(call approvalCall, entry *pendingEntry, rules []rememberRule) string {
-	if len(rules) == 0 {
-		return ""
+//
+// The divergence answer comes from the responses, or from the entry when an earlier round already
+// read it. A later round has no divergence form of its own.
+func (g *gate) planWrite(entry *pendingEntry, responses mcpsdk.InputResponseMap) writePlan {
+	path := g.store.Project.Path
+	skip := func(reason string) writePlan {
+		return writePlan{Skip: func(rules []rememberRule) string { return skippedRemember(path, rules, reason) }}
 	}
 
-	path := g.store.Project.Path
 	if entry.Unreadable {
-		return skippedRemember(path, rules, "could not be read when the approval was requested")
+		return skip("could not be read when the approval was requested")
 	}
 
 	changed, current, err := g.store.CheckProjectDivergence()
 	if err != nil {
-		return fmt.Sprintf("skipping remember: %v", err)
+		message := fmt.Sprintf("skipping remember: %v", err)
+
+		return writePlan{Skip: func([]rememberRule) string { return message }}
 	}
 
 	stale := changed
@@ -366,26 +522,23 @@ func (g *gate) persistRemembered(call approvalCall, entry *pendingEntry, rules [
 		stale = !changed || !bytes.Equal(current, entry.DivergenceSnapshot)
 	}
 	if stale {
-		return skippedRemember(path, rules, "changed on disk since the approval was requested")
+		return skip("changed on disk since the approval was requested")
 	}
 
 	strategy := approve.WriteDirect
 	if entry.Diverged {
-		var warning string
-		strategy, warning = divergenceStrategy(call.Responses)
-		if strategy < 0 {
-			return warning
+		if entry.Carry != nil {
+			strategy = entry.Carry.Strategy
+		} else {
+			var warning string
+			strategy, warning = divergenceStrategy(responses)
+			if strategy < 0 {
+				return writePlan{Skip: func([]rememberRule) string { return warning }}
+			}
 		}
 	}
 
-	var failures []string
-	for _, rule := range rules {
-		if err := g.writeRemembered(rule, strategy); err != nil {
-			failures = append(failures, rememberFailure(path, rule, err))
-		}
-	}
-
-	return strings.Join(failures, "; ")
+	return writePlan{Strategy: strategy}
 }
 
 // writeRemembered saves one remembered rule with the writer for its kind. Remember never creates

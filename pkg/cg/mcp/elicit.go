@@ -349,7 +349,7 @@ func obj(props map[string]any, required ...string) map[string]any {
 func elicitSchema(kase string, form approvalProbe) (any, string, error) {
 	switch kase {
 	case approvalFormCase:
-		return approvalSchema(form.Suggestion, false, form.Path), approvalMessage(form.Argvs, form.Cwd, 1, 2), nil
+		return approvalSchema(formSpec{Suggestion: form.Suggestion, Path: form.Path}), approvalMessage(form.Argvs, form.Cwd, 1, 2), nil
 
 	case "text":
 		return obj(map[string]any{
