@@ -28,9 +28,10 @@ const (
 	// The first levels are too coarse for agreement to mean anything.
 	integrateMinLevels = 2
 
-	// integrateTailFactor bounds how close to an endpoint a node may sit. A node is at most
-	// 2^(integrateTailFactor * |working precision|) times nearer than the range is wide. It
-	// ends a divergent integrand such as 1/x, whose tail never falls below the threshold.
+	// integrateTailFactor bounds how close to an endpoint, or on an infinite range how far
+	// out, a node may sit: 2^(integrateTailFactor * max(|working precision|, 64)) times the
+	// scale. The 64-bit floor keeps the cap useful at low precision. It ends a divergent
+	// integrand such as 1/x, whose tail never falls below the threshold.
 	integrateTailFactor = 4
 )
 
@@ -269,8 +270,8 @@ func (g *quadrature) estimate(level int) *big.Rat {
 	return new(big.Rat).Mul(new(big.Rat).SetInt(g.sum), ratPow2(g.wp-level-g.shift))
 }
 
-// level adds the samples that are new at this level. Level 0 holds every integer t. A later level
-// holds the odd multiples of its step.
+// level adds the samples that are new at this level. Level 0 holds every multiple of the level-0
+// step. A later level holds the odd multiples of its own step.
 func (g *quadrature) level(ctx context.Context, level int) error {
 	h := ratPow2(-level - g.shift)
 	step := int64(2)
