@@ -918,6 +918,9 @@ var examples = []example{
 	{"Functions", "max(3, 7, 5)", "variadic"},
 	{"Functions", "sin(deg2rad(30))", "trig uses radians; nest calls to convert"},
 
+	{"Binders", "sum(i**2, i = 1..10)", "sum over integer bounds; the index is local to the call"},
+	{"Binders", "product(i, i = 1..5)", "product over integer bounds"},
+
 	{"Variables", "r = 3", "assign a name"},
 	{"Variables", "PI * r ** 2", "use it later"},
 	{"Variables", "$0 + 1", "$N is the result of line N"},

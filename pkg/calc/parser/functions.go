@@ -129,6 +129,9 @@ var functionCatalog = []function{
 	{name: "perm", group: "Combinatorial", signature: "perm(n, k)", summary: "number of k-permutations of n", minArgs: 2, maxArgs: 2, fn: func(ctx context.Context, e *Env, a []*unified.Real) (*unified.Real, error) {
 		return perm(ctx, a[0], a[1], e.precision)
 	}},
+
+	{name: "sum", group: "Binders", signature: "sum(expr, i = a..b)", summary: "sum of expr for integer i from a to b", minArgs: 2, maxArgs: 2, binder: &binderSpec{forms: bindRange, eval: sumBinder}},
+	{name: "product", group: "Binders", signature: "product(expr, i = a..b)", summary: "product of expr for integer i from a to b", minArgs: 2, maxArgs: 2, binder: &binderSpec{forms: bindRange, eval: productBinder}},
 }
 
 // functions is the registry consulted by CallNode, derived from functionCatalog.
