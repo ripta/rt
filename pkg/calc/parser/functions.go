@@ -58,10 +58,14 @@ type binderSpec struct {
 	// perturbs marks a binder whose bound name carries a derivative, so the parser keeps it out of
 	// integer-only positions.
 	perturbs bool
-}
 
-// notDiffBinder is the not-differentiable reason of a binder.
-const notDiffBinder = "binder"
+	// jet evaluates the binder inside the body of a diff. Every binder but diff itself has one.
+	jet binderJetFunc
+
+	// integerBounds marks a binder whose range bounds must be integers, so the parser keeps the
+	// variable of a diff out of them.
+	integerBounds bool
+}
 
 // functionCatalog is the source of truth for the function registry. Entries are
 // ordered by group so the discoverability listing iterates it directly and emits
@@ -147,11 +151,11 @@ var functionCatalog = []function{
 		return perm(ctx, a[0], a[1], e.precision)
 	}},
 
-	{name: "sum", group: "Binders", signature: "sum(expr, i = a..b)", summary: "sum of expr for integer i from a to b", minArgs: 2, maxArgs: 2, notDiff: notDiffBinder, binder: &binderSpec{forms: bindRange, eval: sumBinder}},
-	{name: "product", group: "Binders", signature: "product(expr, i = a..b)", summary: "product of expr for integer i from a to b", minArgs: 2, maxArgs: 2, notDiff: notDiffBinder, binder: &binderSpec{forms: bindRange, eval: productBinder}},
-	{name: "solve", group: "Binders", signature: "solve(expr, x = a..b) or solve(expr, x = x0)", summary: "a root of expr in the bracket a..b, or the root nearest the guess x0; expr must be continuous and change sign there, and which root a bracket returns is unspecified", minArgs: 2, maxArgs: 2, notDiff: notDiffBinder, binder: &binderSpec{forms: bindRange | bindPoint, eval: solveBinder}},
-	{name: "integrate", group: "Binders", signature: "integrate(expr, x = a..b)", summary: "an estimate of the integral of expr for x from a to b, where a bound may be inf or -inf; it sharpens as precision rises, but is not a guaranteed bound, and an interior singularity or kink slows it, so split the range there", minArgs: 2, maxArgs: 2, notDiff: notDiffBinder, binder: &binderSpec{forms: bindRange, infinite: true, eval: integrateBinder}},
-	{name: "diff", group: "Binders", signature: "diff(expr, x = a) or diff(expr, n, x = a)", summary: fmt.Sprintf("the exact derivative of expr with respect to x at the point a, or the nth derivative for an integer literal n from 0 to %d; diff calls may nest for mixed partials", maxDiffOrder), minArgs: 2, maxArgs: 2, binder: &binderSpec{forms: bindPoint, eval: diffBinder, perturbs: true}, notDiff: notDiffBinder},
+	{name: "sum", group: "Binders", signature: "sum(expr, i = a..b)", summary: "sum of expr for integer i from a to b", minArgs: 2, maxArgs: 2, binder: &binderSpec{forms: bindRange, eval: sumBinder, jet: sumJet, integerBounds: true}},
+	{name: "product", group: "Binders", signature: "product(expr, i = a..b)", summary: "product of expr for integer i from a to b", minArgs: 2, maxArgs: 2, binder: &binderSpec{forms: bindRange, eval: productBinder, jet: productJet, integerBounds: true}},
+	{name: "solve", group: "Binders", signature: "solve(expr, x = a..b) or solve(expr, x = x0)", summary: "a root of expr in the bracket a..b, or the root nearest the guess x0; expr must be continuous and change sign there, and which root a bracket returns is unspecified", minArgs: 2, maxArgs: 2, binder: &binderSpec{forms: bindRange | bindPoint, eval: solveBinder, jet: solveJet}},
+	{name: "integrate", group: "Binders", signature: "integrate(expr, x = a..b)", summary: "an estimate of the integral of expr for x from a to b, where a bound may be inf or -inf; it sharpens as precision rises, but is not a guaranteed bound, and a derivative of it taken with diff is an estimate too, and an interior singularity or kink slows it, so split the range there", minArgs: 2, maxArgs: 2, binder: &binderSpec{forms: bindRange, infinite: true, eval: integrateBinder, jet: integrateJet}},
+	{name: "diff", group: "Binders", signature: "diff(expr, x = a) or diff(expr, n, x = a)", summary: fmt.Sprintf("the exact derivative of expr with respect to x at the point a, or the nth derivative for an integer literal n from 0 to %d; diff calls may nest for mixed partials", maxDiffOrder), minArgs: 2, maxArgs: 2, binder: &binderSpec{forms: bindPoint, eval: diffBinder, perturbs: true}},
 }
 
 // functions is the registry consulted by CallNode, derived from functionCatalog.

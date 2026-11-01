@@ -183,8 +183,6 @@ func TestDiffErrors(t *testing.T) {
 		src  string
 		want string
 	}{
-		{"diff(sum(x, i = 1..3), x = 1)", "not yet differentiable"},
-		{"diff(integrate(x, t = 0..1), x = 1)", "not yet differentiable"},
 		{"diff(1/x, x = 0)", "division by zero"},
 		{"diff(sqrt(x), x = 0)", "division by zero"},
 		{"diff(ln(x), x = 0)", "ln(0)"},
@@ -373,6 +371,13 @@ func TestEveryCatalogEntryHasADerivativeRuleOrMarker(t *testing.T) {
 	}
 
 	for _, f := range functionCatalog {
+		if f.binder != nil {
+			if (f.binder.jet == nil) == !f.binder.perturbs || f.notDiff != "" {
+				t.Errorf("%s: a binder needs a jet evaluation, or must be diff itself", f.name)
+			}
+			continue
+		}
+
 		switch {
 		case f.partials != nil && f.notDiff != "":
 			t.Errorf("%s: has both a derivative rule and a not-differentiable marker", f.name)

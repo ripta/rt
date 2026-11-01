@@ -103,6 +103,40 @@ type Binding struct {
 	Order int
 }
 
+// jetBound is a Bound whose value may carry perturbations.
+type jetBound struct {
+	Value jv
+	Inf   int
+}
+
+// jetBinding is a Binding whose bounds were evaluated as jets in the caller's scope.
+type jetBinding struct {
+	Name  string
+	Range bool
+	Lo    jetBound
+	Hi    jetBound
+}
+
+// scalar drops the perturbations of the bounds.
+func (b jetBinding) scalar() Binding {
+	out := Binding{Name: b.Name, Range: b.Range}
+	for i, jb := range []jetBound{b.Lo, b.Hi} {
+		bound := Bound{Inf: jb.Inf}
+		if jb.Inf == 0 {
+			bound.Value = jb.Value.value()
+		}
+		if i == 0 {
+			out.Lo = bound
+		} else {
+			out.Hi = bound
+		}
+	}
+	return out
+}
+
+// binderJetFunc evaluates a binder call inside a diff body, to a jet.
+type binderJetFunc func(ctx context.Context, env *Env, body []Node, bind jetBinding) (jv, error)
+
 // binderFunc evaluates a binder call. body holds the call's arguments before the binding,
 // unevaluated.
 type binderFunc func(ctx context.Context, env *Env, body []Node, bind Binding) (*unified.Real, error)
@@ -165,6 +199,36 @@ func evalBinding(ctx context.Context, env *Env, b *BindingNode) (Binding, error)
 	if out.Range {
 		if out.Hi, err = evalBound(ctx, env, b.Hi); err != nil {
 			return Binding{}, err
+		}
+	}
+	return out, nil
+}
+
+func evalBoundJet(ctx context.Context, env *Env, n Node) (jetBound, error) {
+	if infBound(n) != nil {
+		if u, ok := n.(*UnaryNode); ok && u.Op.Type == tokens.OP_MINUS {
+			return jetBound{Inf: -1}, nil
+		}
+		return jetBound{Inf: 1}, nil
+	}
+
+	v, err := evalJet(ctx, env, n)
+	if err != nil {
+		return jetBound{}, err
+	}
+	return jetBound{Value: v}, nil
+}
+
+func evalBindingJet(ctx context.Context, env *Env, b *BindingNode) (jetBinding, error) {
+	out := jetBinding{Name: b.Name.Value, Range: b.Hi != nil}
+
+	var err error
+	if out.Lo, err = evalBoundJet(ctx, env, b.Lo); err != nil {
+		return jetBinding{}, err
+	}
+	if out.Range {
+		if out.Hi, err = evalBoundJet(ctx, env, b.Hi); err != nil {
+			return jetBinding{}, err
 		}
 	}
 	return out, nil

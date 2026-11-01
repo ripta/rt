@@ -936,6 +936,8 @@ var examples = []example{
 	{"Binders", "diff(x*x*x, x = 2)", "the body is evaluated once; the point binding comes last"},
 	{"Binders", "diff(x**3, 2, x = 2)", "an integer literal before the binding is the order of the derivative"},
 	{"Binders", "diff(diff(x*y, x = 1), y = 2)", "diff calls nest, so mixed partials work"},
+	{"Binders", "diff(integrate(sin(t), t = 0..x), x = 1)", "diff goes through integrate, solve, sum, and product; through integrate it is an estimate"},
+	{"Binders", "diff(solve(t**2 - x, t = 0..10), x = 4)", "the derivative of a root, by the implicit function theorem"},
 
 	{"Variables", "r = 3", "assign a name"},
 	{"Variables", "PI * r ** 2", "use it later"},

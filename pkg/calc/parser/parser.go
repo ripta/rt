@@ -504,6 +504,9 @@ func (p *P) finishCall(name tokens.Token, args []Node) (Node, error) {
 			if err := p.checkIntegerOnly(body, binding.Name.Value); err != nil {
 				return nil, err
 			}
+			if err := p.checkIntegerBounds(body, binding.Name.Value); err != nil {
+				return nil, err
+			}
 		}
 	}
 

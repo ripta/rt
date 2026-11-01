@@ -77,3 +77,33 @@ func (p *P) checkIntegerOnly(body Node, name string) error {
 		return nil
 	})
 }
+
+// checkIntegerBounds rejects a reference to name, the variable of a diff, in a bound of a sum or
+// product. Integer bounds make the result defined only on the integers. A bound is evaluated in
+// the scope around its binder, so a binder that rebinds name does not hide it.
+func (p *P) checkIntegerBounds(body Node, name string) error {
+	return walkFree(body, name, func(n Node) error {
+		call, ok := n.(*CallNode)
+		if !ok || len(call.Args) == 0 {
+			return nil
+		}
+		fn, ok := p.catalog[call.Func.Value]
+		if !ok || fn.binder == nil || !fn.binder.integerBounds {
+			return nil
+		}
+		b, ok := call.Args[len(call.Args)-1].(*BindingNode)
+		if !ok {
+			return nil
+		}
+
+		for _, bound := range []Node{b.Lo, b.Hi} {
+			if bound == nil {
+				continue
+			}
+			if id := freeRef(bound, name); id != nil {
+				return p.errorf(id.Name, "%s is the variable of diff, so it cannot appear in a bound of %s, which takes only integers", name, call.Func.Value)
+			}
+		}
+		return nil
+	})
+}
