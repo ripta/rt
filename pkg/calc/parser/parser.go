@@ -313,7 +313,7 @@ func (p *P) parsePrimary() (Node, error) {
 		if err != nil {
 			return nil, err
 		}
-		node = &NumberNode{Value: val}
+		node = &NumberNode{Value: val, Tok: tok}
 
 	case tokens.IDENT:
 		if p.peek().Type == tokens.LPAREN {
@@ -479,6 +479,14 @@ func (p *P) finishCall(name tokens.Token, args []Node) (Node, error) {
 		}
 	}
 
+	if fn.binder != nil && fn.binder.perturbs {
+		var err error
+		if args, call.Order, err = p.diffOrder(name, args); err != nil {
+			return nil, err
+		}
+		call.Args = args
+	}
+
 	if len(args) < fn.minArgs || (fn.maxArgs >= 0 && len(args) > fn.maxArgs) {
 		return nil, p.errorf(name, "%s %s", name.Value, arityError(fn, len(args)))
 	}
@@ -500,6 +508,29 @@ func (p *P) finishCall(name tokens.Token, args []Node) (Node, error) {
 	}
 
 	return call, nil
+}
+
+// diffOrder splits the optional order literal from the arguments of a diff call. The order sits
+// between the body and the binding. A call without one takes the first derivative.
+func (p *P) diffOrder(name tokens.Token, args []Node) ([]Node, int, error) {
+	if len(args) != 3 {
+		return args, 1, nil
+	}
+	if _, ok := args[1].(*BindingNode); ok {
+		return args, 1, nil
+	}
+
+	lit, ok := args[1].(*NumberNode)
+	if !ok || lit.Tok.Type != tokens.LIT_INT {
+		return nil, 0, p.errorf(name, "the order of %s must be an integer literal from 0 to %d, as in %s(expr, 2, x = a)", name.Value, maxDiffOrder, name.Value)
+	}
+
+	n, _ := new(big.Int).SetString(strings.ReplaceAll(lit.Tok.Value, "_", ""), 10)
+	if n == nil || n.Cmp(big.NewInt(maxDiffOrder)) > 0 {
+		return nil, 0, p.errorf(lit.Tok, "the order of %s is at most %d", name.Value, maxDiffOrder)
+	}
+
+	return []Node{args[0], args[2]}, int(n.Int64()), nil
 }
 
 func (p *P) checkBinding(name tokens.Token, fn function, b *BindingNode) error {

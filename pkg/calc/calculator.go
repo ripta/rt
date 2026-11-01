@@ -934,6 +934,8 @@ var examples = []example{
 	{"Binders", "integrate(exp(-(x**2)), x = -inf..inf)", "a bound may be inf or -inf"},
 	{"Binders", "diff(sin(x), x = PI)", "the exact derivative at a point, not a finite difference"},
 	{"Binders", "diff(x*x*x, x = 2)", "the body is evaluated once; the point binding comes last"},
+	{"Binders", "diff(x**3, 2, x = 2)", "an integer literal before the binding is the order of the derivative"},
+	{"Binders", "diff(diff(x*y, x = 1), y = 2)", "diff calls nest, so mixed partials work"},
 
 	{"Variables", "r = 3", "assign a name"},
 	{"Variables", "PI * r ** 2", "use it later"},

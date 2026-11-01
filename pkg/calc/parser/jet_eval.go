@@ -24,8 +24,14 @@ func evalJet(ctx context.Context, env *Env, n Node) (jv, error) {
 	return j.evalJet(ctx, env)
 }
 
+// notDifferentiable words the error for an entry with no derivative rule. A binder will have one
+// later, so only it is "not yet" differentiable.
 func notDifferentiable(pos tokens.Position, name, reason string) error {
-	return fmt.Errorf("%s: %s is not yet differentiable inside diff (%s)", pos, name, reason)
+	yet := ""
+	if reason == notDiffBinder {
+		yet = "yet "
+	}
+	return fmt.Errorf("%s: %s is not %sdifferentiable inside diff (%s)", pos, name, yet, reason)
 }
 
 func (n *NumberNode) evalJet(context.Context, *Env) (jv, error) {
@@ -149,6 +155,9 @@ func (n *CallNode) evalJet(ctx context.Context, env *Env) (jv, error) {
 	if !ok {
 		return jv{}, fmt.Errorf("%s: unknown function %q", n.Func.Pos, n.Func.Value)
 	}
+	if fn.binder != nil && fn.binder.perturbs {
+		return n.diffJet(ctx, env)
+	}
 	if fn.binder != nil {
 		return jv{}, notDifferentiable(n.Func.Pos, n.Func.Value, fn.notDiff)
 	}
@@ -181,36 +190,70 @@ func (n *CallNode) evalJet(ctx context.Context, env *Env) (jv, error) {
 	return result, nil
 }
 
-// maxDiffOrder is the order diff takes the derivative to.
-const maxDiffOrder = 1
+// maxDiffOrder is the highest order the parser accepts for diff.
+const maxDiffOrder = 12
 
 func diffBinder(ctx context.Context, env *Env, body []Node, bind Binding) (*unified.Real, error) {
-	return diffAt(ctx, env, body[0], bind.Name, bind.Lo.Value, maxDiffOrder)
+	if bind.Order == 0 {
+		return evalBody(ctx, env, body[0], bind.Name, bind.Lo.Value)
+	}
+
+	r, err := diffAt(ctx, env, body[0], bind.Name, scalarJ(bind.Lo.Value), bind.Order)
+	if err != nil {
+		return nil, err
+	}
+	return r.value(), nil
+}
+
+// diffJet evaluates a diff call inside the body of an enclosing diff. The point and the body may
+// depend on the enclosing variables, so the result is a jet in their tags.
+func (n *CallNode) diffJet(ctx context.Context, env *Env) (jv, error) {
+	b, ok := n.Args[len(n.Args)-1].(*BindingNode)
+	if !ok || len(n.Args) != 2 {
+		return jv{}, fmt.Errorf("%s: binder %s cannot be evaluated", n.Func.Pos, n.Func.Value)
+	}
+
+	at, err := evalJet(ctx, env, b.Lo)
+	if err != nil {
+		return jv{}, err
+	}
+
+	var r jv
+	if n.Order == 0 {
+		r, err = evalBodyJet(ctx, env, n.Args[0], b.Name.Value, at)
+	} else {
+		r, err = diffAt(ctx, env, n.Args[0], b.Name.Value, at, n.Order)
+	}
+	if err != nil {
+		if isStop(err) {
+			return jv{}, err
+		}
+		return jv{}, fmt.Errorf("%s: %w", n.Func.Pos, err)
+	}
+	return r, nil
 }
 
 // diffAt returns the order-th derivative of body at name = at. The body is evaluated once, with
-// name bound to the jet at + e in a fresh tag.
-func diffAt(ctx context.Context, env *Env, body Node, name string, at *unified.Real, order int) (*unified.Real, error) {
+// name bound to the jet at + e in a fresh tag. The point may itself be a jet of an enclosing tag.
+func diffAt(ctx context.Context, env *Env, body Node, name string, at jv, order int) (jv, error) {
 	t := newTag()
 
 	co := make([]jv, order+1)
 	for k := range co {
 		co[k] = zeroJ()
 	}
-	co[0] = scalarJ(at)
-	if order >= 1 {
-		co[1] = intJ(1)
-	}
+	co[0] = at
+	co[1] = intJ(1)
 
 	r, err := evalBodyJet(ctx, env, body, name, jv{tag: t, co: co})
 	if err != nil {
-		return nil, err
+		return jv{}, err
 	}
 
 	// The k-th derivative is k! times the k-th Taylor coefficient.
-	result := r.coef(t, order).value()
+	result := r.coef(t, order)
 	for k := 2; k <= order; k++ {
-		result = result.Multiply(intReal(big.NewInt(int64(k))))
+		result = jmul(result, intJ(int64(k)))
 	}
 	return result, nil
 }
