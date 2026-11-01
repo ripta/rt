@@ -105,8 +105,34 @@ func (n *BinaryNode) evalJet(ctx context.Context, env *Env) (jv, error) {
 	case tokens.OP_POW:
 		return jetPow(ctx, env, l, r)
 
-	case tokens.OP_PERCENT, tokens.OP_SHL, tokens.OP_SHR:
-		return jv{}, notDifferentiable(n.Op.Pos, n.Op.Value, "not smooth or integer-only")
+	case tokens.OP_PERCENT:
+		apply := func(ctx context.Context, env *Env, a []*unified.Real) (*unified.Real, error) {
+			return n.apply(ctx, env, a[0], a[1])
+		}
+		res, err := composeN(ctx, env, n.Op.Value, apply, dMod, []jv{l, r})
+		if err != nil {
+			if isStop(err) {
+				return jv{}, err
+			}
+			return jv{}, fmt.Errorf("%s: %w", n.Op.Pos, err)
+		}
+		return res, nil
+
+	case tokens.OP_SHL, tokens.OP_SHR:
+		// A shift by a constant count scales the series. A count that depends on the variable has no
+		// derivative, and the parser rejects a count that names the variable.
+		if r.co != nil {
+			return jv{}, notDifferentiable(n.Op.Pos, n.Op.Value, "the shift count is integer-only")
+		}
+		count, err := extractInteger(ctx, r.re, n.Op, env.precision)
+		if err != nil {
+			return jv{}, err
+		}
+		one := intReal(big.NewInt(1))
+		if n.Op.Type == tokens.OP_SHL {
+			return jmul(l, scalarJ(one.ShiftLeft(count))), nil
+		}
+		return jmul(l, scalarJ(one.ShiftRight(count))), nil
 
 	default:
 		return jv{}, fmt.Errorf("unknown operator")
