@@ -197,12 +197,25 @@ func TestDiffThroughSolveAtAVanishingSlope(t *testing.T) {
 	}
 }
 
+// A node of the substituted unit range is reported as the user's variable.
 func TestDiffThroughBindersBodyFailure(t *testing.T) {
 	t.Parallel()
 
-	_, err := evalShipping(context.Background(), "diff(integrate(abs(t - x), t = 0..2), x = 1)", NewEnv())
-	if err == nil || !strings.Contains(err.Error(), "the body failed at") || !strings.Contains(err.Error(), "abs is not differentiable") {
-		t.Errorf("err = %v, want the kink named at a sample", err)
+	tests := []struct {
+		src  string
+		want []string
+	}{
+		{"diff(integrate(abs(t - x), t = 0..2), x = 1)", []string{"the body failed at t = 1:", "abs is not differentiable"}},
+		{"diff(integrate(x/(t - 2), t = 0..4), x = 1)", []string{"the body failed at t = 2:", "division by zero"}},
+		{"diff(integrate(abs(t)*exp(-t), t = x..inf), x = 0)", []string{"the body failed at t = 0:", "abs is not differentiable"}},
+	}
+	for _, tt := range tests {
+		_, err := evalShipping(context.Background(), tt.src, NewEnv())
+		for _, w := range tt.want {
+			if err == nil || !strings.Contains(err.Error(), w) {
+				t.Errorf("%s: err = %v, want it to contain %q", tt.src, err, w)
+			}
+		}
 	}
 }
 

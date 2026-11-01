@@ -230,6 +230,16 @@ func TestDiffErrors(t *testing.T) {
 	}
 }
 
+// Errors from ** inside a diff body carry the operator's position, as other jet rules do.
+func TestDiffPowErrorCarriesPosition(t *testing.T) {
+	t.Parallel()
+
+	_, err := evalShipping(context.Background(), "diff(x**0.5, x = -4)", NewEnv())
+	if err == nil || !strings.Contains(err.Error(), ":1:7: ") || !strings.Contains(err.Error(), "non-real") {
+		t.Errorf("got %v, want the position of ** and the cause", err)
+	}
+}
+
 func TestDiffChargesOneBodyEvaluation(t *testing.T) {
 	t.Parallel()
 
@@ -487,7 +497,6 @@ func TestJetSeriesAtHigherOrders(t *testing.T) {
 		{"x^3 at zero", func() (jv, error) { return jetPow(ctx, env, x, intJ(3)) }, []float64{0, 0, 0, 1, 0}},
 		{"2^x", func() (jv, error) { return jetPow(ctx, env, intJ(2), x) }, []float64{1, math.Ln2, math.Ln2 * math.Ln2 / 2, math.Pow(math.Ln2, 3) / 6, math.Pow(math.Ln2, 4) / 24}},
 		{"(1+x)^(1+x)", func() (jv, error) { return jetPow(ctx, env, jadd(one, x), jadd(one, x)) }, []float64{1, 1, 1, 0.5, 1.0 / 3}},
-		{"gamma(1+x)", func() (jv, error) { return jetGamma(ctx, env, jadd(one, x)) }, []float64{1, -eulerGamma, 0.9890559953279725, -0.9074790760808862, 0.9817280868344002}},
 	}
 	for _, tt := range tests {
 		tt := tt

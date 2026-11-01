@@ -12,8 +12,9 @@ import (
 
 // kinkSign is the sign of v: 0 for an exact zero, otherwise -1 or 1. A value that cannot be told
 // from zero at p is compared again at doubling precisions, from |p| + solveExtraBits bits up to
-// solveEscalations doublings, as solve does. It returns errNearZero when it is still undecided.
-// nearZeroSign alone tries one extra step, which cannot tell a point like 10**-200 from 0.
+// solveEscalations doublings. It returns errNearZero when it is still undecided.
+// nearZeroSign extends only one step, which cannot tell a point like 10**-200 from 0. Solve's
+// own ladder also re-evaluates the body at each precision, which a plain value cannot do.
 func kinkSign(ctx context.Context, v *unified.Real, p int) (int, error) {
 	if v.IsZero() {
 		return 0, nil
@@ -60,7 +61,9 @@ const (
 // returns a zero side.
 //
 // The side is meaningful for kinkZero and kinkInteger, which are the sets whose rules read it.
-func kinkNear(ctx context.Context, env *Env, name string, set kinkSet, u *unified.Real) (*big.Rat, int, error) {
+//
+// A message names the point as k, or as "of = k" when u is derived from the arguments.
+func kinkNear(ctx context.Context, env *Env, name, of string, set kinkSet, u *unified.Real) (*big.Rat, int, error) {
 	k := new(big.Rat)
 	if set != kinkZero {
 		q, err := approxRat(ctx, u, env.precision)
@@ -73,14 +76,19 @@ func kinkNear(ctx context.Context, env *Env, name string, set kinkSet, u *unifie
 		return k, 0, nil
 	}
 
+	at := "at " + fmtRat(k)
+	if of != "" {
+		at = "where " + of + " = " + fmtRat(k)
+	}
+
 	side, err := kinkSign(ctx, u.Subtract(ratReal(k)), env.precision)
 	switch {
 	case errors.Is(err, errNearZero):
-		return nil, 0, fmt.Errorf("%s is not differentiable at %s, and the argument is too close to it to tell whether it is there", name, fmtRat(k))
+		return nil, 0, fmt.Errorf("%s is not differentiable %s, and the argument is too close to it to tell whether it is there", name, at)
 	case err != nil:
 		return nil, 0, err
 	case side == 0:
-		return nil, 0, fmt.Errorf("%s is not differentiable at %s", name, fmtRat(k))
+		return nil, 0, fmt.Errorf("%s is not differentiable %s", name, at)
 	}
 	return k, side, nil
 }
@@ -105,14 +113,14 @@ func roundRat(q *big.Rat) *big.Int {
 // kinkDerivative is the derivative rule of an entry that is flat wherever it is smooth.
 func kinkDerivative(name string, set kinkSet) derivFn {
 	return func(ctx context.Context, env *Env, u jv) (jv, error) {
-		_, _, err := kinkNear(ctx, env, name, set, u.value())
+		_, _, err := kinkNear(ctx, env, name, "", set, u.value())
 		return zeroJ(), err
 	}
 }
 
 // dAbs is signum(u). The sign is constant near a point that is not a kink.
 func dAbs(ctx context.Context, env *Env, u jv) (jv, error) {
-	_, side, err := kinkNear(ctx, env, "abs", kinkZero, u.value())
+	_, side, err := kinkNear(ctx, env, "abs", "", kinkZero, u.value())
 	return intJ(int64(side)), err
 }
 
@@ -124,7 +132,7 @@ func dMod(ctx context.Context, env *Env, args []jv) ([]jv, error) {
 		return nil, errDivideByZero
 	}
 
-	k, side, err := kinkNear(ctx, env, "%", kinkInteger, a.Divide(b))
+	k, side, err := kinkNear(ctx, env, "%", "the first argument divided by the second", kinkInteger, a.Divide(b))
 	if err != nil {
 		return nil, err
 	}

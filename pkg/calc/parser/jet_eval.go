@@ -104,7 +104,14 @@ func (n *BinaryNode) evalJet(ctx context.Context, env *Env) (jv, error) {
 		return jdiv(l, r)
 
 	case tokens.OP_POW:
-		return jetPow(ctx, env, l, r)
+		res, err := jetPow(ctx, env, l, r)
+		if err != nil {
+			if isStop(err) {
+				return jv{}, err
+			}
+			return jv{}, fmt.Errorf("%s: %w", n.Op.Pos, err)
+		}
+		return res, nil
 
 	case tokens.OP_PERCENT:
 		apply := func(ctx context.Context, env *Env, a []*unified.Real) (*unified.Real, error) {

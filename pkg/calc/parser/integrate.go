@@ -163,6 +163,9 @@ type integral struct {
 	// span names the user's range in messages, when the run works on a substituted one.
 	span string
 
+	// userAt maps a node of the substituted range back to the user's variable, for messages.
+	userAt func(x *big.Rat) *big.Rat
+
 	lo, hi *unified.Real
 	shape  shape
 	neg    bool
@@ -595,5 +598,9 @@ func (g *quadrature) sample(ctx context.Context, x, w *big.Rat) ([]*big.Int, err
 	if isStop(err) {
 		return nil, err
 	}
-	return nil, fmt.Errorf("the body failed at %s = %s: %w. Split the range at that point", g.q.name, fmtRat(x), err)
+	at := x
+	if g.q.userAt != nil {
+		at = g.q.userAt(x)
+	}
+	return nil, fmt.Errorf("the body failed at %s = %s: %w. Split the range at that point", g.q.name, fmtRat(at), err)
 }

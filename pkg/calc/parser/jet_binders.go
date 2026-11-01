@@ -173,11 +173,22 @@ func integrateFiniteJet(ctx context.Context, snap *Env, shape jetShape, body Nod
 	}
 
 	w := jsub(b, a)
+	var userAt func(*big.Rat) *big.Rat
+	ra, aerr := approxRat(ctx, a.value(), precision)
+	rb, berr := approxRat(ctx, b.value(), precision)
+	if aerr == nil && berr == nil {
+		width := new(big.Rat).Sub(rb, ra)
+		userAt = func(u *big.Rat) *big.Rat {
+			return new(big.Rat).Add(ra, new(big.Rat).Mul(width, u))
+		}
+	}
 	q := &integral{
 		env:  snap,
 		name: name,
 		n:    shape.size(),
 		span: userSpan(ctx, a.value(), b.value(), precision),
+
+		userAt: userAt,
 		eval: func(ctx context.Context, env *Env, u *big.Rat) ([]*unified.Real, error) {
 			s := jadd(a, jmul(w, scalarJ(ratReal(u))))
 			f, err := evalBodyJet(ctx, env, body, name, s)
