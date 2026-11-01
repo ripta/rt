@@ -137,8 +137,8 @@ func TestBindersListedTogether(t *testing.T) {
 			names = append(names, f.Name)
 		}
 	}
-	if got := strings.Join(names, ","); got != "sum,product,solve,integrate" {
-		t.Errorf("Binders group = %q, want sum,product,solve,integrate", got)
+	if got := strings.Join(names, ","); got != "sum,product,solve,integrate,diff" {
+		t.Errorf("Binders group = %q, want sum,product,solve,integrate,diff", got)
 	}
 
 	infos := Functions()

@@ -28,7 +28,17 @@ type function struct {
 	minArgs   int
 	maxArgs   int
 	binder    *binderSpec
-	fn        func(ctx context.Context, env *Env, args []*unified.Real) (*unified.Real, error)
+
+	// partials is the derivative rule diff uses. notDiff is the reason an entry has none. Every
+	// entry has exactly one of the two. The coverage test enforces it.
+	partials partialsFn
+	notDiff  string
+
+	// integerArgs marks an entry that is defined only on integers, so no argument may depend on a
+	// variable that diff perturbs.
+	integerArgs bool
+
+	fn func(ctx context.Context, env *Env, args []*unified.Real) (*unified.Real, error)
 }
 
 // bindForm is a set of binding argument forms.
@@ -44,6 +54,10 @@ type binderSpec struct {
 	forms    bindForm
 	infinite bool
 	eval     binderFunc
+
+	// perturbs marks a binder whose bound name carries a derivative, so the parser keeps it out of
+	// integer-only positions.
+	perturbs bool
 }
 
 // functionCatalog is the source of truth for the function registry. Entries are
@@ -51,89 +65,90 @@ type binderSpec struct {
 // a header whenever the group changes, with no separate ordering table. The
 // dispatch map below is derived from it.
 var functionCatalog = []function{
-	{name: "abs", group: "Basic", signature: "abs(x)", summary: "absolute value", minArgs: 1, maxArgs: 1, fn: func(_ context.Context, _ *Env, a []*unified.Real) (*unified.Real, error) { return a[0].Abs(), nil }},
-	{name: "signum", group: "Basic", signature: "signum(x)", summary: "sign of x as -1, 0, or 1", minArgs: 1, maxArgs: 1, fn: func(ctx context.Context, e *Env, a []*unified.Real) (*unified.Real, error) {
+	{name: "abs", group: "Basic", signature: "abs(x)", summary: "absolute value", minArgs: 1, maxArgs: 1, partials: unaryPartials(dAbs), fn: func(_ context.Context, _ *Env, a []*unified.Real) (*unified.Real, error) { return a[0].Abs(), nil }},
+	{name: "signum", group: "Basic", signature: "signum(x)", summary: "sign of x as -1, 0, or 1", minArgs: 1, maxArgs: 1, partials: unaryPartials(kinkDerivative("signum", kinkZero)), fn: func(ctx context.Context, e *Env, a []*unified.Real) (*unified.Real, error) {
 		return signum(ctx, a[0], e.precision)
 	}},
 
-	{name: "sin", group: "Trigonometric (radians)", signature: "sin(x)", summary: "sine", minArgs: 1, maxArgs: 1, fn: func(_ context.Context, _ *Env, a []*unified.Real) (*unified.Real, error) { return a[0].Sin(), nil }},
-	{name: "cos", group: "Trigonometric (radians)", signature: "cos(x)", summary: "cosine", minArgs: 1, maxArgs: 1, fn: func(_ context.Context, _ *Env, a []*unified.Real) (*unified.Real, error) { return a[0].Cos(), nil }},
-	{name: "tan", group: "Trigonometric (radians)", signature: "tan(x)", summary: "tangent", minArgs: 1, maxArgs: 1, fn: func(_ context.Context, _ *Env, a []*unified.Real) (*unified.Real, error) { return a[0].Tan(), nil }},
-	{name: "asin", group: "Trigonometric (radians)", signature: "asin(x)", summary: "inverse sine, returns radians", minArgs: 1, maxArgs: 1, fn: func(ctx context.Context, _ *Env, a []*unified.Real) (*unified.Real, error) { return a[0].Asin(ctx) }},
-	{name: "acos", group: "Trigonometric (radians)", signature: "acos(x)", summary: "inverse cosine, returns radians", minArgs: 1, maxArgs: 1, fn: func(ctx context.Context, _ *Env, a []*unified.Real) (*unified.Real, error) { return a[0].Acos(ctx) }},
-	{name: "atan", group: "Trigonometric (radians)", signature: "atan(x)", summary: "inverse tangent, returns radians", minArgs: 1, maxArgs: 1, fn: func(_ context.Context, _ *Env, a []*unified.Real) (*unified.Real, error) { return a[0].Atan(), nil }},
-	{name: "atan2", group: "Trigonometric (radians)", signature: "atan2(y, x)", summary: "angle of the point (x, y), returns radians", minArgs: 2, maxArgs: 2, fn: func(ctx context.Context, _ *Env, a []*unified.Real) (*unified.Real, error) {
+	{name: "sin", group: "Trigonometric (radians)", signature: "sin(x)", summary: "sine", minArgs: 1, maxArgs: 1, partials: unaryPartials(dSin), fn: func(_ context.Context, _ *Env, a []*unified.Real) (*unified.Real, error) { return a[0].Sin(), nil }},
+	{name: "cos", group: "Trigonometric (radians)", signature: "cos(x)", summary: "cosine", minArgs: 1, maxArgs: 1, partials: unaryPartials(dCos), fn: func(_ context.Context, _ *Env, a []*unified.Real) (*unified.Real, error) { return a[0].Cos(), nil }},
+	{name: "tan", group: "Trigonometric (radians)", signature: "tan(x)", summary: "tangent", minArgs: 1, maxArgs: 1, partials: unaryPartials(dTan), fn: func(_ context.Context, _ *Env, a []*unified.Real) (*unified.Real, error) { return a[0].Tan(), nil }},
+	{name: "asin", group: "Trigonometric (radians)", signature: "asin(x)", summary: "inverse sine, returns radians", minArgs: 1, maxArgs: 1, partials: unaryPartials(dAsin), fn: func(ctx context.Context, _ *Env, a []*unified.Real) (*unified.Real, error) { return a[0].Asin(ctx) }},
+	{name: "acos", group: "Trigonometric (radians)", signature: "acos(x)", summary: "inverse cosine, returns radians", minArgs: 1, maxArgs: 1, partials: unaryPartials(dAcos), fn: func(ctx context.Context, _ *Env, a []*unified.Real) (*unified.Real, error) { return a[0].Acos(ctx) }},
+	{name: "atan", group: "Trigonometric (radians)", signature: "atan(x)", summary: "inverse tangent, returns radians", minArgs: 1, maxArgs: 1, partials: unaryPartials(dAtan), fn: func(_ context.Context, _ *Env, a []*unified.Real) (*unified.Real, error) { return a[0].Atan(), nil }},
+	{name: "atan2", group: "Trigonometric (radians)", signature: "atan2(y, x)", summary: "angle of the point (x, y), returns radians", minArgs: 2, maxArgs: 2, partials: dAtan2, fn: func(ctx context.Context, _ *Env, a []*unified.Real) (*unified.Real, error) {
 		return a[0].Atan2(ctx, a[1])
 	}},
-	{name: "deg2rad", group: "Trigonometric (radians)", signature: "deg2rad(x)", summary: "convert degrees to radians", minArgs: 1, maxArgs: 1, fn: func(_ context.Context, _ *Env, a []*unified.Real) (*unified.Real, error) { return deg2rad(a[0]), nil }},
-	{name: "rad2deg", group: "Trigonometric (radians)", signature: "rad2deg(x)", summary: "convert radians to degrees", minArgs: 1, maxArgs: 1, fn: func(_ context.Context, _ *Env, a []*unified.Real) (*unified.Real, error) { return rad2deg(a[0]), nil }},
+	{name: "deg2rad", group: "Trigonometric (radians)", signature: "deg2rad(x)", summary: "convert degrees to radians", minArgs: 1, maxArgs: 1, partials: unaryPartials(dDeg2rad), fn: func(_ context.Context, _ *Env, a []*unified.Real) (*unified.Real, error) { return deg2rad(a[0]), nil }},
+	{name: "rad2deg", group: "Trigonometric (radians)", signature: "rad2deg(x)", summary: "convert radians to degrees", minArgs: 1, maxArgs: 1, partials: unaryPartials(dRad2deg), fn: func(_ context.Context, _ *Env, a []*unified.Real) (*unified.Real, error) { return rad2deg(a[0]), nil }},
 
-	{name: "exp", group: "Exponential and logarithmic", signature: "exp(x)", summary: "e raised to x", minArgs: 1, maxArgs: 1, fn: func(_ context.Context, _ *Env, a []*unified.Real) (*unified.Real, error) { return a[0].Exp(), nil }},
-	{name: "ln", group: "Exponential and logarithmic", signature: "ln(x)", summary: "natural logarithm", minArgs: 1, maxArgs: 1, fn: func(ctx context.Context, _ *Env, a []*unified.Real) (*unified.Real, error) { return a[0].Ln(ctx) }},
-	{name: "log10", group: "Exponential and logarithmic", signature: "log10(x)", summary: "base-10 logarithm", minArgs: 1, maxArgs: 1, fn: func(ctx context.Context, _ *Env, a []*unified.Real) (*unified.Real, error) { return a[0].Log10(ctx) }},
-	{name: "log2", group: "Exponential and logarithmic", signature: "log2(x)", summary: "base-2 logarithm", minArgs: 1, maxArgs: 1, fn: func(ctx context.Context, _ *Env, a []*unified.Real) (*unified.Real, error) { return a[0].Log2(ctx) }},
-	{name: "log", group: "Exponential and logarithmic", signature: "log(x, base)", summary: "logarithm of x in the given base", minArgs: 2, maxArgs: 2, fn: func(ctx context.Context, _ *Env, a []*unified.Real) (*unified.Real, error) {
+	{name: "exp", group: "Exponential and logarithmic", signature: "exp(x)", summary: "e raised to x", minArgs: 1, maxArgs: 1, partials: unaryPartials(dExp), fn: func(_ context.Context, _ *Env, a []*unified.Real) (*unified.Real, error) { return a[0].Exp(), nil }},
+	{name: "ln", group: "Exponential and logarithmic", signature: "ln(x)", summary: "natural logarithm", minArgs: 1, maxArgs: 1, partials: unaryPartials(dLn), fn: func(ctx context.Context, _ *Env, a []*unified.Real) (*unified.Real, error) { return a[0].Ln(ctx) }},
+	{name: "log10", group: "Exponential and logarithmic", signature: "log10(x)", summary: "base-10 logarithm", minArgs: 1, maxArgs: 1, partials: unaryPartials(dLog10), fn: func(ctx context.Context, _ *Env, a []*unified.Real) (*unified.Real, error) { return a[0].Log10(ctx) }},
+	{name: "log2", group: "Exponential and logarithmic", signature: "log2(x)", summary: "base-2 logarithm", minArgs: 1, maxArgs: 1, partials: unaryPartials(dLog2), fn: func(ctx context.Context, _ *Env, a []*unified.Real) (*unified.Real, error) { return a[0].Log2(ctx) }},
+	{name: "log", group: "Exponential and logarithmic", signature: "log(x, base)", summary: "logarithm of x in the given base", minArgs: 2, maxArgs: 2, partials: dLog, fn: func(ctx context.Context, _ *Env, a []*unified.Real) (*unified.Real, error) {
 		return a[0].Log(ctx, a[1])
 	}},
 
-	{name: "sqrt", group: "Roots", signature: "sqrt(x)", summary: "square root", minArgs: 1, maxArgs: 1, fn: func(ctx context.Context, _ *Env, a []*unified.Real) (*unified.Real, error) { return a[0].Sqrt(ctx) }},
-	{name: "cbrt", group: "Roots", signature: "cbrt(x)", summary: "cube root, defined for negatives", minArgs: 1, maxArgs: 1, fn: func(_ context.Context, _ *Env, a []*unified.Real) (*unified.Real, error) { return a[0].Cbrt(), nil }},
+	{name: "sqrt", group: "Roots", signature: "sqrt(x)", summary: "square root", minArgs: 1, maxArgs: 1, partials: unaryPartials(dSqrt), fn: func(ctx context.Context, _ *Env, a []*unified.Real) (*unified.Real, error) { return a[0].Sqrt(ctx) }},
+	{name: "cbrt", group: "Roots", signature: "cbrt(x)", summary: "cube root, defined for negatives", minArgs: 1, maxArgs: 1, partials: unaryPartials(dCbrt), fn: func(_ context.Context, _ *Env, a []*unified.Real) (*unified.Real, error) { return a[0].Cbrt(), nil }},
 
-	{name: "hypot", group: "Geometry", signature: "hypot(x, y)", summary: "length of the hypotenuse, sqrt(x^2 + y^2)", minArgs: 2, maxArgs: 2, fn: func(ctx context.Context, _ *Env, a []*unified.Real) (*unified.Real, error) {
+	{name: "hypot", group: "Geometry", signature: "hypot(x, y)", summary: "length of the hypotenuse, sqrt(x^2 + y^2)", minArgs: 2, maxArgs: 2, partials: dHypot, fn: func(ctx context.Context, _ *Env, a []*unified.Real) (*unified.Real, error) {
 		return hypot(ctx, a[0], a[1])
 	}},
-	{name: "dist", group: "Geometry", signature: "dist(x1, y1, x2, y2)", summary: "Euclidean distance between two points", minArgs: 4, maxArgs: 4, fn: func(ctx context.Context, _ *Env, a []*unified.Real) (*unified.Real, error) {
+	{name: "dist", group: "Geometry", signature: "dist(x1, y1, x2, y2)", summary: "Euclidean distance between two points", minArgs: 4, maxArgs: 4, partials: dDist, fn: func(ctx context.Context, _ *Env, a []*unified.Real) (*unified.Real, error) {
 		return dist(ctx, a[0], a[1], a[2], a[3])
 	}},
-	{name: "norm", group: "Geometry", signature: "norm(x, ...)", summary: "Euclidean norm, sqrt of the sum of squares", minArgs: 1, maxArgs: -1, fn: func(ctx context.Context, _ *Env, a []*unified.Real) (*unified.Real, error) { return norm(ctx, a) }},
+	{name: "norm", group: "Geometry", signature: "norm(x, ...)", summary: "Euclidean norm, sqrt of the sum of squares", minArgs: 1, maxArgs: -1, partials: dNorm, fn: func(ctx context.Context, _ *Env, a []*unified.Real) (*unified.Real, error) { return norm(ctx, a) }},
 
-	{name: "floor", group: "Rounding", signature: "floor(x)", summary: "round down to an integer", minArgs: 1, maxArgs: 1, fn: func(ctx context.Context, e *Env, a []*unified.Real) (*unified.Real, error) {
+	{name: "floor", group: "Rounding", signature: "floor(x)", summary: "round down to an integer", minArgs: 1, maxArgs: 1, partials: unaryPartials(kinkDerivative("floor", kinkInteger)), fn: func(ctx context.Context, e *Env, a []*unified.Real) (*unified.Real, error) {
 		return a[0].Floor(ctx, e.precision)
 	}},
-	{name: "ceil", group: "Rounding", signature: "ceil(x)", summary: "round up to an integer", minArgs: 1, maxArgs: 1, fn: func(ctx context.Context, e *Env, a []*unified.Real) (*unified.Real, error) {
+	{name: "ceil", group: "Rounding", signature: "ceil(x)", summary: "round up to an integer", minArgs: 1, maxArgs: 1, partials: unaryPartials(kinkDerivative("ceil", kinkInteger)), fn: func(ctx context.Context, e *Env, a []*unified.Real) (*unified.Real, error) {
 		return a[0].Ceil(ctx, e.precision)
 	}},
-	{name: "round", group: "Rounding", signature: "round(x)", summary: "round half away from zero", minArgs: 1, maxArgs: 1, fn: func(ctx context.Context, e *Env, a []*unified.Real) (*unified.Real, error) {
+	{name: "round", group: "Rounding", signature: "round(x)", summary: "round half away from zero", minArgs: 1, maxArgs: 1, partials: unaryPartials(kinkDerivative("round", kinkHalfInteger)), fn: func(ctx context.Context, e *Env, a []*unified.Real) (*unified.Real, error) {
 		return a[0].Round(ctx, e.precision)
 	}},
-	{name: "trunc", group: "Rounding", signature: "trunc(x)", summary: "round toward zero", minArgs: 1, maxArgs: 1, fn: func(ctx context.Context, e *Env, a []*unified.Real) (*unified.Real, error) {
+	{name: "trunc", group: "Rounding", signature: "trunc(x)", summary: "round toward zero", minArgs: 1, maxArgs: 1, partials: unaryPartials(kinkDerivative("trunc", kinkNonzeroInteger)), fn: func(ctx context.Context, e *Env, a []*unified.Real) (*unified.Real, error) {
 		return trunc(ctx, a[0], e.precision)
 	}},
 
-	{name: "min", group: "Comparison", signature: "min(x, ...)", summary: "smallest argument", minArgs: 1, maxArgs: -1, fn: func(ctx context.Context, e *Env, a []*unified.Real) (*unified.Real, error) {
+	{name: "min", group: "Comparison", signature: "min(x, ...)", summary: "smallest argument", minArgs: 1, maxArgs: -1, partials: extremumPartials("min", false), fn: func(ctx context.Context, e *Env, a []*unified.Real) (*unified.Real, error) {
 		return foldMinMax(ctx, a, e.precision, false)
 	}},
-	{name: "max", group: "Comparison", signature: "max(x, ...)", summary: "largest argument", minArgs: 1, maxArgs: -1, fn: func(ctx context.Context, e *Env, a []*unified.Real) (*unified.Real, error) {
+	{name: "max", group: "Comparison", signature: "max(x, ...)", summary: "largest argument", minArgs: 1, maxArgs: -1, partials: extremumPartials("max", true), fn: func(ctx context.Context, e *Env, a []*unified.Real) (*unified.Real, error) {
 		return foldMinMax(ctx, a, e.precision, true)
 	}},
 
-	{name: "sinh", group: "Hyperbolic", signature: "sinh(x)", summary: "hyperbolic sine", minArgs: 1, maxArgs: 1, fn: func(_ context.Context, _ *Env, a []*unified.Real) (*unified.Real, error) { return a[0].Sinh(), nil }},
-	{name: "cosh", group: "Hyperbolic", signature: "cosh(x)", summary: "hyperbolic cosine", minArgs: 1, maxArgs: 1, fn: func(_ context.Context, _ *Env, a []*unified.Real) (*unified.Real, error) { return a[0].Cosh(), nil }},
-	{name: "tanh", group: "Hyperbolic", signature: "tanh(x)", summary: "hyperbolic tangent", minArgs: 1, maxArgs: 1, fn: func(_ context.Context, _ *Env, a []*unified.Real) (*unified.Real, error) { return a[0].Tanh(), nil }},
-	{name: "asinh", group: "Hyperbolic", signature: "asinh(x)", summary: "inverse hyperbolic sine", minArgs: 1, maxArgs: 1, fn: func(ctx context.Context, _ *Env, a []*unified.Real) (*unified.Real, error) { return asinh(ctx, a[0]) }},
-	{name: "acosh", group: "Hyperbolic", signature: "acosh(x)", summary: "inverse hyperbolic cosine", minArgs: 1, maxArgs: 1, fn: func(ctx context.Context, e *Env, a []*unified.Real) (*unified.Real, error) {
+	{name: "sinh", group: "Hyperbolic", signature: "sinh(x)", summary: "hyperbolic sine", minArgs: 1, maxArgs: 1, partials: unaryPartials(dSinh), fn: func(_ context.Context, _ *Env, a []*unified.Real) (*unified.Real, error) { return a[0].Sinh(), nil }},
+	{name: "cosh", group: "Hyperbolic", signature: "cosh(x)", summary: "hyperbolic cosine", minArgs: 1, maxArgs: 1, partials: unaryPartials(dCosh), fn: func(_ context.Context, _ *Env, a []*unified.Real) (*unified.Real, error) { return a[0].Cosh(), nil }},
+	{name: "tanh", group: "Hyperbolic", signature: "tanh(x)", summary: "hyperbolic tangent", minArgs: 1, maxArgs: 1, partials: unaryPartials(dTanh), fn: func(_ context.Context, _ *Env, a []*unified.Real) (*unified.Real, error) { return a[0].Tanh(), nil }},
+	{name: "asinh", group: "Hyperbolic", signature: "asinh(x)", summary: "inverse hyperbolic sine", minArgs: 1, maxArgs: 1, partials: unaryPartials(dAsinh), fn: func(ctx context.Context, _ *Env, a []*unified.Real) (*unified.Real, error) { return asinh(ctx, a[0]) }},
+	{name: "acosh", group: "Hyperbolic", signature: "acosh(x)", summary: "inverse hyperbolic cosine", minArgs: 1, maxArgs: 1, partials: unaryPartials(dAcosh), fn: func(ctx context.Context, e *Env, a []*unified.Real) (*unified.Real, error) {
 		return acosh(ctx, a[0], e.precision)
 	}},
-	{name: "atanh", group: "Hyperbolic", signature: "atanh(x)", summary: "inverse hyperbolic tangent", minArgs: 1, maxArgs: 1, fn: func(ctx context.Context, e *Env, a []*unified.Real) (*unified.Real, error) {
+	{name: "atanh", group: "Hyperbolic", signature: "atanh(x)", summary: "inverse hyperbolic tangent", minArgs: 1, maxArgs: 1, partials: unaryPartials(dAtanh), fn: func(ctx context.Context, e *Env, a []*unified.Real) (*unified.Real, error) {
 		return atanh(ctx, a[0], e.precision)
 	}},
 
-	{name: "factorial", group: "Combinatorial", signature: "factorial(n)", summary: "factorial of a non-negative integer", minArgs: 1, maxArgs: 1, fn: func(ctx context.Context, e *Env, a []*unified.Real) (*unified.Real, error) {
+	{name: "factorial", group: "Combinatorial", signature: "factorial(n)", summary: "factorial of a non-negative integer", minArgs: 1, maxArgs: 1, notDiff: "defined only on integers", integerArgs: true, fn: func(ctx context.Context, e *Env, a []*unified.Real) (*unified.Real, error) {
 		return factorial(ctx, a[0], e.precision)
 	}},
-	{name: "gamma", group: "Combinatorial", signature: "gamma(x)", summary: "gamma function, the continuous factorial", minArgs: 1, maxArgs: 1, fn: func(_ context.Context, _ *Env, a []*unified.Real) (*unified.Real, error) { return a[0].Gamma() }},
-	{name: "lgamma", group: "Combinatorial", signature: "lgamma(x)", summary: "natural log of the absolute value of gamma", minArgs: 1, maxArgs: 1, fn: func(ctx context.Context, _ *Env, a []*unified.Real) (*unified.Real, error) { return lgamma(ctx, a[0]) }},
-	{name: "choose", group: "Combinatorial", signature: "choose(n, k)", summary: "binomial coefficient, n choose k", minArgs: 2, maxArgs: 2, fn: func(ctx context.Context, e *Env, a []*unified.Real) (*unified.Real, error) {
+	{name: "gamma", group: "Combinatorial", signature: "gamma(x)", summary: "gamma function, the continuous factorial", minArgs: 1, maxArgs: 1, partials: unaryPartials(dGamma), fn: func(_ context.Context, _ *Env, a []*unified.Real) (*unified.Real, error) { return a[0].Gamma() }},
+	{name: "lgamma", group: "Combinatorial", signature: "lgamma(x)", summary: "natural log of the absolute value of gamma", minArgs: 1, maxArgs: 1, partials: unaryPartials(dLgamma), fn: func(ctx context.Context, _ *Env, a []*unified.Real) (*unified.Real, error) { return lgamma(ctx, a[0]) }},
+	{name: "choose", group: "Combinatorial", signature: "choose(n, k)", summary: "binomial coefficient, n choose k", minArgs: 2, maxArgs: 2, notDiff: "defined only on integers", integerArgs: true, fn: func(ctx context.Context, e *Env, a []*unified.Real) (*unified.Real, error) {
 		return choose(ctx, a[0], a[1], e.precision)
 	}},
-	{name: "perm", group: "Combinatorial", signature: "perm(n, k)", summary: "number of k-permutations of n", minArgs: 2, maxArgs: 2, fn: func(ctx context.Context, e *Env, a []*unified.Real) (*unified.Real, error) {
+	{name: "perm", group: "Combinatorial", signature: "perm(n, k)", summary: "number of k-permutations of n", minArgs: 2, maxArgs: 2, notDiff: "defined only on integers", integerArgs: true, fn: func(ctx context.Context, e *Env, a []*unified.Real) (*unified.Real, error) {
 		return perm(ctx, a[0], a[1], e.precision)
 	}},
 
-	{name: "sum", group: "Binders", signature: "sum(expr, i = a..b)", summary: "sum of expr for integer i from a to b", minArgs: 2, maxArgs: 2, binder: &binderSpec{forms: bindRange, eval: sumBinder}},
-	{name: "product", group: "Binders", signature: "product(expr, i = a..b)", summary: "product of expr for integer i from a to b", minArgs: 2, maxArgs: 2, binder: &binderSpec{forms: bindRange, eval: productBinder}},
-	{name: "solve", group: "Binders", signature: "solve(expr, x = a..b) or solve(expr, x = x0)", summary: "a root of expr in the bracket a..b, or the root nearest the guess x0; expr must be continuous and change sign there, and which root a bracket returns is unspecified", minArgs: 2, maxArgs: 2, binder: &binderSpec{forms: bindRange | bindPoint, eval: solveBinder}},
-	{name: "integrate", group: "Binders", signature: "integrate(expr, x = a..b)", summary: "an estimate of the integral of expr for x from a to b, where a bound may be inf or -inf; it sharpens as precision rises, but is not a guaranteed bound, and an interior singularity or kink slows it, so split the range there", minArgs: 2, maxArgs: 2, binder: &binderSpec{forms: bindRange, infinite: true, eval: integrateBinder}},
+	{name: "sum", group: "Binders", signature: "sum(expr, i = a..b)", summary: "sum of expr for integer i from a to b", minArgs: 2, maxArgs: 2, notDiff: "binder", binder: &binderSpec{forms: bindRange, eval: sumBinder}},
+	{name: "product", group: "Binders", signature: "product(expr, i = a..b)", summary: "product of expr for integer i from a to b", minArgs: 2, maxArgs: 2, notDiff: "binder", binder: &binderSpec{forms: bindRange, eval: productBinder}},
+	{name: "solve", group: "Binders", signature: "solve(expr, x = a..b) or solve(expr, x = x0)", summary: "a root of expr in the bracket a..b, or the root nearest the guess x0; expr must be continuous and change sign there, and which root a bracket returns is unspecified", minArgs: 2, maxArgs: 2, notDiff: "binder", binder: &binderSpec{forms: bindRange | bindPoint, eval: solveBinder}},
+	{name: "integrate", group: "Binders", signature: "integrate(expr, x = a..b)", summary: "an estimate of the integral of expr for x from a to b, where a bound may be inf or -inf; it sharpens as precision rises, but is not a guaranteed bound, and an interior singularity or kink slows it, so split the range there", minArgs: 2, maxArgs: 2, notDiff: "binder", binder: &binderSpec{forms: bindRange, infinite: true, eval: integrateBinder}},
+	{name: "diff", group: "Binders", signature: "diff(expr, x = a)", summary: "the exact derivative of expr with respect to x at the point a", minArgs: 2, maxArgs: 2, binder: &binderSpec{forms: bindPoint, eval: diffBinder, perturbs: true}, notDiff: "binder"},
 }
 
 // functions is the registry consulted by CallNode, derived from functionCatalog.

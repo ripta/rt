@@ -2,6 +2,7 @@ package parser
 
 import (
 	"context"
+	"errors"
 	"math"
 	"math/big"
 	"strings"
@@ -70,6 +71,9 @@ func TestParserExpressions(t *testing.T) {
 		{name: "LN2", exprs: []string{"LN2"}, want: math.Ln2},
 		{name: "PHI", exprs: []string{"PHI"}, want: math.Phi},
 		{name: "SQRT2 squared", exprs: []string{"SQRT2 * SQRT2"}, want: 2},
+		{name: "zero to a fractional power", exprs: []string{"0 ** 0.5"}, want: 0},
+		{name: "zero to the zero", exprs: []string{"0 ** 0"}, want: 1},
+		{name: "negative base to an integer-valued product", exprs: []string{"(-8) ** (6/3)"}, want: 64},
 		{
 			name:  "basic modulo",
 			exprs: []string{"10 % 3"},
@@ -798,6 +802,11 @@ func TestExponentiationErrors(t *testing.T) {
 			wantErr: "negative base to non-integer power is non-real",
 		},
 		{
+			name:    "negative base to an exponent that is not structurally an integer",
+			expr:    "(-8) ** (2*PI/PI)",
+			wantErr: "negative base to non-integer power is non-real",
+		},
+		{
 			name:    "negative base via unary minus to fractional power",
 			expr:    "-2 ** 0.5",
 			wantErr: "negative base to non-integer power is non-real",
@@ -817,6 +826,42 @@ func TestExponentiationErrors(t *testing.T) {
 				t.Fatalf("error mismatch: got %v want substring %q", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+// The irrational base is raised as a whole, so the result agrees with the exact value to the
+// precision asked for. The old path squared an approximation and was off by about 2^-70.
+func TestIrrationalIntegerPowerIsExact(t *testing.T) {
+	t.Parallel()
+
+	for _, src := range []string{"SQRT2**2 - 2", "(PI**3)/PI - PI**2", "(SQRT2**2 - 2) * 10**40"} {
+		v, err := parseAndEval(t, src, NewEnv())
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		r, err := approxRat(context.Background(), v, -400)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if limit := new(big.Rat).SetFrac(big.NewInt(1), new(big.Int).Lsh(big.NewInt(1), 300)); new(big.Rat).Abs(r).Cmp(limit) > 0 {
+			t.Errorf("%s = %v, want 0", src, r.FloatString(30))
+		}
+	}
+}
+
+func TestPowerPrecisionOverflow(t *testing.T) {
+	t.Parallel()
+
+	ctx := constructive.WithPrecisionLimit(context.Background(), 100)
+	node, err := New("test", "10 ** 1000").Parse()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = node.Eval(ctx, NewEnv())
+	if !errors.Is(err, errPowerTooLarge) {
+		t.Errorf("err = %v, want errPowerTooLarge", err)
 	}
 }
 

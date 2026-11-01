@@ -491,6 +491,14 @@ func (p *P) finishCall(name tokens.Token, args []Node) (Node, error) {
 		}
 	}
 
+	if fn.binder != nil && fn.binder.perturbs {
+		for _, body := range args[:len(args)-1] {
+			if err := p.checkIntegerOnly(body, binding.Name.Value); err != nil {
+				return nil, err
+			}
+		}
+	}
+
 	return call, nil
 }
 

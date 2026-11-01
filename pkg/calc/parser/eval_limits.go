@@ -107,18 +107,34 @@ type binderFunc func(ctx context.Context, env *Env, body []Node, bind Binding) (
 // evalBody evaluates body with name bound to val in a child scope. It charges the budget and
 // checks ctx first.
 func evalBody(ctx context.Context, env *Env, body Node, name string, val *unified.Real) (*unified.Real, error) {
-	if err := checkCtx(ctx); err != nil {
+	if err := chargeBody(ctx); err != nil {
 		return nil, err
+	}
+
+	return body.Eval(ctx, env.child(name, val))
+}
+
+// evalBodyJet is evalBody for a name bound to a jet.
+func evalBodyJet(ctx context.Context, env *Env, body Node, name string, val jv) (jv, error) {
+	if err := chargeBody(ctx); err != nil {
+		return jv{}, err
+	}
+
+	return evalJet(ctx, env.childJet(name, val), body)
+}
+
+func chargeBody(ctx context.Context) error {
+	if err := checkCtx(ctx); err != nil {
+		return err
 	}
 
 	if b, ok := ctx.Value(budgetKey{}).(*budget); ok {
 		b.used++
 		if b.used > b.limit {
-			return nil, ErrEvaluationBudget
+			return ErrEvaluationBudget
 		}
 	}
-
-	return body.Eval(ctx, env.child(name, val))
+	return nil
 }
 
 func evalBound(ctx context.Context, env *Env, n Node) (Bound, error) {
