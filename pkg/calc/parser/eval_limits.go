@@ -98,6 +98,9 @@ type Binding struct {
 	Range bool
 	Lo    Bound
 	Hi    Bound
+
+	// Order is the derivative order of a diff call.
+	Order int
 }
 
 // binderFunc evaluates a binder call. body holds the call's arguments before the binding,

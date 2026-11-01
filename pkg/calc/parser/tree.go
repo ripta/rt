@@ -195,6 +195,9 @@ func extractCommentText(tok tokens.Token) string {
 
 type NumberNode struct {
 	Value *unified.Real
+
+	// Tok is the literal the parser read. A hand-built node leaves it zero.
+	Tok tokens.Token
 }
 
 func (n *NumberNode) Eval(_ context.Context, _ *Env) (*unified.Real, error) {
@@ -318,6 +321,9 @@ type CallNode struct {
 	Func tokens.Token
 	Args []Node
 
+	// Order is the derivative order of a diff call. Other calls ignore it.
+	Order int
+
 	// catalog is the table the parser checked this call against. Nil means the shipping functions.
 	catalog map[string]function
 }
@@ -373,6 +379,7 @@ func (n *CallNode) evalBinder(ctx context.Context, env *Env, fn function) (*unif
 		return nil, err
 	}
 
+	bind.Order = n.Order
 	result, err := fn.binder.eval(ctx, env, n.Args[:last], bind)
 	if err != nil {
 		if isStop(err) {

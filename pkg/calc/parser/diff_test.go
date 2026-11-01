@@ -185,7 +185,6 @@ func TestDiffErrors(t *testing.T) {
 	}{
 		{"diff(sum(x, i = 1..3), x = 1)", "not yet differentiable"},
 		{"diff(integrate(x, t = 0..1), x = 1)", "not yet differentiable"},
-		{"diff(diff(x, x = 1), x = 1)", "not yet differentiable"},
 		{"diff(1/x, x = 0)", "division by zero"},
 		{"diff(sqrt(x), x = 0)", "division by zero"},
 		{"diff(ln(x), x = 0)", "ln(0)"},

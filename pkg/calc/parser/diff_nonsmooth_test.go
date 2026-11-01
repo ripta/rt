@@ -180,8 +180,8 @@ func TestDiffRejectsIntegerOnlyUses(t *testing.T) {
 }
 
 // nestedMixed evaluates src, which names x and y, as the mixed second partial of two diffs: y
-// takes the older tag and x the newer one, as diff(diff(src, x = xAt), y = yAt) would. It does
-// not go through diff, which cannot nest yet.
+// takes the older tag and x the newer one, as diff(diff(src, x = xAt), y = yAt) would. The
+// real nested calls are tested beside the order literal.
 func nestedMixed(t *testing.T, src string, xAt, yAt int64) (string, error) {
 	t.Helper()
 
@@ -250,7 +250,7 @@ func TestIntegerOnlyEntriesRejectALiveArgument(t *testing.T) {
 	// argument still reaches the entry's marker.
 	for _, src := range []string{"factorial(x)", "choose(x, 2)", "choose(5, x)", "perm(x, 1)", "perm(5, x)"} {
 		_, err := nestedMixed(t, src, 3, 1)
-		if err == nil || !strings.Contains(err.Error(), "not yet differentiable") || !strings.Contains(err.Error(), "defined only on integers") {
+		if err == nil || !strings.Contains(err.Error(), "is not differentiable inside diff") || !strings.Contains(err.Error(), "defined only on integers") {
 			t.Errorf("%s: got %v, want the integer-only marker error", src, err)
 		}
 	}
