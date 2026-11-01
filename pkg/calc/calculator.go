@@ -932,6 +932,8 @@ var examples = []example{
 	{"Binders", "integrate(sin(x), x = 0..PI)", "an estimate of a definite integral; split the range at an interior singularity"},
 	{"Binders", "integrate(1/sqrt(x), x = 0..1)", "endpoints are never sampled, so an endpoint singularity is fine"},
 	{"Binders", "integrate(exp(-(x**2)), x = -inf..inf)", "a bound may be inf or -inf"},
+	{"Binders", "diff(sin(x), x = PI)", "the exact derivative at a point, not a finite difference"},
+	{"Binders", "diff(x*x*x, x = 2)", "the body is evaluated once; the point binding comes last"},
 
 	{"Variables", "r = 3", "assign a name"},
 	{"Variables", "PI * r ** 2", "use it later"},

@@ -22,6 +22,9 @@ type Node interface {
 type binding struct {
 	value   *unified.Real
 	mutable bool
+
+	// jet is set only by diff. value is the jet's scalar part.
+	jet *jv
 }
 
 type Env struct {
@@ -85,6 +88,26 @@ func (e *Env) child(name string, val *unified.Real) *Env {
 		trace:     e.trace,
 		traceOut:  e.traceOut,
 	}
+}
+
+// childJet is child for a name bound to a jet.
+func (e *Env) childJet(name string, val jv) *Env {
+	c := e.child(name, val.value())
+	c.vars[name].jet = &val
+	return c
+}
+
+// getJet returns the jet name is bound to, or its value as a scalar jet.
+func (e *Env) getJet(name string) (jv, bool) {
+	for s := e; s != nil; s = s.parent {
+		if b, ok := s.vars[name]; ok {
+			if b.jet != nil {
+				return *b.jet, true
+			}
+			return scalarJ(b.value), true
+		}
+	}
+	return jv{}, false
 }
 
 func (e *Env) Get(name string) (*unified.Real, bool) {
@@ -195,6 +218,10 @@ func (n *BinaryNode) Eval(ctx context.Context, env *Env) (*unified.Real, error) 
 		return nil, err
 	}
 
+	return n.apply(ctx, env, l, r)
+}
+
+func (n *BinaryNode) apply(ctx context.Context, env *Env, l, r *unified.Real) (*unified.Real, error) {
 	switch n.Op.Type {
 	case tokens.OP_PLUS:
 		return l.Add(r), nil
@@ -250,6 +277,10 @@ func (n *UnaryNode) Eval(ctx context.Context, env *Env) (*unified.Real, error) {
 		return nil, err
 	}
 
+	return n.apply(val)
+}
+
+func (n *UnaryNode) apply(val *unified.Real) (*unified.Real, error) {
 	switch n.Op.Type {
 	case tokens.OP_MINUS:
 		return val.Negate(), nil
