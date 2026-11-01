@@ -11,7 +11,7 @@ import (
 )
 
 // MaxBodyEvaluations caps the body evaluations of one top-level expression. Nested binders share
-// the count. RT-024 M1 revisits the value against a nested-integral benchmark.
+// the count.
 const MaxBodyEvaluations = 1_000_000
 
 var (
