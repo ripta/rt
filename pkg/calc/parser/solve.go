@@ -511,15 +511,16 @@ func joinAnd(parts []string) string {
 }
 
 // snapshotEnv copies the current values of body's free variables into a fresh scope. The lazy
-// root refines after the call returns, and a later assignment must not change it.
+// root refines after the call returns, and a later assignment must not change it. A jet stays a
+// jet, since a binder inside a diff body integrates or solves its coefficients.
 func snapshotEnv(env *Env, body Node, bound string) *Env {
 	free := map[string]bool{}
 	freeIdents(body, map[string]bool{bound: true}, free)
 
 	snap := &Env{precision: env.precision, vars: map[string]*binding{}}
 	for name := range free {
-		if v, ok := env.Get(name); ok {
-			snap.vars[name] = &binding{value: v}
+		if b := env.lookup(name); b != nil {
+			snap.vars[name] = &binding{value: b.value, jet: b.jet}
 		}
 	}
 	return snap

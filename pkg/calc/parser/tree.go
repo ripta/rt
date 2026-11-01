@@ -110,6 +110,16 @@ func (e *Env) getJet(name string) (jv, bool) {
 	return jv{}, false
 }
 
+// lookup returns the binding of name in the nearest scope that holds it.
+func (e *Env) lookup(name string) *binding {
+	for s := e; s != nil; s = s.parent {
+		if b, ok := s.vars[name]; ok {
+			return b
+		}
+	}
+	return nil
+}
+
 func (e *Env) Get(name string) (*unified.Real, bool) {
 	for s := e; s != nil; s = s.parent {
 		if binding, ok := s.vars[name]; ok {

@@ -41,14 +41,44 @@ var errTailCap = errors.New("the tail does not decay before the cap on t")
 func integrateBinder(ctx context.Context, env *Env, body []Node, bind Binding) (*unified.Real, error) {
 	q := &integral{
 		env:  snapshotEnv(env, body[0], bind.Name),
-		body: body[0],
 		name: bind.Name,
+		n:    1,
+		eval: func(ctx context.Context, env *Env, x *big.Rat) ([]*unified.Real, error) {
+			v, err := evalBody(ctx, env, body[0], bind.Name, ratReal(x))
+			return []*unified.Real{v}, err
+		},
 	}
 
+	zero, err := q.configure(ctx, env.precision, bind)
+	if err != nil {
+		return nil, err
+	}
+	if zero {
+		return unified.Zero(), nil
+	}
+
+	// The first estimate is eager, so its errors land on the calling line. The lazy value then
+	// serves it from the cache. Reading a value at p asks the approximator for a few bits finer.
+	if _, err := q.approximate(ctx, env.precision-integrateReadSlack); err != nil {
+		return nil, err
+	}
+
+	return unified.New(constructive.FromApproximation("integrate", func(ctx context.Context, p int) (*big.Int, error) {
+		r, err := q.approximate(ctx, p)
+		if err != nil {
+			return nil, err
+		}
+		return r[0], nil
+	}), nil), nil
+}
+
+// configure sets the shape and orientation of the range. It reports true when the range is
+// provably empty, so the integral is an exact zero.
+func (q *integral) configure(ctx context.Context, precision int, bind Binding) (bool, error) {
 	switch lo, hi := bind.Lo, bind.Hi; {
 	case lo.Inf != 0 && hi.Inf != 0:
 		if lo.Inf == hi.Inf {
-			return nil, fmt.Errorf("both bounds of integrate are infinite in the same direction. Use opposite infinities, or give one finite bound")
+			return false, fmt.Errorf("both bounds of integrate are infinite in the same direction. Use opposite infinities, or give one finite bound")
 		}
 		q.shape, q.neg = shapeBoth, lo.Inf > 0
 	case lo.Inf != 0 || hi.Inf != 0:
@@ -69,17 +99,17 @@ func integrateBinder(ctx context.Context, env *Env, body []Node, bind Binding) (
 		// The order of the bounds is decided once, so every precision follows the same orientation.
 		// Only bounds that are provably equal give an exact zero. Bounds that cannot be told apart
 		// might still differ by a width that a huge integrand turns into a large value.
-		sign, err := nearZeroSign(ctx, hi.Subtract(lo), env.precision)
+		sign, err := nearZeroSign(ctx, hi.Subtract(lo), precision)
 		switch {
 		case errors.Is(err, errNearZero):
 			if sameBound(lo, hi) {
-				return unified.Zero(), nil
+				return true, nil
 			}
-			return nil, fmt.Errorf("the bounds of integrate are too close to tell apart at this precision. Raise the precision or give bounds that differ by more than 2^%d", env.precision)
+			return false, fmt.Errorf("the bounds of integrate are too close to tell apart at this precision. Raise the precision or give bounds that differ by more than 2^%d", precision)
 		case err != nil:
-			return nil, err
+			return false, err
 		case sign == 0:
-			return unified.Zero(), nil
+			return true, nil
 		}
 
 		q.neg = sign < 0
@@ -89,13 +119,7 @@ func integrateBinder(ctx context.Context, env *Env, body []Node, bind Binding) (
 		q.lo, q.hi = lo, hi
 	}
 
-	// The first estimate is eager, so its errors land on the calling line. The lazy value then
-	// serves it from the cache. Reading a value at p asks the approximator for a few bits finer.
-	if _, err := q.approximate(ctx, env.precision-integrateReadSlack); err != nil {
-		return nil, err
-	}
-
-	return unified.New(constructive.FromApproximation("integrate", q.approximate), nil), nil
+	return false, nil
 }
 
 // sameBound reports whether two bounds are the same value by construction, such as PI and PI.
@@ -125,10 +149,22 @@ const (
 // An infinite end uses x = lo + exp(pi/2*sinh t), mirrored for -inf, and the whole line uses
 // x = sinh(pi/2*sinh t). Both run on every t, so a level's two sides are t > 0 and t < 0 for
 // exp-sinh, and +x and -x for sinh-sinh.
+//
+// An integral can have several outputs, which share every sample. The body then returns n values
+// per point, and a run converges only when every output has.
 type integral struct {
 	env  *Env
-	body Node
 	name string
+
+	// eval samples the body at x, in the environment of the run. It returns n values.
+	eval func(ctx context.Context, env *Env, x *big.Rat) ([]*unified.Real, error)
+	n    int
+
+	// span names the user's range in messages, when the run works on a substituted one.
+	span string
+
+	// userAt maps a node of the substituted range back to the user's variable, for messages.
+	userAt func(x *big.Rat) *big.Rat
 
 	lo, hi *unified.Real
 	shape  shape
@@ -136,11 +172,11 @@ type integral struct {
 
 	// est was converged at estP. A request at estP or coarser is rounded from it, so the first
 	// display does not run the quadrature again.
-	est  *big.Rat
+	est  []*big.Rat
 	estP int
 }
 
-func (q *integral) approximate(ctx context.Context, p int) (*big.Int, error) {
+func (q *integral) approximate(ctx context.Context, p int) ([]*big.Int, error) {
 	if q.est == nil || p < q.estP {
 		est, err := q.run(ctx, p)
 		if err != nil {
@@ -148,11 +184,15 @@ func (q *integral) approximate(ctx context.Context, p int) (*big.Int, error) {
 		}
 		q.est, q.estP = est, p
 	}
-	return roundToBits(q.est, p), nil
+	out := make([]*big.Int, q.n)
+	for i, e := range q.est {
+		out[i] = roundToBits(e, p)
+	}
+	return out, nil
 }
 
 // run estimates the integral to within 2^p, stopping when two successive levels agree to that.
-func (q *integral) run(ctx context.Context, p int) (*big.Rat, error) {
+func (q *integral) run(ctx context.Context, p int) ([]*big.Rat, error) {
 	wp := p - integrateGuardBits
 	a, b, r := new(big.Rat), new(big.Rat), big.NewRat(1, 1)
 	var err error
@@ -174,7 +214,7 @@ func (q *integral) run(ctx context.Context, p int) (*big.Rat, error) {
 		// A wide range scales every term up.
 		wp -= max(0, r.Num().BitLen()-r.Denom().BitLen())
 	}
-	span := q.span(a, b)
+	span := q.rangeName(a, b)
 
 	run := &quadrature{
 		q:    q,
@@ -185,7 +225,10 @@ func (q *integral) run(ctx context.Context, p int) (*big.Rat, error) {
 		wp:   wp,
 		need: -wp + 8,
 		thr:  new(big.Int).Lsh(big.NewInt(1), uint(max(0, p-integrateGuardBits-wp))),
-		sum:  new(big.Int),
+		sum:  make([]*big.Int, q.n),
+	}
+	for i := range run.sum {
+		run.sum[i] = new(big.Int)
 	}
 	// The cap is the same number of bits out on every shape. Exp-sinh and sinh-sinh reach half as
 	// far per unit of t, so their cap on t is twice as large.
@@ -200,7 +243,8 @@ func (q *integral) run(ctx context.Context, p int) (*big.Rat, error) {
 	}
 
 	tol := ratPow2(p)
-	var prev, cur *big.Rat
+	var prev, cur []*big.Rat
+	last := 0
 	for level := 0; level <= integrateMaxLevels; level++ {
 		if err := run.level(ctx, level); err != nil {
 			if errors.Is(err, errTailCap) {
@@ -214,20 +258,37 @@ func (q *integral) run(ctx context.Context, p int) (*big.Rat, error) {
 		if level < integrateMinLevels {
 			continue
 		}
-		if diff := new(big.Rat).Sub(cur, prev); diff.Abs(diff).Cmp(tol) < 0 {
+		slow := -1
+		for i := range cur {
+			if diff := new(big.Rat).Sub(cur[i], prev[i]); diff.Abs(diff).Cmp(tol) >= 0 {
+				slow = i
+				break
+			}
+		}
+		if slow < 0 {
 			if q.neg {
-				cur.Neg(cur)
+				for _, c := range cur {
+					c.Neg(c)
+				}
 			}
 			return cur, nil
 		}
+		last = slow
 	}
 
-	return nil, fmt.Errorf("integrate did not converge on %s = %s after %d step halvings: the last two estimates were %s and %s. An interior singularity or kink slows it, so split the range there",
-		q.name, span, integrateMaxLevels, fmtRat(prev), fmtRat(cur))
+	which := ""
+	if q.n > 1 {
+		which = fmt.Sprintf(" for Taylor coefficient %d", last)
+	}
+	return nil, fmt.Errorf("integrate did not converge on %s = %s after %d step halvings: the last two estimates%s were %s and %s. An interior singularity or kink slows it, so split the range there",
+		q.name, span, integrateMaxLevels, which, fmtRat(prev[last]), fmtRat(cur[last]))
 }
 
-// span names the range of a run in messages, as the bounds were approximated.
-func (q *integral) span(a, b *big.Rat) string {
+// rangeName names the range of a run in messages, as the bounds were approximated.
+func (q *integral) rangeName(a, b *big.Rat) string {
+	if q.span != "" {
+		return q.span
+	}
 	switch q.shape {
 	case shapeUpper:
 		return fmtRat(a) + "..inf"
@@ -253,8 +314,8 @@ type quadrature struct {
 	thr  *big.Int
 	tmax float64
 
-	// sum is the sum of every weighted sample so far, in units of 2^wp.
-	sum *big.Int
+	// sum is the sum of every weighted sample so far for each output, in units of 2^wp.
+	sum []*big.Int
 
 	// shift halves the step of every level. An infinite range needs it, because from t = 2 to t = 3
 	// the point x of exp-sinh grows from hundreds to millions, and a body such as exp(-x) is costly
@@ -266,8 +327,24 @@ type quadrature struct {
 }
 
 // estimate returns the sum times the step of the level.
-func (g *quadrature) estimate(level int) *big.Rat {
-	return new(big.Rat).Mul(new(big.Rat).SetInt(g.sum), ratPow2(g.wp-level-g.shift))
+func (g *quadrature) estimate(level int) []*big.Rat {
+	out := make([]*big.Rat, len(g.sum))
+	for i, s := range g.sum {
+		out[i] = new(big.Rat).Mul(new(big.Rat).SetInt(s), ratPow2(g.wp-level-g.shift))
+	}
+	return out
+}
+
+// add accumulates the terms of one sample, and reports whether every one is below the threshold.
+func (g *quadrature) add(terms []*big.Int) bool {
+	small := true
+	for i, term := range terms {
+		g.sum[i].Add(g.sum[i], term)
+		if new(big.Int).Abs(term).Cmp(g.thr) >= 0 {
+			small = false
+		}
+	}
+	return small
 }
 
 // level adds the samples that are new at this level. Level 0 holds every multiple of the level-0
@@ -310,8 +387,7 @@ func (g *quadrature) level(ctx context.Context, level int) error {
 			if err != nil {
 				return err
 			}
-			g.sum.Add(g.sum, term)
-			if new(big.Int).Abs(term).Cmp(g.thr) < 0 {
+			if g.add(term) {
 				live[side] = false
 				if g.q.shape != shapeFinite {
 					g.end[side] = t
@@ -346,7 +422,7 @@ func (g *quadrature) center(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	g.sum.Add(g.sum, term)
+	g.add(term)
 	return nil
 }
 
@@ -498,8 +574,8 @@ func roundRel(x *big.Rat, bits int) *big.Rat {
 }
 
 // sample returns w*f(x) in units of 2^wp. An ordinary error from the body names x.
-func (g *quadrature) sample(ctx context.Context, x, w *big.Rat) (*big.Int, error) {
-	v, err := evalBody(ctx, g.env, g.q.body, g.q.name, ratReal(x))
+func (g *quadrature) sample(ctx context.Context, x, w *big.Rat) ([]*big.Int, error) {
+	vs, err := g.q.eval(ctx, g.env, x)
 	if err == nil {
 		// A weight of 2^k scales the error of f up by 2^k. Only an infinite range has one.
 		prec := g.wp
@@ -507,13 +583,24 @@ func (g *quadrature) sample(ctx context.Context, x, w *big.Rat) (*big.Int, error
 			prec -= max(0, w.Num().BitLen()-w.Denom().BitLen())
 		}
 
-		var f *big.Rat
-		if f, err = approxRat(ctx, v, prec); err == nil {
-			return roundToBits(f.Mul(f, w), g.wp), nil
+		out := make([]*big.Int, len(vs))
+		for i, v := range vs {
+			var f *big.Rat
+			if f, err = approxRat(ctx, v, prec); err != nil {
+				break
+			}
+			out[i] = roundToBits(f.Mul(f, w), g.wp)
+		}
+		if err == nil {
+			return out, nil
 		}
 	}
 	if isStop(err) {
 		return nil, err
 	}
-	return nil, fmt.Errorf("the body failed at %s = %s: %w. Split the range at that point", g.q.name, fmtRat(x), err)
+	at := x
+	if g.q.userAt != nil {
+		at = g.q.userAt(x)
+	}
+	return nil, fmt.Errorf("the body failed at %s = %s: %w. Split the range at that point", g.q.name, fmtRat(at), err)
 }

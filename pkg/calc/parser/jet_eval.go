@@ -24,14 +24,9 @@ func evalJet(ctx context.Context, env *Env, n Node) (jv, error) {
 	return j.evalJet(ctx, env)
 }
 
-// notDifferentiable words the error for an entry with no derivative rule. A binder will have one
-// later, so only it is "not yet" differentiable.
+// notDifferentiable words the error for an entry with no derivative rule.
 func notDifferentiable(pos tokens.Position, name, reason string) error {
-	yet := ""
-	if reason == notDiffBinder {
-		yet = "yet "
-	}
-	return fmt.Errorf("%s: %s is not %sdifferentiable inside diff (%s)", pos, name, yet, reason)
+	return fmt.Errorf("%s: %s is not differentiable inside diff (%s)", pos, name, reason)
 }
 
 func (n *NumberNode) evalJet(context.Context, *Env) (jv, error) {
@@ -109,7 +104,14 @@ func (n *BinaryNode) evalJet(ctx context.Context, env *Env) (jv, error) {
 		return jdiv(l, r)
 
 	case tokens.OP_POW:
-		return jetPow(ctx, env, l, r)
+		res, err := jetPow(ctx, env, l, r)
+		if err != nil {
+			if isStop(err) {
+				return jv{}, err
+			}
+			return jv{}, fmt.Errorf("%s: %w", n.Op.Pos, err)
+		}
+		return res, nil
 
 	case tokens.OP_PERCENT:
 		apply := func(ctx context.Context, env *Env, a []*unified.Real) (*unified.Real, error) {
@@ -159,7 +161,7 @@ func (n *CallNode) evalJet(ctx context.Context, env *Env) (jv, error) {
 		return n.diffJet(ctx, env)
 	}
 	if fn.binder != nil {
-		return jv{}, notDifferentiable(n.Func.Pos, n.Func.Value, fn.notDiff)
+		return n.binderJet(ctx, env, fn)
 	}
 
 	args := make([]jv, len(n.Args))
@@ -181,6 +183,31 @@ func (n *CallNode) evalJet(ctx context.Context, env *Env) (jv, error) {
 		partials = nil
 	}
 	result, err := composeN(ctx, env, n.Func.Value, value, partials, args)
+	if err != nil {
+		if isStop(err) {
+			return jv{}, err
+		}
+		return jv{}, fmt.Errorf("%s: %w", n.Func.Pos, err)
+	}
+	return result, nil
+}
+
+func (n *CallNode) binderJet(ctx context.Context, env *Env, fn function) (jv, error) {
+	last := len(n.Args) - 1
+	var b *BindingNode
+	if last >= 0 {
+		b, _ = n.Args[last].(*BindingNode)
+	}
+	if b == nil || fn.binder.jet == nil {
+		return jv{}, fmt.Errorf("%s: binder %s cannot be evaluated", n.Func.Pos, n.Func.Value)
+	}
+
+	bind, err := evalBindingJet(ctx, env, b)
+	if err != nil {
+		return jv{}, err
+	}
+
+	result, err := fn.binder.jet(ctx, env, n.Args[:last], bind)
 	if err != nil {
 		if isStop(err) {
 			return jv{}, err

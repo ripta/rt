@@ -20,34 +20,56 @@ func productBinder(ctx context.Context, env *Env, body []Node, bind Binding) (*u
 	return foldRange(ctx, env, body[0], bind, intReal(big.NewInt(1)), (*unified.Real).Multiply)
 }
 
-// foldRange combines the body's value at each integer index from lo to hi, starting from the
-// identity. A reversed range returns the identity.
-//
-// Bodies are evaluated eagerly, one index at a time. A lazy evaluation inside a reals
-// approximation callback would skip the budget and the context checks.
+// sumJet and productJet combine the jets of the body coefficient-wise. The parser keeps the
+// variable of a diff out of the bounds, so only the body carries a perturbation.
+func sumJet(ctx context.Context, env *Env, body []Node, bind jetBinding) (jv, error) {
+	return foldRangeJet(ctx, env, body[0], bind.scalar(), zeroJ(), jadd)
+}
+
+func productJet(ctx context.Context, env *Env, body []Node, bind jetBinding) (jv, error) {
+	return foldRangeJet(ctx, env, body[0], bind.scalar(), intJ(1), jmul)
+}
+
 func foldRange(ctx context.Context, env *Env, body Node, bind Binding, identity *unified.Real, combine func(*unified.Real, *unified.Real) *unified.Real) (*unified.Real, error) {
+	return foldIndices(ctx, env, bind, identity, combine, func(i *big.Int) (*unified.Real, error) {
+		return evalBody(ctx, env, body, bind.Name, intReal(i))
+	})
+}
+
+func foldRangeJet(ctx context.Context, env *Env, body Node, bind Binding, identity jv, combine func(jv, jv) jv) (jv, error) {
+	return foldIndices(ctx, env, bind, identity, combine, func(i *big.Int) (jv, error) {
+		return evalBodyJet(ctx, env, body, bind.Name, scalarJ(intReal(i)))
+	})
+}
+
+// foldIndices combines the term at each integer index from lo to hi, starting from the identity.
+// A reversed range returns the identity.
+//
+// Terms are evaluated eagerly, one index at a time. A lazy evaluation inside a reals
+// approximation callback would skip the budget and the context checks.
+func foldIndices[T any](ctx context.Context, env *Env, bind Binding, identity T, combine func(T, T) T, term func(*big.Int) (T, error)) (T, error) {
 	lo, err := integerBound(ctx, bind.Lo, env.precision)
 	if err != nil {
-		return nil, err
+		return identity, err
 	}
 	hi, err := integerBound(ctx, bind.Hi, env.precision)
 	if err != nil {
-		return nil, err
+		return identity, err
 	}
 
 	// Adjacent terms merge like a binary counter, so the result tree is O(log n) deep. A left-deep
 	// chain of n terms makes the final approximation cost grow much faster than n.
 	type partial struct {
-		val   *unified.Real
+		val   T
 		level int
 	}
 	var stack []partial
 
 	one := big.NewInt(1)
 	for i := new(big.Int).Set(lo); i.Cmp(hi) <= 0; i.Add(i, one) {
-		v, err := evalBody(ctx, env, body, bind.Name, intReal(i))
+		v, err := term(i)
 		if err != nil {
-			return nil, err
+			return identity, err
 		}
 
 		cur := partial{val: v}

@@ -82,9 +82,10 @@ func TestDiffNonSmoothKinks(t *testing.T) {
 		{"diff(round(x), x = -5/2)", "round is not differentiable at -2.5"},
 		{"diff(trunc(x), x = 2)", "trunc is not differentiable at 2"},
 		{"diff(trunc(x), x = -1)", "trunc is not differentiable at -1"},
-		{"diff(x % 3, x = 6)", "% is not differentiable at 2"},
-		{"diff(x % 3, x = 0)", "% is not differentiable at 0"},
-		{"diff(10 % x, x = 5)", "% is not differentiable at 2"},
+		{"diff(x % 3, x = 6)", "% is not differentiable where the first argument divided by the second = 2"},
+		{"diff(x % 3, x = 0)", "% is not differentiable where the first argument divided by the second = 0"},
+		{"diff(x % 3, x = 3)", "% is not differentiable where the first argument divided by the second = 1"},
+		{"diff(10 % x, x = 5)", "% is not differentiable where the first argument divided by the second = 2"},
 		{"diff(min(x, 1), x = 1)", "min is not differentiable where two arguments are equal, as at 1"},
 		{"diff(max(1, x), x = 1)", "max is not differentiable where two arguments are equal"},
 		{"diff(min(x, 2*x), x = 0)", "min is not differentiable where two arguments are equal"},
@@ -225,7 +226,7 @@ func TestNonSmoothKinkInTheInnerTag(t *testing.T) {
 		{src: "abs(x + y)", x: 1, y: -1, wantKink: "abs is not differentiable at 0"},
 		{src: "abs(x)", x: 0, y: 1, wantKink: "abs is not differentiable at 0"},
 		{src: "floor(x*y)", x: 1, y: 3, wantKink: "floor is not differentiable at 3"},
-		{src: "x % y", x: 6, y: 3, wantKink: "% is not differentiable at 2"},
+		{src: "x % y", x: 6, y: 3, wantKink: "% is not differentiable where the first argument divided by the second = 2"},
 		{src: "min(x, y)", x: 2, y: 2, wantKink: "min is not differentiable where two arguments are equal"},
 	}
 	for _, tt := range values {

@@ -17,7 +17,9 @@ import (
 // Every diff call takes a fresh tag, and a later call gets a larger one. A jet's coefficients are
 // scalars or jets of smaller tags, so a nested diff cannot mistake the outer perturbation for its
 // own. All jets of one tag have the same length, because only diff and composeN make them and
-// composeN keeps its input's length. A value whose tag differs from the one an operation works in is constant in that tag.
+// composeN keeps its input's length.
+//
+// A value whose tag differs from the one an operation works in is constant in that tag.
 type jv struct {
 	re  *unified.Real
 	tag int64
