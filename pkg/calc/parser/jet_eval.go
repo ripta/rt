@@ -103,7 +103,7 @@ func (n *BinaryNode) evalJet(ctx context.Context, env *Env) (jv, error) {
 		return jdiv(l, r)
 
 	case tokens.OP_POW:
-		return jv{}, notDifferentiable(n.Op.Pos, n.Op.Value, "exponentiation")
+		return jetPow(ctx, env, l, r)
 
 	case tokens.OP_PERCENT, tokens.OP_SHL, tokens.OP_SHR:
 		return jv{}, notDifferentiable(n.Op.Pos, n.Op.Value, "not smooth or integer-only")

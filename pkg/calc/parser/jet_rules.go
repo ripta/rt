@@ -2,8 +2,10 @@ package parser
 
 import (
 	"context"
+	"errors"
 	"math/big"
 
+	"github.com/ripta/reals/pkg/constructive"
 	"github.com/ripta/reals/pkg/unified"
 )
 
@@ -337,4 +339,176 @@ func dGamma(ctx context.Context, env *Env, u jv) (jv, error) {
 // dLgamma is digamma(u).
 func dLgamma(ctx context.Context, env *Env, u jv) (jv, error) {
 	return jetPolygamma(ctx, env, "lgamma", 0, u)
+}
+
+var (
+	errZeroNegativePower  = errors.New("zero to negative power is undefined")
+	errNegativeNonInteger = errors.New("negative base to non-integer power is non-real")
+	errPowerTooLarge      = errors.New("exponentiation result is too large for the precision limit")
+)
+
+// valPow is the value of l**r for every caller. unified.Pow detects an integer exponent
+// structurally, so a base like SQRT2 raised to 2 stays exact.
+func valPow(ctx context.Context, env *Env, l, r *unified.Real) (*unified.Real, error) {
+	res, err := l.Pow(ctx, r)
+	if err == nil {
+		return res, nil
+	}
+	if stop := checkCtx(ctx); stop != nil {
+		return nil, stop
+	}
+
+	switch {
+	case errors.Is(err, constructive.ErrPrecisionOverflow):
+		return nil, errPowerTooLarge
+
+	case errors.Is(err, unified.ErrNonPositive):
+		base, err := approxRat(ctx, l, env.precision)
+		if err != nil {
+			return nil, err
+		}
+		if base.Sign() < 0 {
+			return nil, errNegativeNonInteger
+		}
+
+		// A zero base reaches here for a negative or non-integer exponent.
+		exp, err := approxRat(ctx, r, env.precision)
+		if err != nil {
+			return nil, err
+		}
+		if exp.Sign() < 0 {
+			return nil, errZeroNegativePower
+		}
+		return unified.Zero(), nil
+	}
+	return nil, err
+}
+
+// integerExponent returns e as an integer when e is structurally one. Raising -1 to e succeeds
+// only for an integer, which is the test unified.Pow itself applies.
+func integerExponent(ctx context.Context, env *Env, e *unified.Real) (*big.Int, bool, error) {
+	if _, err := intReal(big.NewInt(-1)).Pow(ctx, e); err != nil {
+		if errors.Is(err, unified.ErrNonPositive) {
+			return nil, false, nil
+		}
+		if stop := checkCtx(ctx); stop != nil {
+			return nil, false, stop
+		}
+		return nil, false, err
+	}
+
+	rat, err := approxRat(ctx, e, env.precision)
+	if err != nil {
+		return nil, false, err
+	}
+	return rat.Num(), true, nil
+}
+
+// jetPow raises a jet to a jet power. Coefficient 0 is always valPow of the coefficients 0.
+func jetPow(ctx context.Context, env *Env, base, exp jv) (jv, error) {
+	if jetTag(base, exp) == 0 {
+		r, err := valPow(ctx, env, base.re, exp.re)
+		return scalarJ(r), err
+	}
+
+	if exp.co != nil {
+		return jetPowGeneral(ctx, env, base, exp)
+	}
+
+	n, ok, err := integerExponent(ctx, env, exp.re)
+	if err != nil {
+		return jv{}, err
+	}
+	if ok {
+		return jetPowInteger(ctx, env, base, exp, n)
+	}
+	return jetPowReal(ctx, env, base, exp)
+}
+
+// jetPowGeneral is exp(v ln u). It needs a positive base. Coefficient 0 is replaced by the power
+// of the coefficients 0, because exp(v ln u) is inexact where the power is not.
+func jetPowGeneral(ctx context.Context, env *Env, base, exp jv) (jv, error) {
+	lnu, err := jetLn(ctx, env, base)
+	if err != nil {
+		return jv{}, err
+	}
+	res, err := jetExp(ctx, env, jmul(exp, lnu))
+	if err != nil {
+		return jv{}, err
+	}
+
+	t := jetTag(base, exp)
+	if res.tag != t || res.co == nil {
+		return res, nil
+	}
+	p0, err := jetPow(ctx, env, base.coef(t, 0), exp.coef(t, 0))
+	if err != nil {
+		return jv{}, err
+	}
+	co := append([]jv{p0}, res.co[1:]...)
+	return jv{tag: t, co: co}, nil
+}
+
+// jetPowInteger multiplies the series, so it holds at a zero or negative base.
+func jetPowInteger(ctx context.Context, env *Env, base, exp jv, n *big.Int) (jv, error) {
+	if n.Sign() == 0 {
+		return intJ(1), nil
+	}
+
+	t := base.tag
+	p0, err := jetPow(ctx, env, base.coef(t, 0), exp)
+	if err != nil {
+		return jv{}, err
+	}
+
+	acc, sq := intJ(1), base
+	bits := n.BitLen()
+	for i := 0; i < bits; i++ {
+		if err := checkCtx(ctx); err != nil {
+			return jv{}, err
+		}
+		if n.Bit(i) == 1 {
+			acc = jmul(acc, sq)
+		}
+		if i+1 < bits {
+			sq = jmul(sq, sq)
+		}
+	}
+	if n.Sign() < 0 {
+		if acc, err = jdiv(intJ(1), acc); err != nil {
+			return jv{}, err
+		}
+	}
+
+	co := append([]jv{p0}, acc.co[1:]...)
+	return jv{tag: t, co: co}, nil
+}
+
+// jetPowReal is Miller's recurrence for a constant non-integer exponent. It divides by the
+// coefficient-0 base, so it needs a positive one.
+func jetPowReal(ctx context.Context, env *Env, base, exp jv) (jv, error) {
+	t := base.tag
+	u := base.co
+
+	p := make([]jv, len(u))
+	var err error
+	if p[0], err = jetPow(ctx, env, u[0], exp); err != nil {
+		return jv{}, err
+	}
+
+	for k := 1; k < len(u); k++ {
+		if err := checkCtx(ctx); err != nil {
+			return jv{}, err
+		}
+
+		sum := zeroJ()
+		for j := 1; j <= k; j++ {
+			w := jsub(jmul(exp, intJ(int64(j))), intJ(int64(k-j)))
+			sum = jadd(sum, jmul(w, jmul(u[j], p[k-j])))
+		}
+		if p[k], err = jdiv(sum, jmul(intJ(int64(k)), u[0])); err != nil {
+			return jv{}, err
+		}
+	}
+	return jv{tag: t, co: p}, nil
 }

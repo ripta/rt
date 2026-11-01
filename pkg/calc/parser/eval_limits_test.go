@@ -228,3 +228,35 @@ func TestStopErrorsHaveNoPositionPrefix(t *testing.T) {
 		t.Errorf("err = %q, want a bare stop error with no position prefix", err)
 	}
 }
+
+func TestCancelInsideDiffPower(t *testing.T) {
+	t.Parallel()
+
+	for _, src := range []string{
+		"diff(x ** 1000000000, x = 3)",
+		"diff(x ** -1000000000, x = 3)",
+	} {
+		t.Run(src, func(t *testing.T) {
+			t.Parallel()
+
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			time.AfterFunc(50*time.Millisecond, cancel)
+
+			done := make(chan error, 1)
+			go func() {
+				_, err := evalWithBinders(ctx, src, NewEnv())
+				done <- err
+			}()
+
+			select {
+			case err := <-done:
+				if !errors.Is(err, ErrCancelled) {
+					t.Errorf("err = %v, want ErrCancelled", err)
+				}
+			case <-time.After(10 * time.Second):
+				t.Fatal("evaluation ignored cancellation")
+			}
+		})
+	}
+}

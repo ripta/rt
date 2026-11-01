@@ -71,6 +71,15 @@ func TestDiffValues(t *testing.T) {
 		{"diff(exp(sin(x)), x = 0)", 1},
 		{"diff(sin(x)*exp(x), x = 1)", math.E * (math.Sin(1) + math.Cos(1))},
 		{"diff(x*x + 3*x, x = 1/3)", 2.0/3 + 3},
+		{"diff(x**0.5, x = 4)", 0.25},
+		{"diff(x**(1/3), x = 8)", 1.0 / 12},
+		{"diff(x**2.5, x = 4)", 20},
+		{"diff(x**PI, x = 2)", math.Pi * math.Pow(2, math.Pi-1)},
+		{"diff(2**x, x = 3)", 8 * math.Ln2},
+		{"diff(x**x, x = 2)", 4 * (math.Ln2 + 1)},
+		{"diff(x**sin(x), x = 1)", math.Sin(1)},
+		{"diff(sqrt(x**2 + 1), x = 0)", 0},
+		{"diff(0**2 + x, x = 1)", 1},
 	}
 	for _, tt := range tests {
 		src, want := tt.src, tt.want
@@ -95,6 +104,17 @@ func TestDiffExactRationals(t *testing.T) {
 		want string
 	}{
 		{"diff(x*x*x, x = 2)", "12"},
+		{"diff(x**3, x = 2)", "12"},
+		{"diff(x**3, x = -2)", "12"},
+		{"diff(x**3, x = 0)", "0"},
+		{"diff(x**2, x = 0)", "0"},
+		{"diff(x**1, x = 0)", "1"},
+		{"diff(x**0, x = 0)", "0"},
+		{"diff(x**(-2), x = 2)", "-1/4"},
+		{"diff(x**(-1), x = -4)", "-1/16"},
+		{"diff(x**4, x = -1)", "-4"},
+		{"diff((x + 1)**5, x = 0)", "5"},
+		{"diff(x**(4/2), x = 3)", "6"},
 		{"diff(1/x, x = 4)", "-1/16"},
 		{"diff(x/(1 + x), x = 1)", "1/4"},
 		{"diff(7, x = 1)", "0"},
@@ -122,6 +142,11 @@ func TestDiffSharpens(t *testing.T) {
 		{"diff(sin(x), x = PI)", "-1"},
 		{"diff(atan(x), x = 1)", "1/2"},
 		{"diff(sqrt(x), x = 2)", "1/(2*sqrt(2))"},
+		{"diff(x**0.5, x = 2)", "1/(2*sqrt(2))"},
+		{"diff(x**3, x = SQRT2)", "6"},
+		{"diff(2**x, x = 1)", "2*ln(2)"},
+		{"diff(x**x, x = 2)", "4*(ln(2) + 1)"},
+		{"diff(x**SQRT2, x = 1)", "SQRT2"},
 		{"diff(sin(x)*exp(x), x = 1)", "exp(1)*(sin(1) + cos(1))"},
 		{"diff(sin(x)*sin(x) + cos(x)*cos(x), x = 1)", "0"},
 	}
@@ -158,7 +183,6 @@ func TestDiffErrors(t *testing.T) {
 		src  string
 		want string
 	}{
-		{"diff(x**2, x = 1)", "not yet differentiable"},
 		{"diff(abs(x), x = 1)", "not yet differentiable"},
 		{"diff(floor(x), x = 1)", "not yet differentiable"},
 		{"diff(x % 2, x = 1)", "not yet differentiable"},
@@ -191,6 +215,13 @@ func TestDiffErrors(t *testing.T) {
 		{"diff(lgamma(x), x = -1)", "lgamma(-1)"},
 		{"diff(gamma(x), x = -2)", "gamma(-2)"},
 		{"diff(gamma(x), x = 0)", "gamma(0)"},
+		{"diff(x**0.5, x = 0)", "division by zero"},
+		{"diff(x**0.5, x = -4)", "non-real"},
+		{"diff(x**(-1), x = 0)", "zero to negative power"},
+		{"diff((-2)**x, x = 1)", "ln(-2)"},
+		{"diff(0**x, x = 1)", "ln(0)"},
+		{"diff(x**x, x = 0)", "ln(0)"},
+		{"diff(x**x, x = -1)", "ln(-1)"},
 		{"diff(y, x = 1)", "undefined identifier"},
 		{"diff(x, x = 1..2)", "point binding"},
 		{"diff(x)", "binding"},
@@ -436,6 +467,12 @@ func TestJetSeriesAtHigherOrders(t *testing.T) {
 		{"atan", func() (jv, error) {
 			return composeN(ctx, env, "atan", real1((*unified.Real).Atan), unaryPartials(dAtan), []jv{x})
 		}, []float64{0, 1, 0, -1.0 / 3, 0}},
+		{"(1+x)^0.5", func() (jv, error) { return jetPow(ctx, env, jadd(one, x), scalarJ(ratReal(big.NewRat(1, 2)))) }, []float64{1, 0.5, -0.125, 0.0625, -5.0 / 128}},
+		{"(1+x)^-1", func() (jv, error) { return jetPow(ctx, env, jadd(one, x), intJ(-1)) }, []float64{1, -1, 1, -1, 1}},
+		{"(1+x)^4", func() (jv, error) { return jetPow(ctx, env, jadd(one, x), intJ(4)) }, []float64{1, 4, 6, 4, 1}},
+		{"x^3 at zero", func() (jv, error) { return jetPow(ctx, env, x, intJ(3)) }, []float64{0, 0, 0, 1, 0}},
+		{"2^x", func() (jv, error) { return jetPow(ctx, env, intJ(2), x) }, []float64{1, math.Ln2, math.Ln2 * math.Ln2 / 2, math.Pow(math.Ln2, 3) / 6, math.Pow(math.Ln2, 4) / 24}},
+		{"(1+x)^(1+x)", func() (jv, error) { return jetPow(ctx, env, jadd(one, x), jadd(one, x)) }, []float64{1, 1, 1, 0.5, 1.0 / 3}},
 		{"gamma(1+x)", func() (jv, error) { return jetGamma(ctx, env, jadd(one, x)) }, []float64{1, -eulerGamma, 0.9890559953279725, -0.9074790760808862, 0.9817280868344002}},
 	}
 	for _, tt := range tests {
@@ -506,4 +543,78 @@ func TestJetTagsKeepPerturbationsApart(t *testing.T) {
 			t.Errorf("got %v, want division by zero", err)
 		}
 	})
+}
+
+func TestJetPowNestedTags(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	env := NewEnv()
+	tx, ty := newTag(), newTag()
+
+	// x = 2 + e_x in the outer tag, and y = 3 + e_y in the inner tag.
+	x := jetOf(tx, 2, 1)
+	y := jv{tag: ty, co: []jv{intJ(3), intJ(1)}}
+
+	tests := []struct {
+		name string
+		base jv
+		exp  jv
+		dy   []float64
+	}{
+		// d/dy x^y = x^y ln x, and d/dx of that is x^(y-1) (1 + y ln x).
+		{"x^y", x, y, []float64{8 * math.Ln2, 4 * (1 + 3*math.Ln2)}},
+		// d/dy y^x = x y^(x-1), and d/dx of that is y^(x-1) (1 + x ln y).
+		{"y^x", y, x, []float64{2 * 3, 3 * (1 + 2*math.Log(3))}},
+		{"x^0.5", x, scalarJ(ratReal(big.NewRat(1, 2))), nil},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := jetPow(ctx, env, tt.base, tt.exp)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tt.dy == nil {
+				checkCoefs(t, got, tx, []float64{math.Sqrt2, 1 / (2 * math.Sqrt2)})
+				return
+			}
+			checkCoefs(t, got.coef(ty, 1), tx, tt.dy)
+		})
+	}
+}
+
+func TestJetPowIntegerInInnerTagIsConstantInOuter(t *testing.T) {
+	t.Parallel()
+
+	tx, ty := newTag(), newTag()
+	y := jv{tag: ty, co: []jv{intJ(3), intJ(1)}}
+
+	got, err := jetPow(context.Background(), NewEnv(), y, intJ(3))
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkCoefs(t, got, ty, []float64{27, 27})
+	if jetLen(tx, got.coef(ty, 1)) != 0 {
+		t.Error("d/dy y^3 should not depend on the outer tag")
+	}
+}
+
+// The order-0 case of a power is the value through Pow, on every path.
+func TestJetPowValueIsExact(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	env := NewEnv()
+	tag := newTag()
+	x := jetOf(tag, 3, 1)
+
+	got, err := jetPow(ctx, env, intJ(2), x)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v := got.coef(tag, 0).value(); !v.Subtract(intJ(8).value()).IsZero() {
+		t.Errorf("2**x at 3 is not exactly 8 structurally")
+	}
 }
