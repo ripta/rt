@@ -14,10 +14,24 @@ import (
 // one set of forms per layer, and a copy per layer would make the chain quadratic
 // in memory. ok is false for the canonical form when the subject could not be
 // canonicalized, which makes non-basename rules skip it.
+//
+// alias is the head's path under the project's own checkout, set when the head lies in another
+// checkout of the project's repository. Only a project-relative rule compares it.
 type matchForm struct {
-	head string
-	tail []string
-	ok   bool
+	head  string
+	alias string
+	tail  []string
+	ok    bool
+}
+
+// aliased fills in a path form's alias through the injected checkout lookup. A ruleset without one
+// leaves the form as it is.
+func (rs *Ruleset) aliased(f matchForm) matchForm {
+	if f.ok && rs.checkoutAlias != nil {
+		f.alias = rs.checkoutAlias(f.head)
+	}
+
+	return f
 }
 
 func newForm(head string, tail []string) matchForm {
@@ -136,16 +150,31 @@ func formMatches(rule *Rule, form matchForm) bool {
 
 	switch rule.kind {
 	case KindExact:
-		return matchTokens(rule.cmpArgv, form, true)
+		return matchRuleTokens(rule, form, true)
 	case KindPrefix:
-		return matchTokens(rule.cmpArgv, form, false)
+		return matchRuleTokens(rule, form, false)
 	case KindWrapper:
-		return form.length() > len(rule.cmpArgv) && matchTokens(rule.cmpArgv, form, false)
+		return form.length() > len(rule.cmpArgv) && matchRuleTokens(rule, form, false)
 	case KindGlob, KindRegex:
 		return rule.compiled != nil && rule.compiled.MatchString(form.quoted())
 	}
 
 	return false
+}
+
+// matchRuleTokens compares a rule's tokens with the form as it stands, and a project-relative rule
+// also with the form's head mapped to the project's own checkout. An absolute rule pins one file,
+// so it never reads the alias.
+func matchRuleTokens(rule *Rule, form matchForm, exact bool) bool {
+	if matchTokens(rule.cmpArgv, form, exact) {
+		return true
+	}
+
+	if !rule.relative || form.alias == "" {
+		return false
+	}
+
+	return matchTokens(rule.cmpArgv, newForm(form.alias, form.tail), exact)
 }
 
 // compileMatch derives the match form and comparison tokens for a rule once at
@@ -175,6 +204,7 @@ func compileMatch(rule *Rule, projectRoot string) {
 		cmp := slices.Clone(tokens)
 		if !filepath.IsAbs(cmp[0]) {
 			cmp[0] = filepath.Clean(filepath.Join(projectRoot, cmp[0]))
+			rule.relative = true
 		}
 		rule.cmpArgv = cmp
 

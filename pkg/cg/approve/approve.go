@@ -100,6 +100,7 @@ type Rule struct {
 	kind         RuleKind
 	compiled     *regexp.Regexp
 	wantBasename bool
+	relative     bool
 	cmpArgv      []string
 	baseArgv     []string
 }
@@ -132,12 +133,18 @@ type Layer struct {
 
 // Ruleset is the frozen, merged policy the matcher evaluates. It is built once
 // at load and never mutated; the matcher consults only this and never touches
-// disk.
+// disk itself.
+//
+// checkoutAlias is the one injected lookup that does, as Resolver is for inner layers. A nil lookup
+// means relative rules name only the project root's path.
 type Ruleset struct {
 	Mode     Mode
 	Deny     []Rule
 	Allow    []Rule
 	Restrict []Rule
+
+	checkoutAlias func(path string) string
+	projectRoot   string
 }
 
 // Store owns the two layers and the live ruleset. It performs disk I/O at load

@@ -259,7 +259,7 @@ func loadLayer(path string) (Layer, error) {
 // allow and the slices carry no layer provenance, so any allow from either layer
 // carves out of any restrict from either layer.
 func buildRuleset(global, project Layer, projectRoot string) (*Ruleset, error) {
-	rs := &Ruleset{Mode: ModeEnforce}
+	rs := &Ruleset{Mode: ModeEnforce, checkoutAlias: newCheckoutAlias(projectRoot), projectRoot: projectRoot}
 
 	if global.Doc != nil && global.Doc.Mode != "" {
 		rs.Mode = global.Doc.Mode
