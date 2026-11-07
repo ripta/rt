@@ -130,7 +130,7 @@ func (g *gate) editNote(failure *editFailure, targets []approve.EditTarget) stri
 	case editUnparseable:
 		why = fmt.Sprintf("The rule field was not read: %v.", failure.Parse)
 	case editMismatch:
-		why = fmt.Sprintf("The rule %s does not match the command %s.", renderFlowSeq(approve.RedactCredentials(failure.Tokens)), describeCommand(failure.Missed.Argv))
+		why = g.pathMismatch(failure) + fmt.Sprintf("The rule %s does not match the command %s.", renderFlowSeq(approve.RedactCredentials(failure.Tokens)), describeCommand(failure.Missed.Argv))
 	case editWrapperTrim:
 		why = fmt.Sprintf("The rule %s is shorter than the command. This program re-executes its arguments, so a shorter rule would allow any inner command.", renderFlowSeq(approve.RedactCredentials(failure.Tokens)))
 	case editWrapperBox:
@@ -140,6 +140,23 @@ func (g *gate) editNote(failure *editFailure, targets []approve.EditTarget) stri
 	}
 
 	return why + " " + g.acceptedEdits(g.constraintsOf(failure, targets))
+}
+
+// pathMismatch names both paths when the rule's first token resolves somewhere other than the
+// command. The two can be spelled identically, so quoting the spellings alone explains nothing. It
+// leads the note because the client cuts the field's description to one line.
+func (g *gate) pathMismatch(failure *editFailure) string {
+	if len(failure.Tokens) == 0 {
+		return ""
+	}
+
+	named := g.store.PathNamedBy(failure.Tokens[0])
+	ran := failure.Missed.Resolution.RulePath()
+	if named == "" || ran == "" || named == ran {
+		return ""
+	}
+
+	return fmt.Sprintf("The rule's first token names %s, but the command runs %s. ", visibleText(named), visibleText(ran))
 }
 
 // acceptedEdits lists the edits that pass every constraint. It names the credential's position and

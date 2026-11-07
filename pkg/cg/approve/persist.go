@@ -204,6 +204,9 @@ func (s *Store) appendLiveAllow(rule Rule) {
 		Deny:     cur.Deny,
 		Allow:    append(slices.Clone(cur.Allow), rule),
 		Restrict: cur.Restrict,
+
+		checkoutAlias: cur.checkoutAlias,
+		projectRoot:   cur.projectRoot,
 	}
 	s.rules.Store(next)
 }

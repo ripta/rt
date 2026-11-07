@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -879,5 +880,23 @@ func TestEndToEndSecondRoundShowsTheBoxAsRoundOneLeftIt(t *testing.T) {
 	}
 	if !strings.Contains(script.schemas[1], `"allow_extra_args":{"default":true,`) {
 		t.Errorf("round 2 box should keep its round 1 value:\n%s", script.schemas[1])
+	}
+}
+
+// TestMismatchNoteNamesBothPaths pins the note for a relative rule that resolves somewhere other
+// than the command. Both spell the program the same way, so a note that quotes only the spellings
+// reads as "[./x] does not match ./x", and the user cannot tell what to change.
+func TestMismatchNoteNamesBothPaths(t *testing.T) {
+	root := t.TempDir()
+	g := newTestGateAt(t, root, "version: 1\n", false)
+
+	argv := []string{"./tool.sh", "go"}
+	ran := "/elsewhere/tool.sh"
+	target := approve.EditTarget{Argv: argv, Resolution: &model.Resolution{Argv: argv, Resolved: ran, Canonical: ran}}
+
+	note := g.editNote(&editFailure{Reason: editMismatch, Tokens: []string{"./tool.sh"}, Missed: target}, []approve.EditTarget{target})
+
+	if want := "names " + filepath.Join(root, "tool.sh") + ", but the command runs " + ran; !strings.HasPrefix(note, "The rule's first token "+want) {
+		t.Errorf("note = %q, want it to lead with %q", note, want)
 	}
 }

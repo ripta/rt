@@ -72,6 +72,8 @@ func (s *Store) CheckEdit(tokens []string, extraArgs bool, targets []EditTarget)
 
 	for i, target := range targets {
 		canonical, resolved, basename := resolutionForms(target.Argv, target.Resolution)
+		canonical, resolved = s.Ruleset().aliased(canonical), s.Ruleset().aliased(resolved)
+
 		if !tokenRuleMatches(&rule, canonical, resolved, basename) {
 			return 0, &EditRejection{Reason: EditMismatch, Target: i}
 		}
@@ -89,6 +91,20 @@ func (s *Store) CheckEdit(tokens []string, extraArgs bool, targets []EditTarget)
 	}
 
 	return KindExact, nil
+}
+
+// PathNamedBy returns the absolute path a rule's first token names, or empty for a bare program
+// name, which compares by basename and names no path.
+func (s *Store) PathNamedBy(token string) string {
+	if !hasPathSeparator(token) {
+		return ""
+	}
+
+	if filepath.IsAbs(token) {
+		return filepath.Clean(token)
+	}
+
+	return filepath.Clean(filepath.Join(s.projectRoot, token))
 }
 
 // FormHeadsWrapper reports whether a remembered rule for these targets is exact-only: a target's

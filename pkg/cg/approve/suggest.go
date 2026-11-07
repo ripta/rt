@@ -1,6 +1,9 @@
 package approve
 
 import (
+	"path/filepath"
+	"strings"
+
 	"github.com/ripta/rt/pkg/cg/model"
 )
 
@@ -35,6 +38,7 @@ func (rs *Ruleset) Suggest(argv []string, res *model.Resolution) Suggestion {
 
 	execPath := res.RulePath()
 	canonical, resolved, basename := resolutionForms(argv, res)
+	canonical, resolved = rs.aliased(canonical), rs.aliased(resolved)
 
 	var heads bool
 	var near *Rule
@@ -56,7 +60,7 @@ func (rs *Ruleset) Suggest(argv []string, res *model.Resolution) Suggestion {
 		}
 	}
 
-	head := execPath
+	head := rs.portableHead(execPath, canonical, resolved, basename)
 	if head == "" {
 		head = argv[0]
 	}
@@ -64,6 +68,41 @@ func (rs *Ruleset) Suggest(argv []string, res *model.Resolution) Suggestion {
 	tokens := append([]string{head}, argv[1:]...)
 
 	return Suggestion{Tokens: tokens, HeadsWrapper: heads, NearMiss: near}
+}
+
+// portableHead spells a program in the project as a project-relative path, so a remembered rule
+// works for anyone in any checkout. The project file is committed, and an absolute path would hold
+// one person's home directory and one worktree's name.
+//
+// The relative spelling is offered only when it matches the command, so a project root reached
+// through a symlink keeps the absolute path that does. Any other path comes back unchanged.
+func (rs *Ruleset) portableHead(path string, canonical, resolved, basename matchForm) string {
+	if rs.projectRoot == "" || !filepath.IsAbs(path) {
+		return path
+	}
+
+	target := path
+	if rs.checkoutAlias != nil {
+		if alias := rs.checkoutAlias(path); alias != "" {
+			target = alias
+		}
+	}
+
+	rel, err := filepath.Rel(rs.projectRoot, target)
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return path
+	}
+
+	candidate := "./" + filepath.ToSlash(rel)
+
+	rule := Rule{Prefix: []string{candidate}, kind: KindPrefix}
+	compileMatch(&rule, rs.projectRoot)
+
+	if !tokenRuleMatches(&rule, canonical, resolved, basename) {
+		return path
+	}
+
+	return candidate
 }
 
 // headMatches reports whether a wrapper rule's first token names the program in the forms.
@@ -74,5 +113,9 @@ func headMatches(rule *Rule, canonical, resolved, basename matchForm) bool {
 		return basename.ok && basename.head == first
 	}
 
-	return (canonical.ok && canonical.head == first) || (resolved.ok && resolved.head == first)
+	if (canonical.ok && canonical.head == first) || (resolved.ok && resolved.head == first) {
+		return true
+	}
+
+	return rule.relative && ((canonical.ok && canonical.alias == first) || (resolved.ok && resolved.alias == first))
 }

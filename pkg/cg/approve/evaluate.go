@@ -262,6 +262,8 @@ func (e *evaluation) layerAt(offset int) *layer {
 		l.canonical, l.resolved, l.basename = resolutionForms(l.argv, l.resolution)
 	}
 
+	l.canonical, l.resolved = e.rs.aliased(l.canonical), e.rs.aliased(l.resolved)
+
 	e.findPeels(l)
 	e.layers[offset] = l
 
