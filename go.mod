@@ -5,7 +5,7 @@ go 1.27.0
 require (
 	github.com/BurntSushi/toml v1.6.0
 	github.com/containerd/console v1.0.5
-	github.com/elk-language/go-prompt v1.4.0
+	github.com/elk-language/go-prompt v1.6.7
 	github.com/go-logfmt/logfmt v0.6.1
 	github.com/google/cel-go v0.30.0
 	github.com/google/jsonschema-go v0.4.3
@@ -21,11 +21,11 @@ require (
 	github.com/ripta/unihan v0.2.0
 	github.com/rogpeppe/go-internal v1.16.0
 	github.com/spf13/cobra v1.10.2
-	github.com/spf13/pflag v1.0.10
+	github.com/spf13/pflag v1.1.0
 	github.com/stretchr/testify v1.12.1
 	github.com/thediveo/enumflag/v2 v2.2.1
 	github.com/vmihailenco/msgpack/v5 v5.4.1
-	github.com/zclconf/go-cty v1.19.0
+	github.com/zclconf/go-cty v1.20.0
 	golang.org/x/crypto v0.58.0
 	golang.org/x/term v0.47.0
 	golang.org/x/text v0.43.0
