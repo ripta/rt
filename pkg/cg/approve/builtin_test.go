@@ -51,7 +51,7 @@ func TestBuiltinDeny(t *testing.T) {
 func TestBuiltinDenyNotOverridable(t *testing.T) {
 	t.Parallel()
 
-	// A project allow for sh cannot re-allow it: the built-in deny leads the
+	// A project allow for sh cannot re-allow it: the built-in deny is in the
 	// merged deny list and deny is evaluated first.
 	rs := &Ruleset{
 		Mode:  ModeEnforce,
