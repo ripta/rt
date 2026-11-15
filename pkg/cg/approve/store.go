@@ -253,9 +253,13 @@ func loadLayer(path string) (Layer, error) {
 
 // buildRuleset merges the two layers into the frozen ruleset the matcher
 // evaluates. The project mode overrides the global mode; deny, allow, and
-// restrict entries from both layers are unioned. The built-in default-deny set
-// leads the deny list, so it cannot be re-allowed, and deny is evaluated before
-// allow, which gives deny precedence across layers. Restrict is evaluated after
+// restrict entries from both layers are unioned. Deny is evaluated before allow,
+// which gives deny precedence across layers, so the built-in default-deny set
+// cannot be re-allowed.
+//
+// Each tier lists project rules, then global rules, then the built-in deny set.
+// The order never changes a decision. It picks which matching rule a verdict names,
+// so the most specific layer's message reaches the agent. Restrict is evaluated after
 // allow and the slices carry no layer provenance, so any allow from either layer
 // carves out of any restrict from either layer.
 func buildRuleset(global, project Layer, projectRoot string) (*Ruleset, error) {
@@ -268,17 +272,17 @@ func buildRuleset(global, project Layer, projectRoot string) (*Ruleset, error) {
 		rs.Mode = project.Doc.Mode
 	}
 
-	rs.Deny = append(rs.Deny, builtinDenyRules()...)
-	if global.Doc != nil {
-		rs.Deny = append(rs.Deny, global.Doc.Deny...)
-		rs.Allow = append(rs.Allow, global.Doc.Allow...)
-		rs.Restrict = append(rs.Restrict, global.Doc.Restrict...)
-	}
 	if project.Doc != nil {
 		rs.Deny = append(rs.Deny, project.Doc.Deny...)
 		rs.Allow = append(rs.Allow, project.Doc.Allow...)
 		rs.Restrict = append(rs.Restrict, project.Doc.Restrict...)
 	}
+	if global.Doc != nil {
+		rs.Deny = append(rs.Deny, global.Doc.Deny...)
+		rs.Allow = append(rs.Allow, global.Doc.Allow...)
+		rs.Restrict = append(rs.Restrict, global.Doc.Restrict...)
+	}
+	rs.Deny = append(rs.Deny, builtinDenyRules()...)
 
 	for i := range rs.Deny {
 		compileMatch(&rs.Deny[i], projectRoot)

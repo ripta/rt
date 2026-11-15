@@ -84,7 +84,7 @@ func matchesListed(entry []string, form matchForm) bool {
 	return true
 }
 
-// builtinDenyRules returns the conservative default-deny set that always leads
+// builtinDenyRules returns the conservative default-deny set that always closes
 // the merged deny list. It covers shells and inline-code interpreter forms,
 // whose program token alone (sh, bash) or program-plus-eval-flag (python -c)
 // would otherwise wave through arbitrary code in an argument the rules do not

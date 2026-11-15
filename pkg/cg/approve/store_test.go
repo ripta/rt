@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 )
 
@@ -223,6 +224,80 @@ func TestLoadUnionsLayers(t *testing.T) {
 	}
 	if len(rs.Restrict) != 2 {
 		t.Errorf("restrict count = %d, want 2", len(rs.Restrict))
+	}
+}
+
+type attributionTest struct {
+	Name        string
+	Global      string
+	Project     string
+	Argv        []string
+	WantMessage string
+	WantPrefix  []string
+}
+
+var attributionTests = []attributionTest{
+	{
+		Name:        "global deny over builtin",
+		Global:      "version: 1\ndeny:\n  - prefix: [bash, -c]\n    message: global\n",
+		Project:     "version: 1\n",
+		Argv:        []string{"bash", "-c", "true"},
+		WantMessage: "global",
+		WantPrefix:  []string{"bash", "-c"},
+	},
+	{
+		Name:        "project deny over global and builtin",
+		Global:      "version: 1\ndeny:\n  - prefix: [bash]\n    message: global\n",
+		Project:     "version: 1\ndeny:\n  - prefix: [bash, -c]\n    message: project\n",
+		Argv:        []string{"bash", "-c", "true"},
+		WantMessage: "project",
+		WantPrefix:  []string{"bash", "-c"},
+	},
+	{
+		Name:        "project restrict over global",
+		Global:      "version: 1\nrestrict:\n  - prefix: [git]\n    message: global\n",
+		Project:     "version: 1\nrestrict:\n  - prefix: [git, push]\n    message: project\n",
+		Argv:        []string{"git", "push"},
+		WantMessage: "project",
+		WantPrefix:  []string{"git", "push"},
+	},
+	{
+		Name:       "project allow over global",
+		Global:     "version: 1\nallow:\n  - prefix: [make]\n",
+		Project:    "version: 1\nallow:\n  - prefix: [make, test]\n",
+		Argv:       []string{"make", "test"},
+		WantPrefix: []string{"make", "test"},
+	},
+}
+
+// TestLoadAttributesProjectThenGlobalThenBuiltin covers which rule a verdict names when rules from
+// several layers match one command. The decision does not depend on the order, but the attributed
+// rule's message is what the agent sees, so a builtin or global rule must not shadow a more
+// specific layer's explanation.
+func TestLoadAttributesProjectThenGlobalThenBuiltin(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range attributionTests {
+		t.Run(test.Name, func(t *testing.T) {
+			t.Parallel()
+
+			global := writeGlobal(t, test.Global)
+			root := writeProject(t, test.Project)
+
+			s, err := Load(LoadOptions{GlobalPath: global, ProjectRoot: root})
+			if err != nil {
+				t.Fatalf("Load() error: %v", err)
+			}
+
+			got := s.Ruleset().Match(identitySubject(test.Argv))
+			if got.Rule == nil {
+				t.Fatalf("Match(%v) rule = nil, want prefix %v", test.Argv, test.WantPrefix)
+			}
+			if !slices.Equal(got.Rule.Prefix, test.WantPrefix) || got.Rule.Message != test.WantMessage {
+				t.Errorf("Match(%v) rule = prefix %v message %q, want prefix %v message %q",
+					test.Argv, got.Rule.Prefix, got.Rule.Message, test.WantPrefix, test.WantMessage)
+			}
+		})
 	}
 }
 
