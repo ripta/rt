@@ -369,24 +369,14 @@ var roundTests = []roundTest{
 	{
 		Name:    "a declined group names every command it covers in call order",
 		Project: "version: 1\n",
-		Argvs:   [][]string{{"echo@1", "a"}, {"printf", "x"}, {"echo@2", "a"}},
+		Argvs:   [][]string{{"echo", "a"}, {"printf", "x"}, {"echo", "a"}},
 		Answers: mcpsdk.InputResponseMap{
 			"approval-1": decline(),
 			"approval-2": accept(map[string]any{}),
 		},
 
 		WantForms: 2,
-		WantErr:   "2 commands were declined at the approval prompt\n  echo@1 a\n  echo@2 a",
-	},
-	{
-		Name:         "a command allowed between the calls runs while the rest of its form uses the answer",
-		Project:      "version: 1\n",
-		AllowBetween: []string{"echo@1"},
-		Argvs:        [][]string{{"echo@1", "a"}, {"echo@2", "a"}},
-		Answers:      mcpsdk.InputResponseMap{"approval-1": decline()},
-
-		WantForms: 1,
-		WantErr:   "command was declined at the approval prompt\n  echo@2 a",
+		WantErr:   "2 commands were declined at the approval prompt\n  echo a\n  echo a",
 	},
 	{
 		Name:         "a form whose commands are all allowed saves the remembered rule",
@@ -819,9 +809,8 @@ func TestApprovalRoundFormOrder(t *testing.T) {
 
 // linkedPrograms stands in for several spellings of one program. A placeholder program such as
 // "echo@2" becomes a symlink named echo in its own directory, pointing at the real echo. Every
-// spelling has the same canonical path, so commands that differ only in how the program is spelled
-// pre-fill the same rule and share one form. Their resolved paths differ, so a rule can still name
-// one spelling.
+// spelling has the same canonical path but its own resolved path, so each spelling pre-fills its
+// own rule and gets its own form.
 type linkedPrograms struct {
 	t     *testing.T
 	root  string
@@ -895,11 +884,11 @@ func (l *linkedPrograms) text(s string) string {
 	return s
 }
 
-// linkedEchoes is n commands that print the same word through n spellings of echo.
-func linkedEchoes(n int) [][]string {
+// repeatedEchoes is n copies of one command, which all pre-fill the same rule.
+func repeatedEchoes(n int) [][]string {
 	argvs := make([][]string, n)
 	for i := range argvs {
-		argvs[i] = []string{fmt.Sprintf("echo@%d", i+1), "a"}
+		argvs[i] = []string{"echo", "a"}
 	}
 
 	return argvs
@@ -935,29 +924,37 @@ type groupTest struct {
 
 var groupTests = []groupTest{
 	{
-		Name:      "five spellings of one command split into forms of at most the limit",
-		Argvs:     linkedEchoes(5),
-		WantForms: slices.Collect(slices.Chunk(argvLines(linkedEchoes(5)), maxFormCommands)),
+		Name:      "five copies of one command split into forms of at most the limit",
+		Argvs:     repeatedEchoes(5),
+		WantForms: slices.Collect(slices.Chunk(argvLines(repeatedEchoes(5)), maxFormCommands)),
 	},
 	{
-		Name:      "spellings up to the limit share one form",
-		Argvs:     linkedEchoes(maxFormCommands),
-		WantForms: [][]string{argvLines(linkedEchoes(maxFormCommands))},
+		Name:      "copies up to the limit share one form",
+		Argvs:     repeatedEchoes(maxFormCommands),
+		WantForms: [][]string{argvLines(repeatedEchoes(maxFormCommands))},
 	},
 	{
 		Name:  "two commands give two forms in first-appearance order",
-		Argvs: [][]string{{"printf@1", "x"}, {"echo@1", "a"}, {"printf@2", "x"}, {"echo@2", "a"}},
+		Argvs: [][]string{{"printf", "x"}, {"echo", "a"}, {"printf", "x"}, {"echo", "a"}},
 		WantForms: [][]string{
-			{"printf@1 x", "printf@2 x"},
-			{"echo@1 a", "echo@2 a"},
+			{"printf x", "printf x"},
+			{"echo a", "echo a"},
 		},
 	},
 	{
-		Name:  "one spelling more than the limit gives a full form and a form of one",
-		Argvs: linkedEchoes(maxFormCommands + 1),
+		Name:  "two spellings of one program get a form each, since each pre-fills its own path",
+		Argvs: [][]string{{"echo@1", "a"}, {"echo@2", "a"}, {"echo@1", "a"}},
 		WantForms: [][]string{
-			argvLines(linkedEchoes(maxFormCommands)),
-			argvLines(linkedEchoes(maxFormCommands + 1)[maxFormCommands:]),
+			{"echo@1 a", "echo@1 a"},
+			{"echo@2 a"},
+		},
+	},
+	{
+		Name:  "one more than the limit gives a full form and a form of one",
+		Argvs: repeatedEchoes(maxFormCommands + 1),
+		WantForms: [][]string{
+			argvLines(repeatedEchoes(maxFormCommands)),
+			argvLines(repeatedEchoes(maxFormCommands + 1)[maxFormCommands:]),
 		},
 	},
 	{
@@ -1019,7 +1016,7 @@ func TestApprovalRoundRememberOnChunksWritesOneRule(t *testing.T) {
 	g := newTestGateAt(t, root, "version: 1\n", false)
 
 	links := newLinkedPrograms(t)
-	call := testCall(links.argvs(linkedEchoes(maxFormCommands + 1))...)
+	call := testCall(links.argvs(repeatedEchoes(maxFormCommands + 1))...)
 	first, err := g.check(call)
 	if err != nil || first.Pending == nil {
 		t.Fatalf("first call = %+v, %v; want input requests", first, err)
@@ -1045,7 +1042,7 @@ func TestApprovalRoundFormsRecordedPerCommand(t *testing.T) {
 
 	g := newTestGate(t, "version: 1\n", false)
 	links := newLinkedPrograms(t)
-	call := testCall(links.argvs([][]string{{"echo@1", "a"}, {"printf", "x"}, {"echo@2", "a"}})...)
+	call := testCall(links.argvs([][]string{{"echo", "a"}, {"printf", "x"}, {"echo", "a"}})...)
 	first, err := g.check(call)
 	if err != nil || first.Pending == nil {
 		t.Fatalf("first call = %+v, %v; want input requests", first, err)

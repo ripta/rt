@@ -11,6 +11,7 @@ import (
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/ripta/rt/pkg/cg/approve"
 	"github.com/ripta/rt/pkg/cg/model"
 )
 
@@ -18,7 +19,8 @@ import (
 // the wrapper prefers. The wrapper script puts the second directory first on PATH, as `uv run`
 // does, so the file it runs shows whether the gate pinned the one it judged.
 type wrapperEnv struct {
-	// Wrap and Tool are the canonical paths of the wrapper and the judged inner program.
+	// Wrap and Tool are the resolved paths of the wrapper and the judged inner program, the form a
+	// suggested rule and an inner pin use.
 	Wrap string
 	Tool string
 
@@ -45,7 +47,7 @@ func newWrapperEnv(t *testing.T) wrapperEnv {
 
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	return wrapperEnv{Wrap: canonicalPath(t, wrap), Tool: canonicalPath(t, tool), Bin: bin}
+	return wrapperEnv{Wrap: wrap, Tool: tool, Bin: bin}
 }
 
 // rules writes a project file with a path-form wrapper rule for the wrapper and the given
@@ -104,6 +106,39 @@ func TestWrappedInnerCommandRunsPinnedFile(t *testing.T) {
 	}
 }
 
+// TestWrappedLinkedInterpreterKeepsItsLink covers a venv interpreter run through a wrapper. The
+// interpreter is a same-named link to a base interpreter elsewhere, and only the link knows the
+// venv. The inner pin must hand the wrapper the link, so the inner command runs as the venv's
+// interpreter. A pin on the base interpreter's canonical path loses the venv.
+func TestWrappedLinkedInterpreterKeepsItsLink(t *testing.T) {
+	w := newWrapperEnv(t)
+
+	base := t.TempDir()
+	interp := filepath.Join(base, "python3")
+	if err := os.WriteFile(interp, []byte("#!/bin/sh\necho \"$0\"\n"), 0o755); err != nil {
+		t.Fatalf("planting the base interpreter: %v", err)
+	}
+
+	venv := filepath.Join(t.TempDir(), "bin")
+	if err := os.Mkdir(venv, 0o755); err != nil {
+		t.Fatalf("creating the venv: %v", err)
+	}
+	link := filepath.Join(venv, "python3")
+	if err := os.Symlink(interp, link); err != nil {
+		t.Fatalf("linking the venv interpreter: %v", err)
+	}
+
+	g := newTestGate(t, w.rules("  - prefix: ["+link+"]\n"), false)
+
+	_, out, err := handleRun(context.Background(), nil, g, nil, "", runInput{Command: []string{"wrap", link}})
+	if err != nil {
+		t.Fatalf("handleRun: %v", err)
+	}
+	if got := strings.TrimSpace(out.StdoutExcerpt); got != link {
+		t.Errorf("inner command ran as %q, want the venv interpreter %q (stderr %q)", got, link, out.StderrExcerpt)
+	}
+}
+
 func TestWrappedInnerCommandRunsPinnedFileInPool(t *testing.T) {
 	w := newWrapperEnv(t)
 	g := newTestGate(t, w.rules("  - prefix: ["+w.Tool+"]\n"), false)
@@ -139,6 +174,36 @@ func TestGatePinsOnlyInnerLayersOfTheDecidingChain(t *testing.T) {
 	}
 	if got := outcome.Rewrites[1]; len(got) != 2 || got[1] != w.Wrap || got[2] != w.Tool {
 		t.Errorf("rewrites for wrap wrap tool = %v, want offsets 1 and 2 pinned", got)
+	}
+}
+
+// TestApprovalFormCommandAllowedBetweenTheCalls covers a form whose commands share a suggested rule
+// while a rule allows only some of them. A wrapped command and the bare inner command suggest the
+// same rule, but an ordinary allow on the wrapper's whole argv allows only the wrapped one. When it
+// is added between the calls, the wrapped command runs and the declined answer covers the rest.
+func TestApprovalFormCommandAllowedBetweenTheCalls(t *testing.T) {
+	w := newWrapperEnv(t)
+	g := newTestGate(t, w.rules(), false)
+
+	call := testCall([]string{"wrap", "tool", "x"}, []string{"tool", "x"})
+	first, err := g.check(call)
+	if err != nil || first.Pending == nil {
+		t.Fatalf("first call = %+v, %v; want input requests", first, err)
+	}
+	if got := len(first.Pending.InputRequests); got != 1 {
+		t.Fatalf("approval forms = %d, want both commands in one form", got)
+	}
+
+	if err := g.store.AppendProjectAllowPrefix([]string{w.Wrap, "tool"}, approve.WriteDirect); err != nil {
+		t.Fatalf("adding the allow rule: %v", err)
+	}
+
+	_, err = g.check(retryCall(call, first.Pending, mcpsdk.InputResponseMap{"approval-1": decline()}))
+	if want := "command was declined at the approval prompt\n  tool x"; err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("retry error = %v, want it to contain %q", err, want)
+	}
+	if strings.Contains(err.Error(), "wrap tool x") {
+		t.Errorf("retry error names the command the new rule allows: %v", err)
 	}
 }
 
