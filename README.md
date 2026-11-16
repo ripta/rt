@@ -623,7 +623,8 @@ agent that timed out can size its next `cg_wait` from `elapsed_ms` and
 
 `cg_run` checks each command against an approval matcher before running it. The
 default mode prompts for unmatched commands when the client supports elicitation,
-and otherwise fails closed; `cg mcp --blindly-allow` skips the gate entirely.
+and otherwise fails closed; `cg mcp --blindly-allow` skips the gate. Sandboxes still apply, as under
+`mode: allow-all`.
 Rules live in `~/.config/cg/approve.yaml` (global) and `.cg.yaml` /
 `.cg/approve.yaml` / `.claude/cg.yaml` (project), merged at startup:
 
@@ -942,6 +943,60 @@ The check misses what it has no shape for, such as `mysql -phunter2`,
 `--password hunter2`, `curl -u user:pass`, a token in a query parameter, a
 `Bearer` value with no digit, and an opaque value. No warning does not mean a
 rule is free of secrets. Read the rule before remembering it.
+
+### Sandboxes
+
+An allow rule can name a sandbox. cg then runs its command under a macOS Seatbelt profile.
+The rules still decide whether a command runs. The profile limits what it can reach once it
+does. A file that uses sandboxes must say `version: 2`.
+
+```yaml
+version: 2
+
+sandboxes:
+  go:
+    seatbelt:
+      profile: ~/.dotfiles/policies/sbpl/go.sb
+      already_sandboxed: refuse    # run | refuse | ask
+      proxy: http://localhost:3128 # optional
+      params:                      # optional, string values only
+        LOOPBACK: "1"
+
+allow:
+  - prefix: [go, test]
+    sandbox: go
+```
+
+- A `seatbelt` block needs `profile` and `already_sandboxed`. The profile path accepts `~`. A
+  relative path resolves against the project root in a project file, and is an error in the
+  global file.
+- The profile runs with `HOME` and `PROJECT_PATH`, both with symlinks resolved. `params` adds
+  more. SBPL tests a parameter for being set, not for its value, so every value must be a quoted
+  YAML string. `HOME` and `PROJECT_PATH` are reserved.
+- `proxy` sets `HTTP_PROXY`, `HTTPS_PROXY`, and their lowercase forms for the sandboxed command,
+  plus `NO_PROXY` for loopback. The caller's `env` overrides them. Commands with no sandbox see
+  none of them.
+- A project definition overrides a global one with the same name. A name that neither file
+  defines fails the load.
+- Only `exact`, `prefix`, `glob`, and `regex` allow rules take `sandbox`. A wrapped command runs
+  under the sandbox of its inner rule. The most specific rule decides the sandbox, and equally
+  specific rules that name different sandboxes refuse the call.
+- A command that a prompt approves, and a rule that remember saves, runs with no sandbox.
+- Each profile is read once at load and applied as written, so editing the file later changes
+  nothing until cg restarts. The load also compiles it by running it on `/usr/bin/true`, and a
+  profile that is missing or does not compile fails the load. A profile that imports another file
+  reads that file at each run. A run whose import broke is refused with the compile error.
+- A version 2 file rejects unknown keys, so a typo such as `sanbox:` fails the load. An older cg
+  rejects a version 2 file outright.
+- A sandboxed command execs the path `PATH` found, so a multiplexer shim or a virtualenv
+  interpreter keeps working. Its argv[0] is that absolute path. The run record shows the typed
+  command and the sandbox name.
+- `cg check` names the sandbox a command would run under, including under `mode: allow-all`.
+  `cg lint` runs the same load checks.
+- Under `mode: allow-all` and `--blindly-allow`, a command whose deciding rule names a sandbox
+  still runs under it. Every other command runs unsandboxed.
+- A sandboxed command is refused when the sandbox has no block for the platform, or when the load
+  probe could not confirm the profile applies, such as when cg already runs inside a sandbox.
 
 
 `enc`

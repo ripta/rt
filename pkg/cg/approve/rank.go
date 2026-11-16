@@ -273,8 +273,8 @@ func sortRules(rules []*Rule) {
 // wholeRuleKey renders every field of a rule that can tell two rules apart, so two rules with the
 // same match text and different fields still order the same way whatever the list order.
 func wholeRuleKey(r *Rule) string {
-	return fmt.Sprintf("%s\x00as_basename=%t\x00permit=%s\x00message=%s\x00layer=%d",
-		describeRule(r), r.AsBasename, strings.Join(r.PermitUnsafeEnvs, ","), r.Message, r.layer)
+	return fmt.Sprintf("%s\x00as_basename=%t\x00permit=%s\x00message=%s\x00sandbox=%s\x00layer=%d",
+		describeRule(r), r.AsBasename, strings.Join(r.PermitUnsafeEnvs, ","), r.Message, r.Sandbox, r.layer)
 }
 
 // chainRel is how a chain of wrapper rules compares with one ordinary allow.

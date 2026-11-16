@@ -18,11 +18,28 @@ import (
 // Canonical carry the executable identity the approval gate matched, so member runs
 // exec the same file without a fresh PATH lookup. InnerExec pins the inner command of a
 // wrapper the same way SuperviseSpec.InnerExec does.
+//
+// A sandboxed command carries the encoded launch in Argv, Resolved, and Canonical, as
+// SuperviseSpec does, and its typed command and sandbox in Sandbox. Env holds the command's own
+// environment overrides, which are the sandbox's proxy variables. They stay out of PoolSpec.Env,
+// which every member shares, so one command's proxy never reaches another's run.
 type PoolCommand struct {
-	Argv      []string       `json:"argv"`
-	Resolved  string         `json:"resolved,omitempty"`
-	Canonical string         `json:"canonical,omitempty"`
-	InnerExec map[int]string `json:"inner_exec,omitempty"`
+	Argv      []string          `json:"argv"`
+	Resolved  string            `json:"resolved,omitempty"`
+	Canonical string            `json:"canonical,omitempty"`
+	InnerExec map[int]string    `json:"inner_exec,omitempty"`
+	Sandbox   *SandboxSpec      `json:"sandbox,omitempty"`
+	Env       map[string]string `json:"env,omitempty"`
+}
+
+// recorded returns the command the manifest and the history record: the typed one for a sandboxed
+// command.
+func (c *PoolCommand) recorded() []string {
+	if c.Sandbox != nil {
+		return c.Sandbox.Command
+	}
+
+	return c.Argv
 }
 
 // resolution reconstructs the Resolution the server computed for this command.
@@ -203,7 +220,7 @@ func newPoolManifest(id string, spec *PoolSpec) *PoolManifest {
 		Runs:        make([]PoolRunRecord, 0, len(spec.Commands)*spec.Repeat),
 	}
 	for i, c := range spec.Commands {
-		m.Commands[i] = c.Argv
+		m.Commands[i] = c.recorded()
 		for r := 0; r < spec.Repeat; r++ {
 			m.Runs = append(m.Runs, PoolRunRecord{Command: i, Status: PoolRunPending})
 		}
@@ -270,8 +287,9 @@ func schedulePool(dir string, spec *PoolSpec, manifest *PoolManifest, sigCh <-ch
 		run, err := RunSupervised(cmd.Argv, SuperviseOptions{
 			Resolved:   cmd.resolution(),
 			InnerExec:  cmd.InnerExec,
+			Sandbox:    cmd.Sandbox,
 			Cwd:        spec.Cwd,
-			Env:        spec.Env,
+			Env:        LayerEnv(cmd.Env, spec.Env),
 			Pool:       manifest.ID,
 			SessionID:  manifest.SessionID,
 			Supervisor: spec.Supervisor,

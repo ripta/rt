@@ -71,6 +71,7 @@ func (k RuleKind) String() string {
 // populated after validation, and kind records which.
 //
 // Message is valid on deny and restrict rules. PermitUnsafeEnvs is valid only on allow rules.
+// Sandbox is valid only on a plain allow rule and needs a version 2 file.
 //
 // For prefix, exact, and wrapper rules the match form is inferred from the shape of the first
 // token. A bare program name matches the invoked basename. An absolute or project-relative path
@@ -100,6 +101,10 @@ type Rule struct {
 	AsBasename       bool     `yaml:"as_basename,omitempty"`
 	Message          string   `yaml:"message,omitempty"`
 	PermitUnsafeEnvs []string `yaml:"permit_unsafe_envs,omitempty"`
+
+	// Sandbox names the sandbox an exact, prefix, glob, or regex allow rule runs its command under.
+	// It is empty for an unsandboxed rule.
+	Sandbox string `yaml:"sandbox,omitempty"`
 
 	kind         RuleKind
 	compiled     *regexp.Regexp
@@ -133,6 +138,9 @@ type Document struct {
 	Deny     []Rule `yaml:"deny,omitempty"`
 	Allow    []Rule `yaml:"allow,omitempty"`
 	Restrict []Rule `yaml:"restrict,omitempty"`
+
+	// Sandboxes defines named sandboxes, which allow rules refer to. It needs version 2.
+	Sandboxes map[string]SandboxDef `yaml:"sandboxes,omitempty"`
 }
 
 // Layer is one decoded file plus its provenance. Node and Snapshot are held for
@@ -157,6 +165,10 @@ type Ruleset struct {
 	Deny     []Rule
 	Allow    []Rule
 	Restrict []Rule
+
+	// Sandboxes holds the merged, frozen sandbox definitions by name. A remembered rule never changes
+	// it, so every swap of the live ruleset carries the same map.
+	Sandboxes map[string]*Sandbox
 
 	checkoutAlias func(path string) string
 	projectRoot   string
@@ -240,7 +252,7 @@ type MatchResult struct {
 // Loader and merge errors. They are wrapped with the file path and, where a
 // node is available, the offending line.
 var (
-	ErrUnknownVersion     = errors.New("unknown version (expected 1)")
+	ErrUnknownVersion     = errors.New("unknown version (expected 1 or 2)")
 	ErrUnknownMode        = errors.New("unknown mode (expected enforce, allow-all, or deny-all)")
 	ErrNoRuleKind         = errors.New("rule has no rule-kind key (need one of exact, prefix, wrapper, glob, or regex)")
 	ErrMultipleRuleKinds  = errors.New("rule has more than one rule-kind key")
@@ -249,4 +261,9 @@ var (
 	ErrAsBasenameOnTokens = errors.New("as_basename is not valid on a prefix, exact, or wrapper rule; the first token's shape already settles the form (bare name matches the basename, a path matches the resolved or canonical path)")
 	ErrWrapperNotOnAllow  = errors.New("wrapper is valid only on an allow rule; a deny or restrict rule uses prefix instead")
 	ErrDashFirstToken     = errors.New("an allow rule's first token must not start with '-'; the wrapper, not the command, owns such a token")
+
+	ErrSandboxNeedsV2    = errors.New("sandboxes and sandbox need `version: 2`; an older cg would ignore them and run the command unsandboxed")
+	ErrSandboxNotOnPlain = errors.New("sandbox is valid only on an exact, prefix, glob, or regex allow rule; a wrapper takes the sandbox of the inner command's rule")
+	ErrSandboxEmptyName  = errors.New("sandbox must name a sandbox defined under sandboxes")
+	ErrSandboxWithDYLD   = errors.New("a rule that names a sandbox cannot permit a DYLD_ variable: sandbox-exec is protected by SIP, so the variable never reaches the command")
 )

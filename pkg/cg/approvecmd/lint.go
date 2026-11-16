@@ -37,6 +37,7 @@ type lintLayerResult struct {
 // skipped, with the reason in Note, when either layer failed to parse.
 type lintMergedResult struct {
 	Skipped  bool     `json:"skipped,omitempty"`
+	Issues   []string `json:"issues,omitempty"`
 	Note     string   `json:"note,omitempty"`
 	Warnings []string `json:"warnings,omitempty"`
 }
@@ -104,7 +105,7 @@ func (opts *lintOptions) run(cmd *cobra.Command, _ []string) error {
 		writeLintMergedText(cmd.OutOrStdout(), res.Merged)
 	}
 
-	if len(res.Global.Issues) > 0 || len(res.Project.Issues) > 0 {
+	if len(res.Global.Issues) > 0 || len(res.Project.Issues) > 0 || len(res.Merged.Issues) > 0 {
 		return &model.ExitError{Code: 1}
 	}
 
@@ -123,6 +124,10 @@ func lintLayerResultFrom(d approve.LayerDiagnosis) lintLayerResult {
 
 // lintMergedResultFrom runs the merged pass over both layers.
 func lintMergedResultFrom(global, project approve.LayerDiagnosis) lintMergedResult {
+	if issues := approve.MergedIssues(global, project); issues != nil {
+		return lintMergedResult{Issues: unwrapIssues(issues)}
+	}
+
 	warnings, ok := approve.MergedWarnings(global, project)
 	if !ok {
 		return lintMergedResult{Skipped: true, Note: lintMergedSkipNote}
@@ -135,6 +140,11 @@ func lintMergedResultFrom(global, project approve.LayerDiagnosis) lintMergedResu
 // skipped.
 func writeLintMergedText(w io.Writer, r lintMergedResult) {
 	switch {
+	case len(r.Issues) > 0:
+		fmt.Fprintln(w, "merged:")
+		for _, issue := range r.Issues {
+			fmt.Fprintf(w, "  error: %s\n", issue)
+		}
 	case r.Skipped:
 		fmt.Fprintf(w, "merged: %s\n", r.Note)
 	case len(r.Warnings) > 0:

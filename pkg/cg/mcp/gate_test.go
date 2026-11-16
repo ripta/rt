@@ -113,8 +113,8 @@ func TestGateEqualDenyRulesAreAllNamed(t *testing.T) {
 	}
 }
 
-// TestRefusalErrorNamesTiedAllowRules builds the verdict by hand, since no allow field exists yet
-// that two tied rules can differ in. It keeps the refusal's wording from rotting until one does.
+// TestRefusalErrorNamesTiedAllowRules builds the verdict by hand to pin the refusal's wording for a
+// tie, whatever field the tied rules disagree on.
 func TestRefusalErrorNamesTiedAllowRules(t *testing.T) {
 	_, doc, err := approve.ParseDocument([]byte("version: 1\nallow:\n  - prefix: [make]\n  - regex: '^make( |$)'\n    as_basename: true\n"))
 	if err != nil {

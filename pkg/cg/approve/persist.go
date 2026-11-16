@@ -3,6 +3,7 @@ package approve
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -109,13 +110,15 @@ func (s *Store) appendProjectAllow(rule Rule, strategy WriteStrategy) error {
 	if err != nil {
 		return fmt.Errorf("rendering project rules: %w", err)
 	}
-	if err := atomicWrite(s.Project.Path, data); err != nil {
-		return fmt.Errorf("writing project rules: %w", err)
+
+	node, parsed, err := s.checkRendered(data)
+	if err != nil {
+		return fmt.Errorf("refusing to remember %s: the project file changed on disk in a way the remembered rules no longer fit: %w",
+			describeRule(&rule), err)
 	}
 
-	node, parsed, err := parseDocument(data, s.tilde)
-	if err != nil {
-		return fmt.Errorf("re-parsing written project rules: %w", err)
+	if err := atomicWrite(s.Project.Path, data); err != nil {
+		return fmt.Errorf("writing project rules: %w", err)
 	}
 	s.Project.Node = node
 	s.Project.Doc = parsed
@@ -125,6 +128,26 @@ func (s *Store) appendProjectAllow(rule Rule, strategy WriteStrategy) error {
 	s.appendLiveAllow(rule)
 
 	return nil
+}
+
+// checkRendered validates the bytes about to be written, the way a load would, so remember never
+// writes a project file that stops loading. A reload-merge can carry an in-memory rule that names a
+// sandbox into a file edited back to version 1, or edited to drop the sandbox it names. Dropping the
+// rule would unsandbox its command, so the write is refused instead.
+//
+// Profiles are not read. The ruleset already holds them frozen.
+func (s *Store) checkRendered(data []byte) (*yaml.Node, *Document, error) {
+	node, parsed, err := parseDocument(data, s.tilde)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	layer := Layer{Path: s.Project.Path, Doc: parsed}
+	if errs := undefinedSandboxes(sandboxSources(s.Global, layer), layer, s.Global); len(errs) > 0 {
+		return nil, nil, errors.Join(errs...)
+	}
+
+	return node, parsed, nil
 }
 
 // baseDocument returns the document node the new rule is appended to. The direct
@@ -215,6 +238,8 @@ func (s *Store) appendLiveAllow(rule Rule) {
 		Allow:    append(slices.Clone(cur.Allow), rule),
 		Restrict: cur.Restrict,
 
+		Sandboxes: cur.Sandboxes,
+
 		checkoutAlias: cur.checkoutAlias,
 		projectRoot:   cur.projectRoot,
 		tilde:         cur.tilde,
@@ -234,11 +259,12 @@ func containsRule(rules []Rule, r *Rule) bool {
 	return false
 }
 
-// ruleEqual compares two rules by kind and the matching payload. Message and
-// permit_unsafe_envs are not part of identity: a rule edited only in its message
-// is still the same rule for union purposes.
+// ruleEqual compares two rules by kind, the matching payload, and sandbox. Message and
+// permit_unsafe_envs are not part of identity, so a rule edited only in its message is still the
+// same rule for union purposes. A rule that names a sandbox is never the same rule as one that does
+// not, since merging them would drop the sandbox.
 func ruleEqual(a, b *Rule) bool {
-	if a.kind != b.kind {
+	if a.kind != b.kind || a.Sandbox != b.Sandbox {
 		return false
 	}
 	switch a.kind {
@@ -257,10 +283,10 @@ func ruleEqual(a, b *Rule) bool {
 	return false
 }
 
-// buildRuleEntry builds the YAML mapping node for a rule: its single kind key,
-// an as_basename flag when set, plus any message (deny) or permit_unsafe_envs
-// (allow). Every scalar carries an explicit !!str tag so a token like yes or 123
-// round-trips as a string rather than re-parsing as a bool or int.
+// buildRuleEntry builds the YAML mapping node for a rule: its single kind key, an as_basename flag
+// when set, plus any message (deny) or permit_unsafe_envs and sandbox (allow). Every scalar carries
+// an explicit !!str tag so a token like yes or 123 round-trips as a string rather than re-parsing as
+// a bool or int.
 func buildRuleEntry(rule *Rule, isDeny bool) *yaml.Node {
 	entry := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
 
@@ -285,6 +311,9 @@ func buildRuleEntry(rule *Rule, isDeny bool) *yaml.Node {
 	}
 	if !isDeny && len(rule.PermitUnsafeEnvs) > 0 {
 		entry.Content = append(entry.Content, strScalar("permit_unsafe_envs"), flowSeq(rule.PermitUnsafeEnvs))
+	}
+	if !isDeny && rule.Sandbox != "" {
+		entry.Content = append(entry.Content, strScalar("sandbox"), strScalar(rule.Sandbox))
 	}
 
 	return entry

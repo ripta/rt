@@ -3,6 +3,7 @@ package mcp
 import (
 	"encoding/json"
 	"fmt"
+	"runtime"
 	"strings"
 	"sync"
 
@@ -115,6 +116,20 @@ type gateOutcome struct {
 	// the path the wrapper receives there, so an inner command runs the file the gate judged. An
 	// entry is nil when nothing is pinned. A gate that checks nothing returns nil.
 	Rewrites []map[int]string
+
+	// Sandboxes runs parallel to the call's argvs. Each entry is the sandbox the command runs under,
+	// from the deciding rule, or nil for an unsandboxed command. A gate that checks nothing returns
+	// nil.
+	Sandboxes []*approve.Sandbox
+}
+
+// sandboxAt returns the sandbox the i-th command runs under.
+func (o gateOutcome) sandboxAt(i int) *approve.Sandbox {
+	if i < len(o.Sandboxes) {
+		return o.Sandboxes[i]
+	}
+
+	return nil
 }
 
 // check evaluates every command in the call. A nil error with a nil Pending permits execution of
@@ -127,8 +142,11 @@ type gateOutcome struct {
 // A retry reads its forms even when no command needs a prompt any more. A form whose commands are
 // all allowed now can still carry a remember to save.
 func (g *gate) check(call approvalCall) (gateOutcome, error) {
-	if g == nil || g.blindlyAllow {
+	if g == nil || (g.blindlyAllow && g.store == nil) {
 		return gateOutcome{}, nil
+	}
+	if g.blindlyAllow {
+		return g.checkBlindly(call)
 	}
 
 	var entry *pendingEntry
@@ -155,7 +173,7 @@ func (g *gate) check(call approvalCall) (gateOutcome, error) {
 	}
 
 	if len(needs) == 0 && entry == nil {
-		return gateOutcome{Rewrites: pinnedPaths(verdicts)}, nil
+		return g.permitted(call, verdicts)
 	}
 	if len(needs) > 0 && !call.CanPrompt {
 		return gateOutcome{}, g.failClosedError(call.Tool)
@@ -176,9 +194,97 @@ func (g *gate) check(call approvalCall) (gateOutcome, error) {
 			return gateOutcome{}, err
 		}
 	}
-	outcome.Rewrites = pinnedPaths(verdicts)
+	permitted, err := g.permitted(call, verdicts)
+	if err != nil {
+		return gateOutcome{}, err
+	}
+	outcome.Rewrites, outcome.Sandboxes = permitted.Rewrites, permitted.Sandboxes
 
 	return outcome, nil
+}
+
+// checkBlindly is the gate under --blindly-allow, which forces allow-all. Nothing prompts and nothing
+// is denied. The allow tier still ranks, so a command whose deciding rule names a sandbox runs under
+// it. A tie of rules that disagree on the sandbox refuses, since no order may pick one.
+func (g *gate) checkBlindly(call approvalCall) (gateOutcome, error) {
+	verdicts := make([]approve.Verdict, len(call.Argvs))
+
+	for i := range call.Argvs {
+		resolved := call.Resolutions[i]
+		subject := approve.Subject{Argv: call.Argvs[i], Canonical: resolved.CanonicalArgv(), Resolved: resolved.ResolvedArgv()}
+
+		v := g.store.Ruleset().EvaluateAllowAll(subject, approve.CommandResolver(call.Cwd))
+		if v.Decision == approve.DecisionRefuse {
+			return gateOutcome{}, refusalError(call.Tool, v)
+		}
+		if _, err := g.sandboxFor(call.Tool, v, resolved); err != nil {
+			return gateOutcome{}, err
+		}
+
+		verdicts[i] = v
+	}
+
+	return g.permitted(call, verdicts)
+}
+
+// permitted builds the outcome of a call whose commands all run: the inner pins and the sandboxes. A
+// sandbox that cannot be applied is an error, never an unsandboxed run.
+//
+// Under allow-all the pins apply only to a sandboxed command, since the sandbox profile approves the
+// command and its inner layers as one. Other commands under this mode run as they always have.
+func (g *gate) permitted(call approvalCall, verdicts []approve.Verdict) (gateOutcome, error) {
+	out := gateOutcome{Rewrites: pinnedPaths(verdicts), Sandboxes: make([]*approve.Sandbox, len(verdicts))}
+
+	allowAll := g.blindlyAllow || g.store.Ruleset().Mode == approve.ModeAllowAll
+
+	for i, v := range verdicts {
+		sb, err := g.sandboxFor(call.Tool, v, call.Resolutions[i])
+		if err != nil {
+			return gateOutcome{}, err
+		}
+
+		out.Sandboxes[i] = sb
+
+		if allowAll && sb == nil {
+			out.Rewrites[i] = nil
+		}
+	}
+
+	return out, nil
+}
+
+// sandboxFor finds the sandbox a verdict runs its command under, and refuses a command whose
+// sandbox cannot be applied. A rule that names a sandbox never runs without it.
+//
+// The refusals are a sandbox with no block for this platform, a command whose executable did not
+// resolve, since sandbox-exec would search PATH for it, and a profile the load probe could not
+// confirm applies.
+func (g *gate) sandboxFor(tool string, v approve.Verdict, resolved *model.Resolution) (*approve.Sandbox, error) {
+	name := v.Sandbox()
+	if name == "" {
+		return nil, nil
+	}
+
+	sb, ok := g.store.Ruleset().Sandbox(name)
+	if !ok {
+		return nil, fmt.Errorf("%s refused: the rule that allows the command names sandbox %q, which is not defined", tool, name)
+	}
+
+	if sb.Seatbelt == nil {
+		return nil, fmt.Errorf("%s refused: the rule that allows the command names sandbox %q, which has no block for this platform (%s). It defines: %s",
+			tool, name, runtime.GOOS, strings.Join(sb.Declared, ", "))
+	}
+
+	if resolved == nil || resolved.Resolved == "" {
+		return nil, fmt.Errorf("%s refused: sandbox %q needs the command's executable path, and it did not resolve", tool, name)
+	}
+
+	if sb.Seatbelt.Class != model.SandboxApplies {
+		return nil, fmt.Errorf("%s refused: sandbox %q cannot be applied: the profile check at load classified it as %s: %s",
+			tool, name, sb.Seatbelt.Class, sb.Seatbelt.ProbeStderr)
+	}
+
+	return sb, nil
 }
 
 // pinnedPaths works out, for each judged command, the inner executables a wrapper must be
@@ -227,6 +333,10 @@ func (g *gate) evaluate(call approvalCall, i int) (approve.Verdict, error) {
 
 	v := g.store.Ruleset().Evaluate(subject, call.Env, approve.CommandResolver(call.Cwd))
 	if v.Decision != approve.DecisionRefuse {
+		if _, err := g.sandboxFor(call.Tool, v, resolved); err != nil {
+			return v, err
+		}
+
 		return v, nil
 	}
 	if len(v.BadEnvs) > 0 {

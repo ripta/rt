@@ -1,9 +1,12 @@
 package approve
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/ripta/rt/pkg/cg/model"
 )
 
 // DefaultProjectFile is the project rules file path, relative to the project
@@ -43,6 +46,12 @@ type LoadOptions struct {
 	// LookupUser reads a named user's home directory for ~user. It is consulted even when the
 	// user is the one running cg. Nil resolves to the system user database.
 	LookupUser func(name string) (string, error)
+	// Platform names the OS the Seatbelt backend is judged against. Empty resolves to the running
+	// OS. A platform with no backend neither reads nor probes any profile.
+	Platform string
+	// Probe applies a profile to /usr/bin/true and classifies the result, once per sandbox at load.
+	// Nil resolves to model.ProbeSeatbelt.
+	Probe func(profile string, defines []string) model.SandboxProbe
 }
 
 // DefaultGlobalPath returns ~/.config/cg/approve.yaml. The path is built from
@@ -154,17 +163,17 @@ func Load(opts LoadOptions) (*Store, error) {
 		return nil, err
 	}
 
-	global, err := loadLayer(globalPath, env)
+	global, err := loadLayer(globalPath, env, layerGlobal)
 	if err != nil {
 		return nil, err
 	}
 
-	project, err := loadLayer(projectPath, env)
+	project, err := loadLayer(projectPath, env, layerProject)
 	if err != nil {
 		return nil, err
 	}
 
-	rules, err := buildRuleset(global, project, projectRoot, env)
+	rules, err := buildRuleset(global, project, projectRoot, env, newSandboxBackend(opts))
 	if err != nil {
 		return nil, err
 	}
@@ -185,9 +194,10 @@ type LayerDiagnosis struct {
 	Err      error
 	Warnings []Warning
 
-	layer Layer
-	root  string
-	tilde *tildeEnv
+	layer   Layer
+	root    string
+	tilde   *tildeEnv
+	backend sandboxBackend
 }
 
 // Diagnose validates the global and project layers independently for `cg
@@ -222,8 +232,8 @@ func Diagnose(opts LoadOptions) (global, project LayerDiagnosis, err error) {
 		return LayerDiagnosis{}, LayerDiagnosis{}, err
 	}
 
-	globalLayer, globalErr := loadLayer(globalPath, env)
-	projectLayer, projectErr := loadLayer(projectPath, env)
+	globalLayer, globalErr := loadLayer(globalPath, env, layerGlobal)
+	projectLayer, projectErr := loadLayer(projectPath, env, layerProject)
 
 	// loadLayer returns a zero-value Layer on a read or parse error, path and
 	// Present included, since Load only needs the error and never reads those
@@ -238,6 +248,8 @@ func Diagnose(opts LoadOptions) (global, project LayerDiagnosis, err error) {
 			Warnings: documentWarnings(globalLayer.Doc),
 			layer:    globalLayer,
 			root:     projectRoot,
+			tilde:    env,
+			backend:  newSandboxBackend(opts),
 		},
 		LayerDiagnosis{
 			Path:     projectPath,
@@ -247,6 +259,7 @@ func Diagnose(opts LoadOptions) (global, project LayerDiagnosis, err error) {
 			layer:    projectLayer,
 			root:     projectRoot,
 			tilde:    env,
+			backend:  newSandboxBackend(opts),
 		},
 		nil
 }
@@ -260,7 +273,7 @@ func MergedWarnings(global, project LayerDiagnosis) (warnings []Warning, ok bool
 		return nil, false
 	}
 
-	rs, err := buildRuleset(global.layer, project.layer, project.root, project.tilde)
+	rs, err := buildRuleset(global.layer, project.layer, project.root, project.tilde, project.backend)
 	if err != nil {
 		return nil, false
 	}
@@ -268,9 +281,23 @@ func MergedWarnings(global, project LayerDiagnosis) (warnings []Warning, ok bool
 	return rs.coverageWarnings(), true
 }
 
+// MergedIssues reports what only the merge can find: a rule naming a sandbox that neither file
+// defines, a profile that is missing, and a profile that does not compile. It runs the same checks
+// as the server's load, and reports nothing when either layer failed to parse, since the merged
+// ruleset does not exist then.
+func MergedIssues(global, project LayerDiagnosis) error {
+	if global.Err != nil || project.Err != nil {
+		return nil
+	}
+
+	_, err := buildRuleset(global.layer, project.layer, project.root, project.tilde, project.backend)
+
+	return err
+}
+
 // loadLayer reads and parses one layer file. A missing file yields a layer with
 // Present=false; any other read or parse error is returned with the path.
-func loadLayer(path string, env *tildeEnv) (Layer, error) {
+func loadLayer(path string, env *tildeEnv, which ruleLayer) (Layer, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -282,6 +309,12 @@ func loadLayer(path string, env *tildeEnv) (Layer, error) {
 	node, doc, err := parseDocument(raw, env)
 	if err != nil {
 		return Layer{}, fmt.Errorf("%s: %w", path, err)
+	}
+
+	if which == layerGlobal {
+		if err := errors.Join(checkGlobalProfiles(doc)...); err != nil {
+			return Layer{}, fmt.Errorf("%s: %w", path, err)
+		}
 	}
 
 	return Layer{
@@ -304,7 +337,7 @@ func loadLayer(path string, env *tildeEnv) (Layer, error) {
 // ranking. The list order never changes a decision or the rule a verdict names.
 // Restrict stays a tier below allow, so any allow from either layer carves out of any
 // restrict from either layer.
-func buildRuleset(global, project Layer, projectRoot string, env *tildeEnv) (*Ruleset, error) {
+func buildRuleset(global, project Layer, projectRoot string, env *tildeEnv, backend sandboxBackend) (*Ruleset, error) {
 	rs := &Ruleset{Mode: ModeEnforce, checkoutAlias: newCheckoutAlias(projectRoot), projectRoot: projectRoot, tilde: env}
 
 	if global.Doc != nil && global.Doc.Mode != "" {
@@ -335,6 +368,12 @@ func buildRuleset(global, project Layer, projectRoot string, env *tildeEnv) (*Ru
 	for i := range rs.Restrict {
 		compileMatch(&rs.Restrict[i], projectRoot)
 	}
+
+	sandboxes, err := freezeSandboxes(global, project, projectRoot, env, backend)
+	if err != nil {
+		return nil, err
+	}
+	rs.Sandboxes = sandboxes
 
 	return rs, nil
 }
