@@ -30,6 +30,12 @@ func newSandboxFixture(t *testing.T) *sandboxFixture {
 	t.Helper()
 	t.Setenv("TMPDIR", t.TempDir())
 
+	// The probe scripts read the inherited proxy variables, so a host that exports them would
+	// change what the real-sandbox tests observe.
+	for _, name := range []string{"HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy", "NO_PROXY", "no_proxy"} {
+		t.Setenv(name, "")
+	}
+
 	real := func() string {
 		dir, err := filepath.EvalSymlinks(t.TempDir())
 		if err != nil {

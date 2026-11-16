@@ -974,8 +974,8 @@ allow:
   more. SBPL tests a parameter for being set, not for its value, so every value must be a quoted
   YAML string. `HOME` and `PROJECT_PATH` are reserved.
 - `proxy` sets `HTTP_PROXY`, `HTTPS_PROXY`, and their lowercase forms for the sandboxed command,
-  plus `NO_PROXY` for loopback. The caller's `env` overrides them. Commands with no sandbox see
-  none of them.
+  plus `NO_PROXY` for loopback. The caller's `env` overrides them one variable name at a time, so a
+  caller replacing the proxy sets both spellings. Commands with no sandbox see none of them.
 - A project definition overrides a global one with the same name. A name that neither file
   defines fails the load.
 - Only `exact`, `prefix`, `glob`, and `regex` allow rules take `sandbox`. A wrapped command runs

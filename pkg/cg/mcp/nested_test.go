@@ -35,9 +35,6 @@ type nestedFixture struct {
 func newNestedFixture(t *testing.T, class model.SandboxClass, already string, blindly bool) *nestedFixture {
 	t.Helper()
 
-	t.Setenv("HTTPS_PROXY", "")
-	t.Setenv("NO_PROXY", "")
-
 	f := newSandboxFixture(t)
 	f.Probe = fakeProbe(class, nestedStderr)
 	f.write("p.sb", "(version 1)\n(allow default)\n", 0o644)
