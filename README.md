@@ -638,6 +638,26 @@ to match the basename join instead; the shape inference covers `exact` and
 `prefix`, so `as_basename` is rejected there. Shells and inline-code interpreters
 are denied by default and cannot be re-allowed.
 
+A `restrict` section adds a fourth tier below `allow`: a command that matches a
+`restrict` rule but no `allow` rule is refused rather than prompted, so a policy
+can enumerate the safe subset of a tool and fail the rest closed within that
+scope. The tiers run `deny` > `allow` > `restrict` > `prompt`, so an `allow`
+carves a command out of a `restrict` scope while an explicit `deny` still beats
+everything. `restrict` rules take the same kinds as `deny`, which is every kind
+except `wrapper`, and accept an optional `message`.
+
+```yaml
+allow:
+  - prefix: [git, show]
+  - prefix: [git, log]
+restrict:
+  - prefix: [git]
+    message: only read-only git is permitted here
+```
+
+Here `git show` and `git log` run, every other `git` subcommand is refused with
+the message, and a command outside the `git` scope still prompts.
+
 ### Home-relative paths
 
 A first token that starts with `~` is a home-relative path. It is a third shape
@@ -678,26 +698,6 @@ directory service cannot be resolved there. Spell that path absolutely.
 starts with `~`, names that exact file. A relative value still joins the project
 root. Project-relative tokens inside the file still resolve against the project
 root, not the file's directory.
-
-A `restrict` section adds a fourth tier below `allow`: a command that matches a
-`restrict` rule but no `allow` rule is refused rather than prompted, so a policy
-can enumerate the safe subset of a tool and fail the rest closed within that
-scope. The tiers run `deny` > `allow` > `restrict` > `prompt`, so an `allow`
-carves a command out of a `restrict` scope while an explicit `deny` still beats
-everything. `restrict` rules take the same kinds as `deny`, which is every kind
-except `wrapper`, and accept an optional `message`.
-
-```yaml
-allow:
-  - prefix: [git, show]
-  - prefix: [git, log]
-restrict:
-  - prefix: [git]
-    message: only read-only git is permitted here
-```
-
-Here `git show` and `git log` run, every other `git` subcommand is refused with
-the message, and a command outside the `git` scope still prompts.
 
 ### Wrapper rules
 

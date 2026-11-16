@@ -407,7 +407,10 @@ func TestTildeCollidesWithWrapper(t *testing.T) {
 	}
 }
 
-func TestTildeFailedResolutionPrefillIsFlagged(t *testing.T) {
+// TestTildeEmptyResolutionPrefillFallsBackToAsWritten pins the fallback when resolution produced no
+// path at all. The pre-fill is the token as written, and the edit check refuses it. The failed
+// resolution with a joined cwd is covered by TestTildeFailedResolutionPrefillIsAbsolute.
+func TestTildeEmptyResolutionPrefillFallsBackToAsWritten(t *testing.T) {
 	t.Parallel()
 
 	s := loadTilde(t, "", "version: 1\n")
@@ -749,10 +752,10 @@ func TestTildeRoundTripKeepsEveryWrittenToken(t *testing.T) {
 	}
 }
 
-// TestTildePrefillSavedThenEditedBackToAbsolute walks the library half of the remember form: the
-// pre-fill is ~/..., saving it unchanged writes that spelling, and an edit back to the absolute
-// path passes the edit check, is written as typed, and allows the command in the live ruleset.
-func TestTildePrefillSavedThenEditedBackToAbsolute(t *testing.T) {
+// TestTildePrefillAndAbsoluteEditWithDivergentCanonical covers what the mcp prompt tests cannot
+// reach. The resolved path and the canonical path differ. Both the ~ pre-fill and the absolute
+// edit must pass the edit check, and the absolute rule must match live on the resolved path.
+func TestTildePrefillAndAbsoluteEditWithDivergentCanonical(t *testing.T) {
 	t.Parallel()
 
 	root := writeProject(t, "version: 1\n")
@@ -772,26 +775,16 @@ func TestTildePrefillSavedThenEditedBackToAbsolute(t *testing.T) {
 		t.Fatalf("CheckEdit(pre-fill) = %v, %+v", kind, rejection)
 	}
 
-	if err := s.AppendProjectAllowExact(pre, WriteDirect); err != nil {
-		t.Fatalf("AppendProjectAllowExact: %v", err)
-	}
-
-	raw, _ := os.ReadFile(ProjectPath(root, ""))
-	if !strings.Contains(string(raw), "~/bin/foo") {
-		t.Errorf("unchanged pre-fill was not written as ~:\n%s", raw)
-	}
-
-	other := loadTildeAt(t, writeProject(t, "version: 1\n"))
 	absolute := []string{"/home/me/bin/foo", "x"}
-	if _, rejection := other.CheckEdit(absolute, false, targets); rejection != nil {
+	if _, rejection := s.CheckEdit(absolute, false, targets); rejection != nil {
 		t.Fatalf("CheckEdit(absolute) = %+v, want accepted", rejection)
 	}
-	if err := other.AppendProjectAllowExact(absolute, WriteDirect); err != nil {
+	if err := s.AppendProjectAllowExact(absolute, WriteDirect); err != nil {
 		t.Fatalf("AppendProjectAllowExact(absolute): %v", err)
 	}
 
 	subject := Subject{Argv: argv, Canonical: []string{"/opt/real/foo", "x"}, Resolved: []string{"/home/me/bin/foo", "x"}}
-	if got := other.Ruleset().Match(subject).Decision; got != DecisionRun {
+	if got := s.Ruleset().Match(subject).Decision; got != DecisionRun {
 		t.Errorf("live match after the absolute edit = %v, want run", got)
 	}
 }
