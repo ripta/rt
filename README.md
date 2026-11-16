@@ -655,6 +655,18 @@ file under your home directory and never `<project>/~/bin/foo`. It applies to
   still show the spelling the file uses. A change to `$HOME` mid-session does
   not change what a rule matches.
 
+When remember prompts for a program under your home directory and outside the
+project, it pre-fills the first token as `~/...`. Saved unchanged, the rule
+names the same program on each of your machines whatever the home path is. In a
+committed project file it also allows each teammate's own `~/bin/foo`. Edit the
+token back to the absolute path to pin one file. A program inside the project
+keeps its project-relative spelling. The `~/...` spelling is offered only when
+it matches the command, so a home directory reached through a symlink keeps the
+absolute path.
+
+Rules compare as written. A project file may hold `~/bin/foo` and the absolute
+path of the same program as two rules, and remember keeps both.
+
 A `~user` that cannot be resolved on this machine fails safe. In an `exact` or
 `prefix` allow rule it makes the rule inert: it matches nothing, and `cg lint`
 and `cg check` warn about it with the file name. In a `deny`, `restrict`, or

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"os/user"
 	"path/filepath"
 	"slices"
@@ -932,5 +933,107 @@ func TestMismatchNoteForTildeFirstToken(t *testing.T) {
 	note = g.editNote(&editFailure{Reason: editMismatch, Tokens: []string{"~no-such-user-for-cg-test/bin/tool"}, Missed: target}, []approve.EditTarget{target})
 	if !strings.Contains(note, `"no-such-user-for-cg-test"`) {
 		t.Errorf("note = %q, want it to name the unresolved user", note)
+	}
+}
+
+// homeProgramGate builds a gate whose home directory holds bin/echo, a link to the real echo that
+// canonicalizes elsewhere. The project lives in its own directory, outside the home.
+func homeProgramGate(t *testing.T) (*gate, string, string) {
+	t.Helper()
+
+	home, root := t.TempDir(), t.TempDir()
+
+	real, err := exec.LookPath("echo")
+	if err != nil {
+		t.Fatalf("looking up echo: %v", err)
+	}
+	if err := os.Mkdir(filepath.Join(home, "bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	program := filepath.Join(home, "bin", "echo")
+	if err := os.Symlink(real, program); err != nil {
+		t.Fatal(err)
+	}
+
+	store, err := approve.Load(approve.LoadOptions{
+		GlobalPath:  filepath.Join(root, "no-global.yaml"),
+		ProjectRoot: root,
+		Home:        func() (string, error) { return home, nil },
+		LookupUser:  func(name string) (string, error) { return "", user.UnknownUserError(name) },
+	})
+	if err != nil {
+		t.Fatalf("approve.Load: %v", err)
+	}
+
+	return &gate{store: store}, root, program
+}
+
+// TestHomeProgramPrefillRemembersTildeSpelling follows a program under the home directory through
+// the whole prompt. The form pre-fills ~/..., an unchanged answer writes that spelling, and the
+// live ruleset then runs the command. It cannot show a second machine with another home.
+func TestHomeProgramPrefillRemembersTildeSpelling(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+
+	g, root, program := homeProgramGate(t)
+	call := testCall([]string{program, "hi"})
+
+	targets := map[int]promptTarget{0: promptTargetOf(call, 0, approve.Verdict{})}
+	plan := planForms(g.store.Ruleset(), []int{0}, targets)
+	if want := []string{"~/bin/echo", "hi"}; len(plan) != 1 || !slices.Equal(plan[0].Suggestion.Tokens, want) {
+		t.Fatalf("pre-fill = %+v, want %v", plan, want)
+	}
+
+	first, err := g.check(call)
+	if err != nil || first.Pending == nil {
+		t.Fatalf("first call = %+v, %v; want input requests", first, err)
+	}
+
+	_, err = g.check(retryCall(call, first.Pending, mcpsdk.InputResponseMap{
+		"approval-1": accept(map[string]any{"remember": true, "rule": "[~/bin/echo, hi]"}),
+	}))
+	if err != nil {
+		t.Fatalf("retry: %v", err)
+	}
+
+	written, err := readProjectIfPresent(root)
+	if err != nil || !strings.Contains(written, "~/bin/echo") {
+		t.Errorf("project file = %q, %v; want the ~ spelling", written, err)
+	}
+
+	again, err := g.check(testCall([]string{program, "hi"}))
+	if err != nil || again.Pending != nil {
+		t.Errorf("the second command = %+v, %v; want the remembered rule to allow it", again, err)
+	}
+}
+
+// TestHomeProgramEditBackToAbsolutePathSaves pins that the user can undo the ~/... pre-fill. The
+// absolute spelling passes the edit check, is written as typed, and allows the command again.
+func TestHomeProgramEditBackToAbsolutePathSaves(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+
+	g, root, program := homeProgramGate(t)
+	call := testCall([]string{program, "hi"})
+
+	first, err := g.check(call)
+	if err != nil || first.Pending == nil {
+		t.Fatalf("first call = %+v, %v; want input requests", first, err)
+	}
+
+	_, err = g.check(retryCall(call, first.Pending, mcpsdk.InputResponseMap{
+		"approval-1": accept(map[string]any{"remember": true, "rule": "[" + program + ", hi]"}),
+	}))
+	if err != nil {
+		t.Fatalf("retry: %v", err)
+	}
+
+	written, err := readProjectIfPresent(root)
+	if err != nil || !strings.Contains(written, program) || strings.Contains(written, "~") {
+		t.Errorf("project file = %q, %v; want the absolute spelling only", written, err)
+	}
+
+	again, err := g.check(testCall([]string{program, "hi"}))
+	if err != nil || again.Pending != nil {
+		t.Errorf("the second command = %+v, %v; want the remembered rule to allow it", again, err)
 	}
 }

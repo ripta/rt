@@ -721,3 +721,132 @@ func TestTildePasswdOnlyBuildReportsUnknownUserByType(t *testing.T) {
 		t.Errorf("lookupUserHome error = %v, want user.UnknownUserError, which the /etc/passwd wording relies on", err)
 	}
 }
+
+func TestTildeRoundTripKeepsEveryWrittenToken(t *testing.T) {
+	t.Parallel()
+
+	disk := "version: 1\nallow:\n  - prefix: [~/bin/a, -v]\n  - exact: [\"~alice/bin/b\"]\n  - wrapper: [~/bin/nice, -n, \"1\"]\n" +
+		"deny:\n  - prefix: [~/bin/evil]\n"
+	root := writeProject(t, disk)
+	s := loadTildeAt(t, root)
+
+	if err := s.AppendProjectAllowPrefix([]string{"~/bin/new"}, WriteDirect); err != nil {
+		t.Fatalf("AppendProjectAllowPrefix: %v", err)
+	}
+
+	raw, err := os.ReadFile(ProjectPath(root, ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, want := range []string{"~/bin/a", "~alice/bin/b", "~/bin/nice", "~/bin/evil", "~/bin/new"} {
+		if !strings.Contains(string(raw), want) {
+			t.Errorf("written file lost %q:\n%s", want, raw)
+		}
+	}
+	if strings.Contains(string(raw), tildeHome) || strings.Contains(string(raw), tildeAlice) {
+		t.Errorf("written file holds an expanded path:\n%s", raw)
+	}
+}
+
+// TestTildePrefillSavedThenEditedBackToAbsolute walks the library half of the remember form: the
+// pre-fill is ~/..., saving it unchanged writes that spelling, and an edit back to the absolute
+// path passes the edit check, is written as typed, and allows the command in the live ruleset.
+func TestTildePrefillSavedThenEditedBackToAbsolute(t *testing.T) {
+	t.Parallel()
+
+	root := writeProject(t, "version: 1\n")
+	s := loadTildeAt(t, root)
+
+	argv := []string{"foo", "x"}
+	res := &model.Resolution{Argv: argv, Resolved: "/home/me/bin/foo", Canonical: "/opt/real/foo"}
+	targets := []EditTarget{{Argv: argv, Resolution: res}}
+
+	pre := s.Ruleset().Suggest(argv, res).Tokens
+	if !slices.Equal(pre, []string{"~/bin/foo", "x"}) {
+		t.Fatalf("pre-fill = %v, want the ~ spelling", pre)
+	}
+
+	kind, rejection := s.CheckEdit(pre, false, targets)
+	if rejection != nil || kind != KindExact {
+		t.Fatalf("CheckEdit(pre-fill) = %v, %+v", kind, rejection)
+	}
+
+	if err := s.AppendProjectAllowExact(pre, WriteDirect); err != nil {
+		t.Fatalf("AppendProjectAllowExact: %v", err)
+	}
+
+	raw, _ := os.ReadFile(ProjectPath(root, ""))
+	if !strings.Contains(string(raw), "~/bin/foo") {
+		t.Errorf("unchanged pre-fill was not written as ~:\n%s", raw)
+	}
+
+	other := loadTildeAt(t, writeProject(t, "version: 1\n"))
+	absolute := []string{"/home/me/bin/foo", "x"}
+	if _, rejection := other.CheckEdit(absolute, false, targets); rejection != nil {
+		t.Fatalf("CheckEdit(absolute) = %+v, want accepted", rejection)
+	}
+	if err := other.AppendProjectAllowExact(absolute, WriteDirect); err != nil {
+		t.Fatalf("AppendProjectAllowExact(absolute): %v", err)
+	}
+
+	subject := Subject{Argv: argv, Canonical: []string{"/opt/real/foo", "x"}, Resolved: []string{"/home/me/bin/foo", "x"}}
+	if got := other.Ruleset().Match(subject).Decision; got != DecisionRun {
+		t.Errorf("live match after the absolute edit = %v, want run", got)
+	}
+}
+
+// TestTildeReloadMergeKeepsBothSpellings pins that rules compare as written. The in-memory rule
+// is the absolute spelling and the disk holds the ~ spelling of the same program, so the merge
+// keeps both.
+func TestTildeReloadMergeKeepsBothSpellings(t *testing.T) {
+	t.Parallel()
+
+	root := writeProject(t, "version: 1\nallow:\n  - prefix: [/home/me/bin/foo]\n")
+	s := loadTildeAt(t, root)
+
+	disk := "version: 1\nallow:\n  - prefix: [~/bin/foo]\n"
+	if err := os.WriteFile(ProjectPath(root, ""), []byte(disk), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.AppendProjectAllowPrefix([]string{"make"}, WriteReloadMerge); err != nil {
+		t.Fatalf("AppendProjectAllowPrefix: %v", err)
+	}
+
+	raw, _ := os.ReadFile(ProjectPath(root, ""))
+	for _, want := range []string{"~/bin/foo", "/home/me/bin/foo", "make"} {
+		if !strings.Contains(string(raw), want) {
+			t.Errorf("merged file lost %q:\n%s", want, raw)
+		}
+	}
+}
+
+// TestTildeFailedResolutionPrefillIsAbsolute covers a program that does not exist, written
+// ~/bin/foo. It runs as <cwd>/~/bin/foo, and resolution has already joined the cwd, so the
+// pre-fill is that absolute path. It is never the home-relative spelling, and the edit check
+// refuses the home-relative one because the program has no canonical path to match.
+func TestTildeFailedResolutionPrefillIsAbsolute(t *testing.T) {
+	t.Parallel()
+
+	s := loadTilde(t, "", "version: 1\n")
+	cwd := t.TempDir()
+
+	argv := []string{"~/bin/foo", "x"}
+	res, err := model.ResolveCommand(argv, cwd)
+	if err == nil {
+		t.Fatal("ResolveCommand succeeded for a program that does not exist")
+	}
+
+	suggestion := s.Ruleset().Suggest(argv, res)
+	if want := filepath.Join(cwd, "~", "bin", "foo"); suggestion.Tokens[0] != want {
+		t.Errorf("pre-fill head = %q, want %q", suggestion.Tokens[0], want)
+	}
+
+	targets := []EditTarget{{Argv: argv, Resolution: res}}
+	for _, tokens := range [][]string{suggestion.Tokens, argv} {
+		if _, rejection := s.CheckEdit(tokens, false, targets); rejection == nil {
+			t.Errorf("CheckEdit(%v) accepted a program with no canonical path", tokens)
+		}
+	}
+}
