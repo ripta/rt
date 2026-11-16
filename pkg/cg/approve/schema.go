@@ -33,7 +33,16 @@ const (
 // ParseDocument decodes one approve.yaml layer's bytes into both a yaml.Node
 // (retained for later round-trip writes) and a validated, compiled Document.
 // Errors carry the offending line; callers wrap them with the file path.
+//
+// A leading ~ in a rule's first token expands against the process home directory and the system
+// user database. The store parses with the home directory it read at load instead.
 func ParseDocument(raw []byte) (*yaml.Node, *Document, error) {
+	return parseDocument(raw, newTildeEnv(nil, nil))
+}
+
+// parseDocument is ParseDocument with the tilde environment supplied, so every parse in one
+// session expands with the same home directory.
+func parseDocument(raw []byte, env *tildeEnv) (*yaml.Node, *Document, error) {
 	var node yaml.Node
 	if err := yaml.Unmarshal(raw, &node); err != nil {
 		return nil, nil, err
@@ -44,7 +53,7 @@ func ParseDocument(raw []byte) (*yaml.Node, *Document, error) {
 		return nil, nil, err
 	}
 
-	if err := validateDocument(&node, &doc); err != nil {
+	if err := validateDocument(&node, &doc, env); err != nil {
 		return nil, nil, err
 	}
 
@@ -61,7 +70,7 @@ func ParseDocument(raw []byte) (*yaml.Node, *Document, error) {
 // just the first; the version check is the exception, since an unknown schema
 // version means the rest of the document cannot be trusted to have decoded
 // against the expected shape at all.
-func validateDocument(node *yaml.Node, doc *Document) error {
+func validateDocument(node *yaml.Node, doc *Document, env *tildeEnv) error {
 	if doc.Version != 1 {
 		return ErrUnknownVersion
 	}
@@ -75,21 +84,21 @@ func validateDocument(node *yaml.Node, doc *Document) error {
 	}
 
 	root := rootMapping(node)
-	errs = append(errs, validateEntries(findMapValue(root, "deny"), doc.Deny, sectionDeny)...)
-	errs = append(errs, validateEntries(findMapValue(root, "allow"), doc.Allow, sectionAllow)...)
-	errs = append(errs, validateEntries(findMapValue(root, "restrict"), doc.Restrict, sectionRestrict)...)
+	errs = append(errs, validateEntries(findMapValue(root, "deny"), doc.Deny, sectionDeny, env)...)
+	errs = append(errs, validateEntries(findMapValue(root, "allow"), doc.Allow, sectionAllow, env)...)
+	errs = append(errs, validateEntries(findMapValue(root, "restrict"), doc.Restrict, sectionRestrict, env)...)
 
 	return errors.Join(errs...)
 }
 
 // validateEntries validates each entry in a deny, allow, or restrict sequence,
-// records its rule kind on the matching typed rule, and compiles glob/regex
-// patterns. seq is the YAML sequence node and may be nil when the key is absent.
-// It collects every entry's error rather than stopping at the first, so a
+// records its rule kind on the matching typed rule, expands a leading ~ in the first token, and
+// compiles glob/regex patterns. seq is the YAML sequence node and may be nil when the key is
+// absent. It collects every entry's error rather than stopping at the first, so a
 // caller sees every broken rule in the sequence at once; an entry whose
 // validateRule fails skips compileRule, since the rule kind compileRule relies
 // on was not established.
-func validateEntries(seq *yaml.Node, rules []Rule, section ruleSection) []error {
+func validateEntries(seq *yaml.Node, rules []Rule, section ruleSection, env *tildeEnv) []error {
 	var errs []error
 	for i := range rules {
 		var entry *yaml.Node
@@ -99,6 +108,14 @@ func validateEntries(seq *yaml.Node, rules []Rule, section ruleSection) []error 
 
 		if err := validateRule(entry, &rules[i], section); err != nil {
 			errs = append(errs, err)
+			continue
+		}
+		if err := env.expandRule(&rules[i], section); err != nil {
+			line := 0
+			if entry != nil {
+				line = entry.Line
+			}
+			errs = append(errs, fmt.Errorf("line %d: %w", line, err))
 			continue
 		}
 		if err := compileRule(&rules[i]); err != nil {

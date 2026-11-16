@@ -150,6 +150,10 @@ func (g *gate) pathMismatch(failure *editFailure) string {
 		return ""
 	}
 
+	if problem := g.store.TildeProblem(failure.Tokens[0]); problem != "" {
+		return fmt.Sprintf("The rule's first token was not expanded: %s ", visibleText(problem))
+	}
+
 	named := g.store.PathNamedBy(failure.Tokens[0])
 	ran := failure.Missed.Resolution.RulePath()
 	if named == "" || ran == "" || named == ran {

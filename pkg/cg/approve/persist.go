@@ -82,6 +82,13 @@ func (s *Store) appendProjectAllow(rule Rule, strategy WriteStrategy) error {
 		return fmt.Errorf("refusing to remember %s: %w", describeRule(&rule), ErrDashFirstToken)
 	}
 
+	if err := s.tilde.expandRule(&rule, sectionAllow); err != nil {
+		return fmt.Errorf("refusing to remember %s: %w", describeRule(&rule), err)
+	}
+	if rule.inert {
+		return fmt.Errorf("refusing to remember %s: %s", describeRule(&rule), rule.inertReason)
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -106,7 +113,7 @@ func (s *Store) appendProjectAllow(rule Rule, strategy WriteStrategy) error {
 		return fmt.Errorf("writing project rules: %w", err)
 	}
 
-	node, parsed, err := ParseDocument(data)
+	node, parsed, err := parseDocument(data, s.tilde)
 	if err != nil {
 		return fmt.Errorf("re-parsing written project rules: %w", err)
 	}
@@ -163,9 +170,9 @@ func (s *Store) reloadMergeBase() (*yaml.Node, error) {
 		return nil, fmt.Errorf("reading project rules: %w", err)
 	}
 
-	node, disk, err := ParseDocument(raw)
+	node, disk, err := parseDocument(raw, s.tilde)
 	if err != nil {
-		return nil, fmt.Errorf("parsing on-disk project rules: %w", err)
+		return nil, fmt.Errorf("parsing on-disk project rules %s: %w", s.Project.Path, err)
 	}
 	root := rootMapping(node)
 	if root == nil {
@@ -196,7 +203,8 @@ func mergeAbsent(seq *yaml.Node, mem, disk []Rule, isDeny bool) {
 // atomic pointer. The deny slice is shared because it is never mutated; the
 // allow slice is copied so the live snapshot the matcher reads stays immutable.
 // The rule is compiled against the store's project root so the live rule matches
-// the same commands the reloaded file would, including a relative first token.
+// the same commands the reloaded file would, including a relative first token. The caller has
+// already expanded a leading ~ with the store's own home directory.
 func (s *Store) appendLiveAllow(rule Rule) {
 	compileMatch(&rule, s.projectRoot)
 	cur := s.rules.Load()
@@ -208,6 +216,7 @@ func (s *Store) appendLiveAllow(rule Rule) {
 
 		checkoutAlias: cur.checkoutAlias,
 		projectRoot:   cur.projectRoot,
+		tilde:         cur.tilde,
 	}
 	s.rules.Store(next)
 }

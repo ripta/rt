@@ -21,6 +21,9 @@ const (
 	WarnCoveredByAllow
 	// WarnDeadByDeny marks a wrapper rule that a deny rule makes dead.
 	WarnDeadByDeny
+	// WarnInertRule marks an allow rule whose ~user cannot be resolved on this machine. It
+	// matches no command, so a command it was meant to allow prompts.
+	WarnInertRule
 )
 
 // Warning is one non-fatal finding about a rule or a pair of rules.
@@ -42,8 +45,22 @@ func (rs *Ruleset) Warnings() []Warning {
 
 // Warnings reports the warnings of the live ruleset, which includes rules a
 // remember added since load.
+//
+// The merged ruleset carries no layer provenance, so the inert-rule findings come from the layers
+// and name their file.
 func (s *Store) Warnings() []Warning {
-	return s.Ruleset().Warnings()
+	out := s.Ruleset().Warnings()
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for _, layer := range []Layer{s.Global, s.Project} {
+		if layer.Doc != nil {
+			out = append(out, inertWarnings(layer.Doc.Allow, layer.Path+": ")...)
+		}
+	}
+
+	return out
 }
 
 // documentWarnings reports the findings about single rules in one layer. They
@@ -55,8 +72,29 @@ func documentWarnings(doc *Document) []Warning {
 
 	out := ruleWarnings("deny", doc.Deny)
 	out = append(out, ruleWarnings("allow", doc.Allow)...)
+	out = append(out, ruleWarnings("restrict", doc.Restrict)...)
 
-	return append(out, ruleWarnings("restrict", doc.Restrict)...)
+	return append(out, inertWarnings(doc.Allow, "")...)
+}
+
+// inertWarnings reports each allow rule whose ~user could not be resolved. prefix leads the
+// message when the caller does not already name the layer file.
+func inertWarnings(rules []Rule, prefix string) []Warning {
+	var out []Warning
+
+	for i := range rules {
+		if !rules[i].inert {
+			continue
+		}
+
+		out = append(out, Warning{
+			Kind: WarnInertRule,
+			Message: fmt.Sprintf("%sallow %s matches no command, so it never allows anything: %s",
+				prefix, describeRule(&rules[i]), rules[i].inertReason),
+		})
+	}
+
+	return out
 }
 
 // ruleWarnings reports the findings about single rules in one section. Allow rules skip the
@@ -169,6 +207,10 @@ func (rs *Ruleset) coverageWarnings() []Warning {
 // when the two differ in shape, because remember writes path-form rules and people
 // write bare-name wrapper rules. The rest compare byte-exact.
 func tokensCover(cover, wrapper *Rule) bool {
+	if cover.inert || wrapper.inert {
+		return false
+	}
+
 	c, w := compareTokens(cover), compareTokens(wrapper)
 	if len(c) == 0 || len(c) > len(w) {
 		return false

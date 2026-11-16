@@ -638,6 +638,35 @@ to match the basename join instead; the shape inference covers `exact` and
 `prefix`, so `as_basename` is rejected there. Shells and inline-code interpreters
 are denied by default and cannot be re-allowed.
 
+### Home-relative paths
+
+A first token that starts with `~` is a home-relative path. It is a third shape
+beside the absolute and project-relative ones, so `prefix: [~/bin/foo]` pins the
+file under your home directory and never `<project>/~/bin/foo`. It applies to
+`exact`, `prefix`, and `wrapper` rules in every tier.
+
+* `~` and `~/...` expand to `$HOME`, the same lookup that locates the global
+  rules file.
+* `~user` and `~user/...` expand through the system user database, even when
+  `user` is you.
+* A `~` anywhere else in the token is literal. Tokens after the first, and
+  `glob` and `regex` patterns, are never expanded.
+* Expansion happens once, when the rules load. `cg check` and the remember form
+  still show the spelling the file uses. A change to `$HOME` mid-session does
+  not change what a rule matches.
+
+A `~user` that cannot be resolved on this machine fails safe. In an `exact` or
+`prefix` allow rule it makes the rule inert: it matches nothing, and `cg lint`
+and `cg check` warn about it with the file name. In a `deny`, `restrict`, or
+`wrapper` rule it fails the load with an error naming the file and the token.
+Release builds without cgo on Linux read only `/etc/passwd`, so a user kept in a
+directory service cannot be resolved there. Spell that path absolutely.
+
+`--project-config` takes the same expansion. A value that is absolute, or that
+starts with `~`, names that exact file. A relative value still joins the project
+root. Project-relative tokens inside the file still resolve against the project
+root, not the file's directory.
+
 A `restrict` section adds a fourth tier below `allow`: a command that matches a
 `restrict` rule but no `allow` rule is refused rather than prompted, so a policy
 can enumerate the safe subset of a tool and fail the rest closed within that

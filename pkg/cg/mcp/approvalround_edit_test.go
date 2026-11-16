@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/user"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -898,5 +899,38 @@ func TestMismatchNoteNamesBothPaths(t *testing.T) {
 
 	if want := "names " + filepath.Join(root, "tool.sh") + ", but the command runs " + ran; !strings.HasPrefix(note, "The rule's first token "+want) {
 		t.Errorf("note = %q, want it to lead with %q", note, want)
+	}
+}
+
+// TestMismatchNoteForTildeFirstToken pins both ~ notes. A resolvable ~/ token names its expanded
+// home path, never the project-root join. An unresolvable ~user names the user, since the rule
+// compiled inert and no path comparison explains the miss.
+func TestMismatchNoteForTildeFirstToken(t *testing.T) {
+	home := t.TempDir()
+	root := t.TempDir()
+
+	store, err := approve.Load(approve.LoadOptions{
+		GlobalPath:  filepath.Join(root, "no-global.yaml"),
+		ProjectRoot: root,
+		Home:        func() (string, error) { return home, nil },
+		LookupUser:  func(name string) (string, error) { return "", user.UnknownUserError(name) },
+	})
+	if err != nil {
+		t.Fatalf("approve.Load: %v", err)
+	}
+	g := &gate{store: store}
+
+	argv := []string{"tool", "go"}
+	ran := "/elsewhere/tool"
+	target := approve.EditTarget{Argv: argv, Resolution: &model.Resolution{Argv: argv, Resolved: ran, Canonical: ran}}
+
+	note := g.editNote(&editFailure{Reason: editMismatch, Tokens: []string{"~/bin/tool"}, Missed: target}, []approve.EditTarget{target})
+	if want := "names " + filepath.Join(home, "bin", "tool") + ", but the command runs " + ran; !strings.HasPrefix(note, "The rule's first token "+want) {
+		t.Errorf("note = %q, want it to lead with %q", note, want)
+	}
+
+	note = g.editNote(&editFailure{Reason: editMismatch, Tokens: []string{"~no-such-user-for-cg-test/bin/tool"}, Missed: target}, []approve.EditTarget{target})
+	if !strings.Contains(note, `"no-such-user-for-cg-test"`) {
+		t.Errorf("note = %q, want it to name the unresolved user", note)
 	}
 }
