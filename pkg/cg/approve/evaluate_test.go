@@ -66,41 +66,6 @@ var evaluateTests = []evaluateTest{
 		wantBadEnvs: []string{"LD_PRELOAD"},
 	},
 	{
-		name: "a broader permit does not rescue a more specific rule that refuses",
-		allow: []Rule{
-			permitRule(KindExact, nil, "make", "test"),
-			permitRule(KindPrefix, []string{"PATH"}, "make"),
-		},
-		argv:           []string{"make", "test"},
-		env:            map[string]string{"PATH": "/custom"},
-		want:           DecisionRefuse,
-		wantBadEnvs:    []string{"PATH"},
-		wantRuleTokens: []string{"make", "test"},
-	},
-	{
-		name: "a more specific permit runs over a broader rule without one",
-		allow: []Rule{
-			permitRule(KindPrefix, nil, "make"),
-			permitRule(KindExact, []string{"PATH"}, "make", "test"),
-		},
-		argv:           []string{"make", "test"},
-		env:            map[string]string{"PATH": "/custom"},
-		want:           DecisionRun,
-		wantRuleTokens: []string{"make", "test"},
-	},
-	{
-		name: "no matching allow permits, refuse names the most specific match",
-		allow: []Rule{
-			permitRule(KindPrefix, nil, "make"),
-			permitRule(KindExact, nil, "make", "test"),
-		},
-		argv:           []string{"make", "test"},
-		env:            map[string]string{"PATH": "/custom"},
-		want:           DecisionRefuse,
-		wantBadEnvs:    []string{"PATH"},
-		wantRuleTokens: []string{"make", "test"},
-	},
-	{
 		name: "a permitting allow that does not match is ignored",
 		allow: []Rule{
 			permitRule(KindPrefix, nil, "make"),

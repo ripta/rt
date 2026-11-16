@@ -69,8 +69,8 @@ func (lm LayerMatches) DecidingRules() []*Rule {
 // Explain lists, for each layer the verdict for subj reaches, every allow that matched it with its
 // rank, and marks the deciding set.
 //
-// It reads the ranking Evaluate reads. Evaluate and the gate never call it, so a rule the ranking
-// put below another can never supply a field to a call.
+// Level 0 comes from the same decidingAllows call Evaluate makes. Evaluate and the gate never call
+// Explain, so a rule the ranking put below another can never supply a field to a call.
 //
 // It lists allows only. A deny or a restrict that matched is not a match here. A wrapper chain is
 // listed whenever it competes, which includes a peel refused because a wrapper lacks the env permit,
@@ -101,90 +101,67 @@ func (rs *Ruleset) Explain(subj Subject, env map[string]string, resolve Resolver
 	return out
 }
 
-// explainItem is a match under comparison. A chain carries its member ranks.
-type explainItem struct {
-	match   Match
-	rank    rank
-	members []rank
-	key     string
-}
-
-// beats reports whether x outranks y. Two chains never meet, since a layer has one peel.
-func (x explainItem) beats(y explainItem) bool {
-	switch {
-	case x.members == nil && y.members == nil:
-		return x.rank.outranks(y.rank)
-	case x.members != nil && y.members == nil:
-		return compareChain(x.members, y.rank) == chainAbove
-	case x.members == nil:
-		return compareChain(y.members, x.rank) == allowAbove
-	}
-
-	return false
-}
-
 // explainLayer assigns every matching allow of a layer its dominance level.
+//
+// Level 0 is what decidingAllows returns, the same call the verdict makes. Each later level applies
+// decidingAllows again to the matches the earlier levels left.
 func explainLayer(matched []*Rule, peel *settled) []Match {
-	items := make([]explainItem, 0, len(matched)+1)
-
-	for _, rule := range matched {
-		rk := rule.ranking()
-		items = append(items, explainItem{match: Match{Rule: rule}, rank: rk, key: wholeRuleKey(rule)})
-	}
-
-	if peel != nil && len(peel.members) > 0 {
-		items = append(items, explainItem{
-			match:   Match{Wrappers: peel.wrappers, Inner: peel.chainInner},
-			rank:    peel.members[0],
-			members: peel.members,
-			key:     wholeRuleKey(peel.wrappers[0]),
-		})
-	}
-
-	for i := range items {
-		rk := items[i].rank
-		items[i].match.Count, items[i].match.Kind, items[i].match.PathForm, items[i].match.Layer = rk.count, rk.shape.String(), rk.path, rk.layer.String()
-	}
-
 	var out []Match
 
-	remaining := items
-	for level := 0; len(remaining) > 0; level++ {
-		var top, rest []explainItem
+	if peel != nil && len(peel.members) == 0 {
+		peel = nil
+	}
 
-		for i, it := range remaining {
-			beaten := false
-			for j, other := range remaining {
-				if i != j && other.beats(it) {
-					beaten = true
-					break
-				}
-			}
+	for level := 0; len(matched) > 0 || peel != nil; level++ {
+		tied, chainIn := decidingAllows(matched, peel)
 
-			if beaten {
-				rest = append(rest, it)
-			} else {
-				top = append(top, it)
-			}
-		}
-
-		// The relation is a partial order, so some item is always undominated. A cycle would
+		// The relation is a partial order, so some match is always undominated. A cycle would
 		// otherwise never end.
-		if len(top) == 0 {
-			top, rest = rest, nil
+		if len(tied) == 0 && !chainIn {
+			tied, chainIn = matched, peel != nil
 		}
 
-		slices.SortStableFunc(top, func(a, b explainItem) int { return strings.Compare(a.key, b.key) })
+		var top []Match
 
-		for _, it := range top {
-			it.match.Level = level
-			out = append(out, it.match)
+		for _, rule := range tied {
+			top = append(top, newMatch(Match{Rule: rule}, rule.ranking()))
 		}
 
-		remaining = rest
+		if chainIn && peel != nil {
+			top = append(top, newMatch(Match{Wrappers: peel.wrappers, Inner: peel.chainInner}, peel.members[0]))
+		}
+
+		slices.SortStableFunc(top, func(a, b Match) int { return strings.Compare(matchKey(a), matchKey(b)) })
+
+		for _, m := range top {
+			m.Level = level
+			out = append(out, m)
+		}
+
+		matched = slices.DeleteFunc(slices.Clone(matched), func(r *Rule) bool { return slices.Contains(tied, r) })
+
+		if chainIn {
+			peel = nil
+		}
 	}
 
 	return out
+}
+
+// newMatch fills the display fields of a match from the rank it competed at.
+func newMatch(m Match, rk rank) Match {
+	m.Count, m.Kind, m.PathForm, m.Layer = rk.count, rk.shape.String(), rk.path, rk.layer.String()
+
+	return m
+}
+
+// matchKey is the whole-rule key a level is ordered by. A chain is keyed by its first wrapper.
+func matchKey(m Match) string {
+	if m.IsChain() {
+		return wholeRuleKey(m.Wrappers[0])
+	}
+
+	return wholeRuleKey(m.Rule)
 }
 
 // String renders a rank shape for display.

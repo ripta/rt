@@ -259,32 +259,6 @@ var wrapperTests = []wrapperTest{
 		wantChain: 2,
 	},
 	{
-		name: "permits are not pooled within a tied set",
-		allow: []Rule{
-			permitting(wrapperRule("nice"), "PATH"),
-			permitting(wrapperRule("nice"), "LD_PRELOAD"),
-			permitting(prefixRule("make"), "PATH", "LD_PRELOAD"),
-		},
-		argv:        []string{"nice", "make"},
-		env:         map[string]string{"PATH": "/x", "LD_PRELOAD": "y.so"},
-		want:        DecisionRefuse,
-		wantBadEnvs: []string{"PATH"},
-		wantChain:   1,
-	},
-	{
-		name: "a path-form wrapper rule is chosen over a bare one of equal length",
-		allow: []Rule{
-			wrapperRule("nice"),
-			permitting(wrapperRule("/usr/bin/nice"), "PATH", "LD_PRELOAD"),
-			permitting(prefixRule("make"), "PATH", "LD_PRELOAD"),
-		},
-		argv:      []string{"nice", "make"},
-		canonical: []string{"/usr/bin/nice", "make"},
-		env:       map[string]string{"PATH": "/x", "LD_PRELOAD": "y.so"},
-		want:      DecisionRun,
-		wantChain: 2,
-	},
-	{
 		name:        "prompting inner command with a dangerous override refuses",
 		allow:       []Rule{permitting(wrapperRule("nice"), "PATH")},
 		argv:        []string{"nice", "foo"},

@@ -148,8 +148,9 @@ type Skip struct {
 // outranks, in whole-rule order. A tie of allows, or of equally specific denies or
 // restricts, holds more than one.
 //
-// Rule is the first of them, or the rule an env refusal names. It never depends on the
-// order of the rules in a file.
+// Rule is the first of the ordinary tied rules by whole-rule key, or the rule an env refusal
+// names. When a wrapper chain ties with ordinary allows, Rule is still an ordinary one, and the
+// chain's inner rules follow in Deciding. It never depends on the order of the rules in a file.
 //
 // For a chain, Rule and Deciding come from the innermost layer. Step is the step that
 // settled the typed command.
@@ -590,9 +591,10 @@ func (e *evaluation) layerPeel(l *layer) *settled {
 // decidingAllows ranks the matching allows of a layer against the chain its peel settles. It returns
 // the ordinary allows in the deciding set, and whether the peel is in it too.
 //
-// Both the verdict and the explain call read it, so the listing `cg check` prints cannot rank
-// differently from the verdict. The matching list is an argument, never a result, so the code that
-// serves the gate is not handed the rules the ranking left out.
+// Both the verdict and the explain call read it. Explain takes its level 0 from it and applies it
+// again to the remainder for later levels, so the listing `cg check` prints cannot rank differently
+// from the verdict. The matching list is an argument, never a result. The verdict reads only the
+// deciding set it returns, and is never handed the rules the ranking left out.
 func decidingAllows(matched []*Rule, peel *settled) (tied []*Rule, chainIn bool) {
 	ordinary := decidingRules(rankedRules(matched))
 	if peel == nil || len(peel.members) == 0 {

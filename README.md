@@ -730,14 +730,14 @@ lower shows up beside the rule that decided. Each entry gives its count, kind, f
 layer. The deciding set is marked `deciding`, and every other entry is marked `outranked`.
 Entries sort by dominance level, then by rule text. Level 0 is the deciding set. Level 1
 is what only level 0 outranks, and so on. A wrapper chain that competes with the ordinary
-rules is listed as `wrapper [...] over <inner rules>`. Its count, kind, form, and layer are
-those of its first inner rule, and its level comes from comparing it against every inner
-rule. The list shows allows only, never a `deny` or `restrict` rule that matched. Under `--output json`, each layer
-carries a `matches` array. The top-level result holds the typed command's layer, and each
-`chain` entry holds its own. Use the list to see why a pattern did not decide, such as one
-whose count the ranking could not read, and to see a path-form rule deciding over a
-bare-name one on a wrapped layer. The list is for reading only. The gate decides from the
-deciding set alone.
+rules is listed as `wrapper [...] over <inner rules>`. Its count, kind, form, and layer
+are those of its first inner rule, and its level comes from comparing it against every
+inner rule. The list shows allows only, never a `deny` or `restrict` rule that matched.
+Under `--output json`, each layer carries a `matches` array. The top-level result holds
+the typed command's layer, and each `chain` entry holds its own. Use the list to see why a
+pattern did not decide, such as one whose count the ranking could not read, and to see a
+path-form rule deciding over a bare-name one on a wrapped layer. The list is for reading
+only. The gate decides from the deciding set alone.
 
 A `restrict` rule stays a tier below `allow`. Specificity ranks the allow rules only. When
 several `deny` or `restrict` rules match, a refusal names the deciding set of them, each with
