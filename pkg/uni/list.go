@@ -36,7 +36,7 @@ func newListCommand() *cobra.Command {
 	}
 
 	c.Flags().BoolVarP(&l.all, "all", "A", l.all, "List all")
-	c.Flags().StringSliceVarP(&l.cats, "categories", "C", l.cats, "Categories to limit to (see `uni catsegories`); by default all categories")
+	c.Flags().StringSliceVarP(&l.cats, "categories", "C", l.cats, "Categories to limit to (see `uni categories`); by default all categories")
 	c.Flags().BoolVarP(&l.count, "count", "c", l.count, "Show count of matches")
 	c.Flags().StringSliceVarP(&l.output, "output", "o", l.output, "Output columns")
 	c.Flags().StringSliceVarP(&l.ranges, "range", "r", l.ranges, "Range of runes to limit to (e.g. a-z, U+0000-U+007F); by default all runes")
