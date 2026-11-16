@@ -9,7 +9,7 @@ import (
 func TestWrapperRulesRoundTripThroughRemember(t *testing.T) {
 	t.Parallel()
 
-	content := "version: 1\nallow:\n  - wrapper: [nice, -n, \"19\"]\n    permit_unsafe_envs: [PATH]\n  - wrapper: [nice, -n, \"19\"]\n  - prefix: [nice]\n"
+	content := "version: 1\nallow:\n  - wrapper: [nice, -n, \"19\"]\n    permit_unsafe_envs: [PATH]\n  - wrapper: [nice, -n, \"19\"]\n  - wrapper: [nice, -n, \"19\"]\n    permit_unsafe_envs: [PATH]\n  - prefix: [nice]\n"
 	root := writeProject(t, content)
 	s := loadProject(t, root)
 
@@ -23,8 +23,8 @@ func TestWrapperRulesRoundTripThroughRemember(t *testing.T) {
 	}
 	got := string(raw)
 
-	if n := strings.Count(got, "wrapper: [nice, -n, \"19\"]"); n != 1 {
-		t.Errorf("expected the duplicate wrapper rules to collapse to one, got %d:\n%s", n, got)
+	if n := strings.Count(got, "wrapper: [nice, -n, \"19\"]"); n != 2 {
+		t.Errorf("expected the identical wrapper rules to collapse and the permit-free one to stay, got %d:\n%s", n, got)
 	}
 	if !strings.Contains(got, "permit_unsafe_envs: [PATH]") {
 		t.Errorf("the kept wrapper rule lost its permit:\n%s", got)
@@ -37,8 +37,8 @@ func TestWrapperRulesRoundTripThroughRemember(t *testing.T) {
 			wrappers++
 		}
 	}
-	if wrappers != 1 {
-		t.Errorf("reloaded wrapper rules = %d, want 1", wrappers)
+	if wrappers != 2 {
+		t.Errorf("reloaded wrapper rules = %d, want 2", wrappers)
 	}
 }
 
