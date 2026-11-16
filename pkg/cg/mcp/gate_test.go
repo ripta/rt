@@ -93,6 +93,57 @@ func TestGateDenyRefusesWithMessage(t *testing.T) {
 	}
 }
 
+func TestGateEqualDenyRulesAreAllNamed(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+
+	rules := "version: 1\ndeny:\n  - regex: '^rm( |$)'\n    as_basename: true\n    message: use trash\n  - prefix: [rm]\n    message: never rm\n"
+	g := newTestGate(t, rules, false)
+
+	_, _, err := handleRun(context.Background(), nil, g, nil, runOrigin{}, runInput{Command: []string{"rm", "x"}})
+	if err == nil {
+		t.Fatalf("expected refusal for denied command")
+	}
+	for _, want := range []string{"2 equally specific deny rules", "never rm", "use trash"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("err = %v, want it to contain %q", err, want)
+		}
+	}
+	if strings.Index(err.Error(), "never rm") > strings.Index(err.Error(), "use trash") {
+		t.Errorf("err = %v, want the rules named in rule-text order, the prefix first", err)
+	}
+}
+
+// TestRefusalErrorNamesTiedAllowRules builds the verdict by hand, since no allow field exists yet
+// that two tied rules can differ in. It keeps the refusal's wording from rotting until one does.
+func TestRefusalErrorNamesTiedAllowRules(t *testing.T) {
+	_, doc, err := approve.ParseDocument([]byte("version: 1\nallow:\n  - prefix: [make]\n  - regex: '^make( |$)'\n    as_basename: true\n"))
+	if err != nil {
+		t.Fatalf("ParseDocument: %v", err)
+	}
+
+	tied := []*approve.Rule{&doc.Allow[0], &doc.Allow[1]}
+
+	got := refusalError("cg_run", approve.Verdict{Decision: approve.DecisionRefuse, Step: approve.StepTieRefusal, Rule: tied[0], Deciding: tied})
+	for _, want := range []string{"cg_run refused", "the command matches equally specific allow rules that disagree", "prefix [make]", `regex "^make( |$)"`} {
+		if !strings.Contains(got.Error(), want) {
+			t.Errorf("err = %v, want it to contain %q", got, want)
+		}
+	}
+
+	chained := approve.Verdict{
+		Decision: approve.DecisionRefuse,
+		Rule:     tied[0],
+		Deciding: tied,
+		Chain: []approve.ChainLayer{
+			{Offset: 0, Argv: []string{"nice", "make"}, Step: approve.StepPeel},
+			{Offset: 1, Argv: []string{"make"}, Step: approve.StepTieRefusal},
+		},
+	}
+	if got := refusalError("cg_run", chained); !strings.Contains(got.Error(), "the inner command `make` matches equally specific allow rules") {
+		t.Errorf("err = %v, want it to name the inner layer", got)
+	}
+}
+
 func TestGateRestrictRefusesWithMessage(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 

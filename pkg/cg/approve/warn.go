@@ -181,9 +181,10 @@ func (rs *Ruleset) coverageWarnings() []Warning {
 			if rs.Allow[j].kind == KindPrefix && tokensCover(&rs.Allow[j], wrapper) {
 				out = append(out, Warning{
 					Kind: WarnCoveredByAllow,
-					Message: fmt.Sprintf("allow %s already allows every command %s matches, "+
-						"without judging the inner command, so the wrapper rule has no effect. Narrow the "+
-						"prefix rule or remove it.", describeRule(&rs.Allow[j]), "allow "+describeRule(wrapper)),
+					Message: fmt.Sprintf("allow %s covers every command %s matches, so it decides only "+
+						"when the inner command has no rule of its own. A rule that matches the inner command "+
+						"outranks the prefix. Narrow the prefix rule or remove it to have the wrapper rule "+
+						"judge every inner command.", describeRule(&rs.Allow[j]), "allow "+describeRule(wrapper)),
 				})
 			}
 		}

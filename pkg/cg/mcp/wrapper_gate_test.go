@@ -72,6 +72,18 @@ var wrapperPinTests = []struct {
 		Want:  "evil",
 	},
 	{
+		Name:  "a path-form rule outranks a bare-name rule and pins the layer",
+		Rules: func(w wrapperEnv) string { return w.rules("  - prefix: [tool]\n  - prefix: [" + w.Tool + "]\n") },
+		Want:  "good",
+	},
+	{
+		Name: "a chain tied with a bare-name carve-out leaves the layer unpinned",
+		Rules: func(w wrapperEnv) string {
+			return w.rules("  - prefix: [" + w.Tool + "]\n  - exact: [wrap, tool]\n")
+		},
+		Want: "evil",
+	},
+	{
 		Name: "an ordinary allow on the whole argv decides, so nothing is pinned",
 		Rules: func(w wrapperEnv) string {
 			return w.rules("  - prefix: [" + w.Tool + "]\n  - exact: [" + w.Wrap + ", tool]\n")

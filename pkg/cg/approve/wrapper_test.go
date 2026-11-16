@@ -262,18 +262,17 @@ var wrapperTests = []wrapperTest{
 		name: "permits are not pooled within a tied set",
 		allow: []Rule{
 			permitting(wrapperRule("nice"), "PATH"),
-			permitting(wrapperRule("/usr/bin/nice"), "LD_PRELOAD"),
+			permitting(wrapperRule("nice"), "LD_PRELOAD"),
 			permitting(prefixRule("make"), "PATH", "LD_PRELOAD"),
 		},
 		argv:        []string{"nice", "make"},
-		canonical:   []string{"/usr/bin/nice", "make"},
 		env:         map[string]string{"PATH": "/x", "LD_PRELOAD": "y.so"},
 		want:        DecisionRefuse,
-		wantBadEnvs: []string{"LD_PRELOAD"},
+		wantBadEnvs: []string{"PATH"},
 		wantChain:   1,
 	},
 	{
-		name: "one rule in a tied set permitting everything runs",
+		name: "a path-form wrapper rule is chosen over a bare one of equal length",
 		allow: []Rule{
 			wrapperRule("nice"),
 			permitting(wrapperRule("/usr/bin/nice"), "PATH", "LD_PRELOAD"),

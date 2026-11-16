@@ -1,6 +1,7 @@
 package approve
 
 import (
+	"slices"
 	"sort"
 	"strings"
 
@@ -44,6 +45,9 @@ const (
 	StepRestrict
 	// StepInner means the inner layer's prompt or refusal stands for this layer.
 	StepInner
+	// StepTieRefusal means equally specific allow rules all run the call and disagree on a field
+	// other than the match and the env permit.
+	StepTieRefusal
 )
 
 // String renders a Step for display.
@@ -61,6 +65,8 @@ func (s Step) String() string {
 		return "restrict"
 	case StepInner:
 		return "inner verdict"
+	case StepTieRefusal:
+		return "tie refusal"
 	default:
 		return "none"
 	}
@@ -70,10 +76,10 @@ func (s Step) String() string {
 // argv, from the top command inward. The last layer of a chain is the one behind
 // the verdict.
 //
-// Candidates are the rules of the step that settled the layer: the ordinary allows
-// that ran it, or the tied wrapper rules whose peel ran. PathForm reports whether
-// every candidate is a path-form rule. A caller that pins the inner executable
-// reads both.
+// Candidates are the deciding set of the step that settled the layer: the ordinary
+// allows no other allow outranks, or the wrapper rules the peel chose. They are the
+// rules whether or not their env check passed. PathForm reports whether every
+// candidate is a path-form rule. A caller that pins the inner executable reads both.
 type ChainLayer struct {
 	Offset int
 	Argv   []string
@@ -82,12 +88,12 @@ type ChainLayer struct {
 	// resolution the caller supplied in the Subject.
 	Resolution *model.Resolution
 
-	// Wrappers are the wrapper rules peeled out of this layer: the tied set of the
-	// longest match. It is empty on the innermost layer.
+	// Wrappers are the wrapper rules peeled out of this layer: the longest match, then the
+	// path-form ones, then the most specific layer. It is empty on the innermost layer.
 	Wrappers []*Rule
 
-	// Rule is the rule that settled this layer: the permitting wrapper rule on a peeled
-	// layer, the deciding rule on the last one. It is nil on a prompt.
+	// Rule is the rule that settled this layer: a wrapper rule on a peeled layer, the
+	// deciding rule on the last one. It is nil on a prompt.
 	Rule *Rule
 
 	Step       Step
@@ -137,11 +143,23 @@ type Skip struct {
 // command inward, and Rule is the rule behind the verdict at the last layer. Chain
 // is nil when the top layer settled the call alone. Skipped lists the wrapper rules
 // that matched a layer and did not peel, whether or not they affected the verdict.
+//
+// Deciding is the deciding set behind Rule: the matching rules no other matching rule
+// outranks, in whole-rule order. A tie of allows, or of equally specific denies or
+// restricts, holds more than one.
+//
+// Rule is the first of them, or the rule an env refusal names. It never depends on the
+// order of the rules in a file.
+//
+// For a chain, Rule and Deciding come from the innermost layer. Step is the step that
+// settled the typed command.
 type Verdict struct {
 	Decision   Decision
 	Rule       *Rule
+	Deciding   []*Rule
 	Restricted bool
 	BadEnvs    []string
+	Step       Step
 	Chain      []ChainLayer
 	Skipped    []Skip
 }
@@ -153,23 +171,27 @@ type Verdict struct {
 // inner layer when a wrapper rule peels. resolve supplies the resolution of each
 // inner layer and may be nil.
 //
-// At each layer the allow tier evaluates every matching ordinary allow and the peel
-// of the longest wrapper match, each through the env gate, and settles in order:
+// At each layer the matching allows are ranked by specificity, and the deciding set
+// is every allow that no other outranks. A wrapper peel joins the ranking as a chain
+// whenever its inner layer settles on a matching allow. The deciding set decides the
+// whole call, and a rule outside it supplies nothing:
 //
-//  1. An ordinary allow that runs after its env check decides the layer.
-//  2. Otherwise a peel that runs decides it, and the inner layer's verdict carries up.
-//  3. Otherwise a matching ordinary allow refuses with its env refusal.
-//  4. Otherwise a matching restrict rule refuses. A wrapper rule whose peel did not
-//     run is not an allow carve-out.
+//  1. One deciding rule runs the call when it passes its env check, and otherwise
+//     refuses with its env refusal.
+//  2. A tied set runs only when every rule passes its env check and the rules agree
+//     on every field other than the match and the env permit. Otherwise it refuses.
+//     An env refusal names the rule missing the fewest variables, then the rule
+//     whose whole text sorts first.
+//  3. A chain decides by its peel. Every wrapper rule it chose must permit the
+//     override, and so must every layer inside it.
+//  4. With no allow deciding, a matching restrict rule refuses. A peel that did not
+//     compete is not an allow carve-out.
 //  5. Otherwise the peel's verdict stands, prompt or refusal. With no peel, the
 //     layer prompts.
 //
 // A prompt with a dangerous override becomes a refusal, since a command with no
-// matching rule has no permit_unsafe_envs list to grant an exemption. A peel runs
-// only when a wrapper rule in its tied set permits every dangerous variable on its
-// own and the inner layer runs, so every layer of a chain must permit the override.
-// Permits are never pooled across rules, which keeps the verdict independent of
-// allow order.
+// matching rule has no permit_unsafe_envs list to grant an exemption. Permits are
+// never pooled across rules, and the deciding set does not depend on allow order.
 //
 // allow-all and deny-all short-circuit before any rule is consulted.
 func (rs *Ruleset) Evaluate(subj Subject, env map[string]string, resolve Resolver) Verdict {
@@ -232,6 +254,13 @@ type wrapperMatch struct {
 // settled is the allow tier's outcome for one layer. rule, restricted, and badEnvs
 // are what the verdict reports and carry up from an inner layer. own is the rule
 // that settled this layer itself.
+//
+// deciding is the deciding set behind rule.
+//
+// candidates is the deciding set of the step that settled this layer. Pinning reads it.
+//
+// members is non-empty only when the layer settled on a matching allow. It holds the ranks the layer
+// competes at inside an outer peel.
 type settled struct {
 	offset     int
 	decision   Decision
@@ -241,7 +270,9 @@ type settled struct {
 
 	step       Step
 	own        *Rule
+	deciding   []*Rule
 	candidates []*Rule
+	members    []rank
 
 	wrappers []*Rule
 	next     *settled
@@ -265,6 +296,7 @@ func (e *evaluation) layerAt(offset int) *layer {
 	l.canonical, l.resolved = e.rs.aliased(l.canonical), e.rs.aliased(l.resolved)
 
 	e.findPeels(l)
+	l.sortSkips()
 	e.layers[offset] = l
 
 	return l
@@ -320,27 +352,87 @@ func (e *evaluation) findPeels(l *layer) {
 	}
 }
 
-// allowPeel returns the tied set of the longest wrapper match the allow tier may
-// peel, and the number of tokens it removes. Equal-length matches can differ only
-// in the shape of their first token, so they peel to the same inner argv.
+// sortSkips orders a layer's skips by whole rule, so the report does not depend on list order.
+func (l *layer) sortSkips() {
+	slices.SortStableFunc(l.skips, func(a, b Skip) int {
+		return strings.Compare(wholeRuleKey(a.Rule), wholeRuleKey(b.Rule))
+	})
+}
+
+// allowPeel returns the wrapper rules the allow tier peels a layer through, and the tokens they
+// remove.
+//
+// The longest match wins, then a path-form rule over a bare-name one, then the more specific layer.
+//
+// Rules equal on all three peel to the same inner argv and form a tie, in whole-rule order.
 func (l *layer) allowPeel() ([]*Rule, int) {
-	if l.listed {
+	if l.listed || len(l.peels) == 0 {
 		return nil, 0
 	}
 
-	var tied []*Rule
-	longest := 0
-	for _, p := range l.peels {
-		switch {
-		case p.n > longest:
-			longest = p.n
-			tied = []*Rule{p.rule}
-		case p.n == longest:
-			tied = append(tied, p.rule)
+	best := l.peels[0]
+	for _, p := range l.peels[1:] {
+		if peelBetter(p, best) {
+			best = p
 		}
 	}
 
-	return tied, longest
+	var chosen []*Rule
+	for _, p := range l.peels {
+		if !peelBetter(p, best) && !peelBetter(best, p) {
+			chosen = append(chosen, p.rule)
+		}
+	}
+
+	sortRules(chosen)
+
+	return chosen, best.n
+}
+
+// peelBetter reports whether wrapper match a is chosen over b: longer, then path-form, then the more
+// specific layer.
+func peelBetter(a, b wrapperMatch) bool {
+	if a.n != b.n {
+		return a.n > b.n
+	}
+
+	ra, rb := a.rule.ranking(), b.rule.ranking()
+	if ra.path != rb.path {
+		return ra.path
+	}
+
+	return ra.layer < rb.layer
+}
+
+// peelEdge is a wrapper rule that reaches a layer from a parent layer.
+type peelEdge struct {
+	parent int
+	rule   *Rule
+	taken  bool
+}
+
+// betterEdge picks, among the wrapper rules that reach one layer, the path the deny hoist reports.
+//
+// It prefers a peel the allow tier takes, then the smaller parent offset, which is the outermost
+// parent and the fewest hops. Then it prefers a path-form rule, then the more specific layer, then the
+// rule's whole text. None of those depends on list order.
+func betterEdge(a, b peelEdge) bool {
+	if a.taken != b.taken {
+		return a.taken
+	}
+	if a.parent != b.parent {
+		return a.parent < b.parent
+	}
+
+	ra, rb := a.rule.ranking(), b.rule.ranking()
+	if ra.path != rb.path {
+		return ra.path
+	}
+	if ra.layer != rb.layer {
+		return ra.layer < rb.layer
+	}
+
+	return wholeRuleKey(a.rule) < wholeRuleKey(b.rule)
 }
 
 // hoistDeny checks deny on the top command and on every layer reachable through a
@@ -348,81 +440,95 @@ func (l *layer) allowPeel() ([]*Rule, int) {
 // the call. It follows every matching rule, listed programs included, and checks
 // layers whose argv[0] does not resolve, since a bare-name deny still matches them
 // through the basename form.
+//
+// The refusal names the outermost layer with a matching deny: the smallest offset. The
+// wrapper path to that layer is chosen by betterEdge, so it never depends on list order.
 func (e *evaluation) hoistDeny() (Verdict, bool) {
-	type parent struct {
-		offset int
-		rule   *Rule
-	}
+	edges := make(map[int]peelEdge)
 
-	parents := make(map[int]parent)
-	seen := map[int]bool{0: true}
-	queue := []int{0}
-
-	for len(queue) > 0 {
-		offset := queue[0]
-		queue = queue[1:]
-
-		l := e.layerAt(offset)
-		if rule := e.denyingRule(l); rule != nil {
-			path := []int{offset}
-			for o := offset; o != 0; o = parents[o].offset {
-				path = append(path, parents[o].offset)
-			}
-
-			chain := make([]ChainLayer, 0, len(path))
-			for i := len(path) - 1; i >= 0; i-- {
-				pl := e.layerAt(path[i])
-				cl := ChainLayer{Offset: pl.offset, Argv: pl.argv, Resolution: pl.resolution, Step: StepPeel}
-				if i > 0 {
-					cl.Wrappers = []*Rule{parents[path[i-1]].rule}
-				} else {
-					cl.Rule, cl.Step = rule, StepDeny
-				}
-				chain = append(chain, cl)
-			}
-
-			v := Verdict{Decision: DecisionRefuse, Rule: rule, Skipped: e.skipped()}
-			if len(chain) > 1 {
-				v.Chain = chain
-			}
-
-			return v, true
+	for offset := 0; offset < len(e.top.Argv); offset++ {
+		if _, reached := edges[offset]; offset > 0 && !reached {
+			continue
 		}
 
-		for _, p := range l.peels {
-			child := offset + p.n
-			if seen[child] {
-				continue
-			}
+		l := e.layerAt(offset)
+		if deciding := e.denying(l); len(deciding) > 0 {
+			return e.denyVerdict(offset, edges, deciding), true
+		}
 
-			seen[child] = true
-			parents[child] = parent{offset: offset, rule: p.rule}
-			queue = append(queue, child)
+		taken, _ := l.allowPeel()
+		for _, p := range l.peels {
+			edge := peelEdge{parent: offset, rule: p.rule, taken: slices.Contains(taken, p.rule)}
+			child := offset + p.n
+
+			if cur, ok := edges[child]; !ok || betterEdge(edge, cur) {
+				edges[child] = edge
+			}
 		}
 	}
 
 	return Verdict{}, false
 }
 
-// denyingRule returns the first deny rule matching a layer. On an inner layer a
-// path-form exact or prefix deny also matches by the basename of its first token.
-// The wrapper looks the inner program up itself, so it may find the denied file
-// even when the server PATH finds another. The top layer keeps exact path matching,
-// since the supervisor runs the path cg resolved.
-func (e *evaluation) denyingRule(l *layer) *Rule {
-	for i := range e.rs.Deny {
-		rule := &e.rs.Deny[i]
-		if ruleMatches(rule, l.canonical, l.resolved, l.basename) {
-			return rule
+// denyVerdict builds the refusal for the deciding set of denies at offset, with the wrapper chain
+// that leads there.
+func (e *evaluation) denyVerdict(offset int, edges map[int]peelEdge, deciding []*Rule) Verdict {
+	path := []int{offset}
+	for o := offset; o != 0; {
+		o = edges[o].parent
+		path = append(path, o)
+	}
+	slices.Reverse(path)
+
+	chain := make([]ChainLayer, 0, len(path))
+	for i, off := range path {
+		pl := e.layerAt(off)
+		cl := ChainLayer{Offset: pl.offset, Argv: pl.argv, Resolution: pl.resolution}
+
+		if i < len(path)-1 {
+			cl.Step = StepPeel
+			cl.Wrappers = []*Rule{edges[path[i+1]].rule}
+		} else {
+			cl.Rule, cl.Step = deciding[0], StepDeny
+			cl.Candidates, cl.PathForm = deciding, pathForm(deciding)
 		}
 
-		if l.offset > 0 && rule.baseArgv != nil && (rule.kind == KindExact || rule.kind == KindPrefix) &&
-			matchTokens(rule.baseArgv, l.basename, rule.kind == KindExact) {
-			return rule
-		}
+		chain = append(chain, cl)
 	}
 
-	return nil
+	v := Verdict{Decision: DecisionRefuse, Rule: deciding[0], Deciding: deciding, Step: StepDeny, Skipped: e.skipped()}
+	if len(chain) > 1 {
+		v.Chain = chain
+	}
+
+	return v
+}
+
+// denying returns the deciding set of the deny rules matching a layer, in whole-rule order. On an
+// inner layer a path-form exact or prefix deny also matches by the basename of its first token. The
+// wrapper looks the inner program up itself, so it may find the denied file even when the server PATH
+// finds another. Such a deny ranks as a bare-name rule. The top layer keeps exact path matching,
+// since the supervisor runs the path cg resolved.
+func (e *evaluation) denying(l *layer) []*Rule {
+	var items []ranked
+
+	for i := range e.rs.Deny {
+		rule := &e.rs.Deny[i]
+		rk := rule.ranking()
+
+		switch {
+		case ruleMatches(rule, l.canonical, l.resolved, l.basename):
+		case l.offset > 0 && rule.baseArgv != nil && (rule.kind == KindExact || rule.kind == KindPrefix) &&
+			matchTokens(rule.baseArgv, l.basename, rule.kind == KindExact):
+			rk.path = false
+		default:
+			continue
+		}
+
+		items = append(items, ranked{rule: rule, rank: rk})
+	}
+
+	return decidingRules(items)
 }
 
 // settle runs the allow tier for the layer at offset, memoized.
@@ -435,90 +541,249 @@ func (e *evaluation) settle(offset int) *settled {
 	return l.settled
 }
 
+// matching returns the rules of a tier that match a layer as ordinary rules.
+func matching(rules []Rule, l *layer) []*Rule {
+	var out []*Rule
+
+	for i := range rules {
+		if ruleMatches(&rules[i], l.canonical, l.resolved, l.basename) {
+			out = append(out, &rules[i])
+		}
+	}
+
+	return out
+}
+
+// rankedRules pairs each rule with its own rank.
+func rankedRules(rules []*Rule) []ranked {
+	out := make([]ranked, len(rules))
+	for i, rule := range rules {
+		out[i] = ranked{rule: rule, rank: rule.ranking()}
+	}
+
+	return out
+}
+
 func (e *evaluation) settleLayer(l *layer) *settled {
-	s := &settled{offset: l.offset}
+	matched := matching(e.rs.Allow, l)
+	ordinary := decidingRules(rankedRules(matched))
 
-	var matched, ran []*Rule
-	for i := range e.rs.Allow {
-		rule := &e.rs.Allow[i]
-		if !ruleMatches(rule, l.canonical, l.resolved, l.basename) {
-			continue
-		}
-
-		matched = append(matched, rule)
-		if len(rule.DisallowedEnvs(e.env)) == 0 {
-			ran = append(ran, rule)
-		}
+	var peel *settled
+	if wrappers, n := l.allowPeel(); len(wrappers) > 0 {
+		peel = e.peelOf(l, wrappers, e.settle(l.offset+n))
 	}
 
-	if len(ran) > 0 {
-		s.decision, s.rule, s.own, s.step, s.candidates = DecisionRun, ran[0], ran[0], StepAllow, ran
-
-		return s
+	tied, chainIn := ordinary, false
+	if peel != nil && len(peel.members) > 0 {
+		tied, chainIn = rankAgainstChain(matched, ordinary, peel.members)
 	}
 
-	var permitting []*Rule
-	var inner *settled
-
-	tied, n := l.allowPeel()
-	if len(tied) > 0 {
-		for _, rule := range tied {
-			if len(rule.DisallowedEnvs(e.env)) == 0 {
-				permitting = append(permitting, rule)
-			}
-		}
-
-		inner = e.settle(l.offset + n)
+	switch {
+	case len(tied) > 0 && chainIn:
+		return e.settleTie(l, tied, peel)
+	case len(tied) > 0:
+		return e.settleTie(l, tied, nil)
+	case chainIn:
+		return peel
 	}
 
-	if len(permitting) > 0 && inner.decision == DecisionRun {
-		s.decision, s.rule, s.own, s.step, s.candidates = DecisionRun, inner.rule, permitting[0], StepPeel, permitting
-		s.wrappers, s.next = tied, inner
-
-		return s
-	}
-
-	if len(matched) > 0 {
-		s.decision, s.rule, s.own, s.step = DecisionRefuse, matched[0], matched[0], StepEnvRefusal
-		s.badEnvs = matched[0].DisallowedEnvs(e.env)
-		s.candidates = matched
-
-		return s
-	}
-
-	for i := range e.rs.Restrict {
-		rule := &e.rs.Restrict[i]
-		if ruleMatches(rule, l.canonical, l.resolved, l.basename) {
-			s.decision, s.rule, s.own, s.step, s.restricted = DecisionRefuse, rule, rule, StepRestrict, true
-
-			return s
+	if deciding := decidingRules(rankedRules(matching(e.rs.Restrict, l))); len(deciding) > 0 {
+		return &settled{
+			offset: l.offset, decision: DecisionRefuse, rule: deciding[0], own: deciding[0], step: StepRestrict, restricted: true,
+			deciding: deciding, candidates: deciding,
 		}
 	}
 
-	if len(tied) > 0 {
-		s.wrappers = tied
-
-		switch {
-		case inner.decision == DecisionRefuse || len(permitting) > 0:
-			s.decision, s.rule, s.restricted, s.badEnvs = inner.decision, inner.rule, inner.restricted, inner.badEnvs
-			s.step, s.next = StepInner, inner
-			if len(permitting) > 0 {
-				s.own, s.candidates = permitting[0], permitting
-			}
-		default:
-			s.own, s.badEnvs = leastDisallowed(tied, e.env)
-			s.decision, s.rule, s.step = DecisionRefuse, s.own, StepEnvRefusal
-		}
-
-		return s
+	if peel != nil {
+		return peel
 	}
 
-	s.decision = DecisionPrompt
+	s := &settled{offset: l.offset, decision: DecisionPrompt}
 	if bad := (&Rule{}).DisallowedEnvs(e.env); len(bad) > 0 {
 		s.decision, s.badEnvs, s.step = DecisionRefuse, bad, StepEnvRefusal
 	}
 
 	return s
+}
+
+// rankAgainstChain ranks a chain against the matching allows. It returns the ordinary allows left in
+// the deciding set, which are those the chain does not outrank, and whether the chain itself stays
+// in it, which is when no matching allow outranks the chain.
+func rankAgainstChain(matched, ordinary []*Rule, members []rank) ([]*Rule, bool) {
+	chainIn := true
+	for _, rule := range matched {
+		if compareChain(members, rule.ranking()) == allowAbove {
+			chainIn = false
+			break
+		}
+	}
+
+	var kept []*Rule
+	for _, rule := range ordinary {
+		if compareChain(members, rule.ranking()) != chainAbove {
+			kept = append(kept, rule)
+		}
+	}
+
+	return kept, chainIn
+}
+
+// peelOf settles a layer by the peel through the chosen wrapper rules and the settled inner layer.
+//
+// Every chosen wrapper rule must permit the override. The peel runs only when they all do and the
+// inner layer runs.
+//
+// The settled layer carries members only when the inner layer settled on a matching allow. That is
+// when the peel competes with the ordinary allows.
+func (e *evaluation) peelOf(l *layer, wrappers []*Rule, inner *settled) *settled {
+	s := &settled{offset: l.offset, wrappers: wrappers, candidates: wrappers}
+
+	var permitting, failing []*Rule
+	for _, rule := range wrappers {
+		if len(rule.DisallowedEnvs(e.env)) == 0 {
+			permitting = append(permitting, rule)
+		} else {
+			failing = append(failing, rule)
+		}
+	}
+
+	if len(inner.members) > 0 {
+		s.members = chainMembers(wrappers, inner.members)
+	}
+
+	switch {
+	case len(failing) == 0 && inner.decision == DecisionRun:
+		s.decision, s.rule, s.own, s.step, s.next = DecisionRun, inner.rule, permitting[0], StepPeel, inner
+		s.deciding = inner.deciding
+	case inner.decision == DecisionRefuse || len(failing) == 0:
+		s.decision, s.rule, s.restricted, s.badEnvs = inner.decision, inner.rule, inner.restricted, inner.badEnvs
+		s.step, s.next, s.deciding = StepInner, inner, inner.deciding
+		if len(failing) == 0 {
+			s.own = permitting[0]
+		}
+	default:
+		s.own, s.badEnvs = leastDisallowed(failing, e.env)
+		s.decision, s.rule, s.step, s.deciding = DecisionRefuse, s.own, StepEnvRefusal, []*Rule{s.own}
+	}
+
+	return s
+}
+
+// allowFields is every per-rule field of an allow rule other than the match and permit_unsafe_envs.
+// It is empty until such a field exists. Add the field here and the tie check compares it.
+type allowFields struct{}
+
+// fieldsOf reads the fields a tied rule is compared on.
+func fieldsOf(*Rule) allowFields { return allowFields{} }
+
+// fieldsAgree reports whether every rule of a tied set carries the same fields. A chain's fields are
+// those of its inner deciding rules.
+func fieldsAgree(tied []*Rule, chain *settled) bool {
+	rules := tied
+	if chain != nil {
+		rules = append(slices.Clone(tied), chain.deciding...)
+	}
+
+	for _, rule := range rules[1:] {
+		if fieldsOf(rule) != fieldsOf(rules[0]) {
+			return false
+		}
+	}
+
+	return true
+}
+
+// settleTie settles a layer whose deciding set holds the ordinary allows in tied and, when chain is
+// not nil, the peel.
+//
+// Every member must run after its env check, and the members must agree on every field. Otherwise the
+// call is refused.
+//
+// Among env refusals, the one missing the fewest variables is named. Then the rule whose whole text
+// sorts first is named.
+func (e *evaluation) settleTie(l *layer, tied []*Rule, chain *settled) *settled {
+	type refusal struct {
+		rule *Rule
+		bad  []string
+		peel bool
+	}
+
+	var refusals []refusal
+	for _, rule := range tied {
+		if bad := rule.DisallowedEnvs(e.env); len(bad) > 0 {
+			refusals = append(refusals, refusal{rule: rule, bad: bad})
+		}
+	}
+
+	if chain != nil && chain.decision != DecisionRun {
+		refusals = append(refusals, refusal{rule: chain.rule, bad: chain.badEnvs, peel: true})
+	}
+
+	s := &settled{offset: l.offset, candidates: slices.Clone(tied), members: rankList(rankedRules(tied))}
+
+	deciding := slices.Clone(tied)
+	if chain != nil {
+		s.candidates = append(s.candidates, chain.candidates...)
+		s.members = append(s.members, chain.members...)
+		deciding = append(deciding, chain.deciding...)
+	}
+	sortRules(deciding)
+	s.deciding = deciding
+
+	if len(refusals) > 0 {
+		best := refusals[0]
+		for _, r := range refusals[1:] {
+			if len(r.bad) < len(best.bad) || (len(r.bad) == len(best.bad) && wholeRuleKey(r.rule) < wholeRuleKey(best.rule)) {
+				best = r
+			}
+		}
+
+		if best.peel {
+			return chain
+		}
+
+		s.decision, s.rule, s.own, s.step, s.badEnvs = DecisionRefuse, best.rule, best.rule, StepEnvRefusal, best.bad
+
+		return s
+	}
+
+	s.rule, s.own = tied[0], tied[0]
+	s.decision, s.step = DecisionRun, StepAllow
+
+	if !fieldsAgree(tied, chain) {
+		s.decision, s.step = DecisionRefuse, StepTieRefusal
+	}
+
+	return s
+}
+
+// rankList returns the ranks of ranked rules.
+func rankList(items []ranked) []rank {
+	out := make([]rank, len(items))
+	for i, it := range items {
+		out[i] = it.rank
+	}
+
+	return out
+}
+
+// leastDisallowed picks, from a set of wrapper rules none of which permits the
+// override, the rule closest to permitting it: the one missing the fewest variables,
+// with ties broken by the rule's whole text. The choice does not depend on allow
+// order, which remember re-sorts, so the refusal names the same fix every time.
+func leastDisallowed(rules []*Rule, env map[string]string) (*Rule, []string) {
+	var best *Rule
+	var bestBad []string
+
+	for _, rule := range rules {
+		bad := rule.DisallowedEnvs(env)
+		if best == nil || len(bad) < len(bestBad) ||
+			(len(bad) == len(bestBad) && wholeRuleKey(rule) < wholeRuleKey(best)) {
+			best, bestBad = rule, bad
+		}
+	}
+
+	return best, bestBad
 }
 
 // verdict turns the top layer's outcome into a Verdict, walking the peel chain
@@ -527,8 +792,10 @@ func (e *evaluation) verdict(top *settled) Verdict {
 	v := Verdict{
 		Decision:   top.decision,
 		Rule:       top.rule,
+		Deciding:   top.deciding,
 		Restricted: top.restricted,
 		BadEnvs:    top.badEnvs,
+		Step:       top.step,
 		Skipped:    e.skipped(),
 	}
 
@@ -568,26 +835,6 @@ func (e *evaluation) skipped() []Skip {
 	}
 
 	return out
-}
-
-// leastDisallowed picks, from a tied set of wrapper rules none of which permits
-// the override, the rule closest to permitting it: the one missing the fewest
-// variables, with ties broken by the variable names. The choice does not depend on
-// allow order, which remember re-sorts, so the refusal names the same fix every
-// time.
-func leastDisallowed(rules []*Rule, env map[string]string) (*Rule, []string) {
-	var best *Rule
-	var bestBad []string
-
-	for _, rule := range rules {
-		bad := rule.DisallowedEnvs(env)
-		if best == nil || len(bad) < len(bestBad) ||
-			(len(bad) == len(bestBad) && strings.Join(bad, ",") < strings.Join(bestBad, ",")) {
-			best, bestBad = rule, bad
-		}
-	}
-
-	return best, bestBad
 }
 
 // pathForm reports whether every rule in a non-empty candidate set matches by path

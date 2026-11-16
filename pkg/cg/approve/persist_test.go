@@ -386,3 +386,67 @@ func TestAppendKeepsDenyRulesDifferingInMessage(t *testing.T) {
 		t.Errorf("expected the duplicate 'ask first' deny to collapse to one, got %d:\n%s", n, got)
 	}
 }
+
+// rememberProbe is a command checked before and after a remember and a restart.
+type rememberProbe struct {
+	Name string
+	Argv []string
+	Env  map[string]string
+}
+
+var rememberProbes = []rememberProbe{
+	{Name: "env override on a tied pair", Argv: []string{"make", "test"}, Env: map[string]string{"PATH": "/x"}},
+	{Name: "equal denies", Argv: []string{"rm", "x"}},
+	{Name: "the remembered rule's own command", Argv: []string{"make", "build"}, Env: map[string]string{"PATH": "/x"}},
+	{Name: "a command only the global layer allows", Argv: []string{"git", "status"}},
+}
+
+// TestVerdictSurvivesRememberAndRestart covers a project file that has not diverged on disk. The
+// live ruleset appends the remembered rule, and a restart reads the re-sorted file. The verdict,
+// the rules it names, and their messages must be the same in both. It also covers the layer of the
+// remembered rule, which is the project in both.
+func TestVerdictSurvivesRememberAndRestart(t *testing.T) {
+	t.Parallel()
+
+	global := writeGlobal(t, "version: 1\nallow:\n  - prefix: [make]\n    permit_unsafe_envs: [PATH]\n  - prefix: [git]\ndeny:\n  - prefix: [rm]\n    message: global rm\n")
+	root := writeProject(t, "version: 1\n"+
+		"allow:\n"+
+		"  - regex: '^make test( |$)'\n    as_basename: true\n"+
+		"  - prefix: [make, test]\n    permit_unsafe_envs: [PATH]\n"+
+		"deny:\n"+
+		"  - regex: '^rm( |$)'\n    as_basename: true\n    message: p2\n"+
+		"  - prefix: [rm]\n    message: p1\n")
+
+	opts := LoadOptions{GlobalPath: global, ProjectRoot: root}
+
+	s, err := Load(opts)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if err := s.AppendProjectAllowPrefix([]string{"make", "build"}, WriteDirect); err != nil {
+		t.Fatalf("AppendProjectAllowPrefix: %v", err)
+	}
+
+	reloaded, err := Load(opts)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+
+	for _, probe := range rememberProbes {
+		t.Run(probe.Name, func(t *testing.T) {
+			subj := identitySubject(probe.Argv)
+
+			live := s.Ruleset().Evaluate(subj, probe.Env, nil)
+			again := reloaded.Ruleset().Evaluate(subj, probe.Env, nil)
+
+			if summarize(live) != summarize(again) {
+				t.Errorf("verdict changed across a remember and a restart:\nlive: %s\nreloaded: %s", summarize(live), summarize(again))
+			}
+		})
+	}
+
+	live := s.Ruleset().Evaluate(identitySubject([]string{"make", "build"}), nil, nil)
+	if live.Rule == nil || live.Rule.layer != layerProject {
+		t.Errorf("remembered rule = %v, want it to rank as a project rule", live.Rule)
+	}
+}

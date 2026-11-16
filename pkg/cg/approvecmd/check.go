@@ -28,10 +28,14 @@ type checkOptions struct {
 // checkResult is the `cg check --output json` payload: the evaluated command,
 // the verdict, and the rule that produced it, when there is one.
 type checkResult struct {
-	Command    []string    `json:"command"`
-	Decision   string      `json:"decision"`
-	Section    string      `json:"section,omitempty"`
-	Rule       *ruleInfo   `json:"rule,omitempty"`
+	Command  []string  `json:"command"`
+	Decision string    `json:"decision"`
+	Section  string    `json:"section,omitempty"`
+	Rule     *ruleInfo `json:"rule,omitempty"`
+
+	// Deciding lists every rule of a tie: the matching rules no other outranks. It is empty when
+	// one rule decided, which Rule then names.
+	Deciding   []ruleInfo  `json:"deciding,omitempty"`
 	Restricted bool        `json:"restricted,omitempty"`
 	BadEnvs    []string    `json:"bad_envs,omitempty"`
 	Chain      []chainInfo `json:"chain,omitempty"`
@@ -45,7 +49,7 @@ type checkResult struct {
 // chainInfo is the JSON-facing description of one layer of a wrapper chain, from
 // the typed command inward. Resolved is the path an inner layer's executable
 // resolved to, and is empty when it did not resolve. Candidates and PathForm
-// describe the rules of the step that settled the layer.
+// describe the deciding set of the step that settled the layer.
 type chainInfo struct {
 	Offset     int        `json:"offset"`
 	Command    []string   `json:"command"`
@@ -255,6 +259,11 @@ func checkResultFrom(argv []string, v approve.Verdict) checkResult {
 		info := ruleInfoFor(v.Rule)
 		res.Rule = &info
 	}
+	if len(v.Deciding) > 1 {
+		for _, r := range v.Deciding {
+			res.Deciding = append(res.Deciding, ruleInfoFor(r))
+		}
+	}
 
 	for _, cl := range v.Chain {
 		res.Chain = append(res.Chain, chainInfoFrom(cl))
@@ -319,6 +328,7 @@ func writeCheckText(w io.Writer, argv []string, v approve.Verdict, projectPath s
 		}
 	}
 
+	writeTiedText(w, v)
 	writeChainText(w, v)
 
 	if len(v.BadEnvs) > 0 {
@@ -332,6 +342,23 @@ func writeCheckText(w io.Writer, argv []string, v approve.Verdict, projectPath s
 
 	if v.Decision == approve.DecisionPrompt {
 		fmt.Fprintln(w, "  hint: no rule matched; cg_run would prompt for interactive approval, or fail closed without one")
+	}
+}
+
+// writeTiedText names every rule of a tie. The rules are equally specific, so they decide together.
+func writeTiedText(w io.Writer, v approve.Verdict) {
+	if len(v.Deciding) < 2 {
+		return
+	}
+
+	fmt.Fprintf(w, "  decided together by %d equally specific rules:\n", len(v.Deciding))
+
+	for _, r := range v.Deciding {
+		fmt.Fprintf(w, "    %s", r.String())
+		if r.Message != "" {
+			fmt.Fprintf(w, ": %s", r.Message)
+		}
+		fmt.Fprintln(w)
 	}
 }
 
@@ -430,9 +457,19 @@ func ruleSectionFor(v approve.Verdict) string {
 		return ""
 	case v.Restricted:
 		return "restrict"
-	case v.Decision == approve.DecisionRun || len(v.BadEnvs) > 0:
+	case v.Decision == approve.DecisionRun || len(v.BadEnvs) > 0 || lastStep(v) == approve.StepTieRefusal:
 		return "allow"
 	default:
 		return "deny"
 	}
+}
+
+// lastStep is the step that settled the layer behind the verdict: the last chain layer's, or the
+// typed command's when no wrapper was involved.
+func lastStep(v approve.Verdict) approve.Step {
+	if n := len(v.Chain); n > 0 {
+		return v.Chain[n-1].Step
+	}
+
+	return v.Step
 }

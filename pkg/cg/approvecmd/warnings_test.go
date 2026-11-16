@@ -46,7 +46,7 @@ func TestLintMergedPassReportsCoveredWrapper(t *testing.T) {
 	if exitCode(t, err) != 0 {
 		t.Fatalf("exit code = %d, want 0; out = %s", exitCode(t, err), out)
 	}
-	if !strings.Contains(out, "merged:\n  warning: allow prefix [/usr/bin/nice] already allows every command") {
+	if !strings.Contains(out, "merged:\n  warning: allow prefix [/usr/bin/nice] covers every command") {
 		t.Errorf("output missing the merged warning:\n%s", out)
 	}
 }

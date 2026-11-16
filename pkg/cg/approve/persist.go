@@ -207,6 +207,7 @@ func mergeAbsent(seq *yaml.Node, mem, disk []Rule, isDeny bool) {
 // already expanded a leading ~ with the store's own home directory.
 func (s *Store) appendLiveAllow(rule Rule) {
 	compileMatch(&rule, s.projectRoot)
+	rule.layer = layerProject
 	cur := s.rules.Load()
 	next := &Ruleset{
 		Mode:     cur.Mode,
