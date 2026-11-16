@@ -1,7 +1,6 @@
 package model
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -45,6 +44,10 @@ type PoolSpec struct {
 	Cwd         string            `json:"cwd,omitempty"`
 	Env         map[string]string `json:"env,omitempty"`
 	SessionID   string            `json:"session_id,omitempty"`
+
+	// Supervisor is the identity the server recorded at start. The pool supervisor verifies it
+	// before every member and repeat spawn. When nil, see SuperviseOptions.Supervisor.
+	Supervisor *ExecIdentity `json:"supervisor,omitempty"`
 }
 
 // normalize applies spec defaults and rejects malformed input. The MCP layer
@@ -214,6 +217,13 @@ type poolResult struct {
 	dir string
 }
 
+// poolMember is an in-flight member run. pid is the child's process-group ID from the member
+// supervisor's ack.
+type poolMember struct {
+	runID string
+	pid   int
+}
+
 // schedulePool runs the manifest's jobs through per-run supervisors, at most
 // spec.Parallelism in flight, rewriting the manifest on every state change.
 // It returns once every started member has finished; the caller marks jobs
@@ -223,7 +233,7 @@ func schedulePool(dir string, spec *PoolSpec, manifest *PoolManifest, sigCh <-ch
 	workers := min(spec.Parallelism, total)
 
 	results := make(chan poolResult)
-	inFlight := make(map[int]string, workers)
+	inFlight := make(map[int]poolMember, workers)
 
 	next := 0
 	stopped := false
@@ -233,9 +243,11 @@ func schedulePool(dir string, spec *PoolSpec, manifest *PoolManifest, sigCh <-ch
 	// supervisePool surfaces persistent ones.
 	persist := func() { _ = WritePoolManifest(dir, manifest) }
 
+	// The pid comes from the member's ack, never its pid file: a member's command may be able
+	// to rewrite that file, and the pool supervisor runs outside any sandbox.
 	cancelInFlight := func() {
-		for _, runID := range inFlight {
-			_, _ = CancelRun(context.Background(), runID, CancelOptions{})
+		for _, member := range inFlight {
+			_ = syscall.Kill(-member.pid, syscall.SIGTERM)
 		}
 	}
 
@@ -256,12 +268,13 @@ func schedulePool(dir string, spec *PoolSpec, manifest *PoolManifest, sigCh <-ch
 		cmd := &spec.Commands[rec.Command]
 
 		run, err := RunSupervised(cmd.Argv, SuperviseOptions{
-			Resolved:  cmd.resolution(),
-			InnerExec: cmd.InnerExec,
-			Cwd:       spec.Cwd,
-			Env:       spec.Env,
-			Pool:      manifest.ID,
-			SessionID: manifest.SessionID,
+			Resolved:   cmd.resolution(),
+			InnerExec:  cmd.InnerExec,
+			Cwd:        spec.Cwd,
+			Env:        spec.Env,
+			Pool:       manifest.ID,
+			SessionID:  manifest.SessionID,
+			Supervisor: spec.Supervisor,
 
 			Parallelism: spec.Parallelism,
 		})
@@ -278,7 +291,7 @@ func schedulePool(dir string, spec *PoolSpec, manifest *PoolManifest, sigCh <-ch
 
 		rec.RunID = run.ID
 		rec.Status = PoolRunRunning
-		inFlight[job] = run.ID
+		inFlight[job] = poolMember{runID: run.ID, pid: run.Pid}
 
 		go func(job int, run *CaptureRun) {
 			<-run.Done
@@ -298,7 +311,7 @@ func schedulePool(dir string, spec *PoolSpec, manifest *PoolManifest, sigCh <-ch
 
 		select {
 		case res := <-results:
-			runID := inFlight[res.job]
+			runID := inFlight[res.job].runID
 			delete(inFlight, res.job)
 			if finishPoolRun(&manifest.Runs[res.job], runID, res.dir) {
 				noteFailure()

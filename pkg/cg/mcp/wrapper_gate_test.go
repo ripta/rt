@@ -87,7 +87,7 @@ func TestWrappedInnerCommandRunsPinnedFile(t *testing.T) {
 			g := newTestGate(t, test.Rules(w), false)
 
 			typed := []string{"wrap", "tool"}
-			_, out, err := handleRun(context.Background(), nil, g, nil, "", runInput{Command: typed})
+			_, out, err := handleRun(context.Background(), nil, g, nil, runOrigin{}, runInput{Command: typed})
 			if err != nil {
 				t.Fatalf("handleRun: %v", err)
 			}
@@ -130,7 +130,7 @@ func TestWrappedLinkedInterpreterKeepsItsLink(t *testing.T) {
 
 	g := newTestGate(t, w.rules("  - prefix: ["+link+"]\n"), false)
 
-	_, out, err := handleRun(context.Background(), nil, g, nil, "", runInput{Command: []string{"wrap", link}})
+	_, out, err := handleRun(context.Background(), nil, g, nil, runOrigin{}, runInput{Command: []string{"wrap", link}})
 	if err != nil {
 		t.Fatalf("handleRun: %v", err)
 	}
@@ -143,7 +143,7 @@ func TestWrappedInnerCommandRunsPinnedFileInPool(t *testing.T) {
 	w := newWrapperEnv(t)
 	g := newTestGate(t, w.rules("  - prefix: ["+w.Tool+"]\n"), false)
 
-	_, out, err := handleRunMany(context.Background(), nil, g, nil, "", runManyInput{Commands: [][]string{{"wrap", "tool"}}})
+	_, out, err := handleRunMany(context.Background(), nil, g, nil, runOrigin{}, runManyInput{Commands: [][]string{{"wrap", "tool"}}})
 	if err != nil {
 		t.Fatalf("handleRunMany: %v", err)
 	}

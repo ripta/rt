@@ -61,19 +61,19 @@ type runOutput struct {
 	RememberWarning string `json:"remember_warning,omitempty"`
 }
 
-func registerRun(s *mcpsdk.Server, reg *runRegistry, g *gate, sessionID string) {
+func registerRun(s *mcpsdk.Server, reg *runRegistry, g *gate, origin runOrigin) {
 	mcpsdk.AddTool(s, &mcpsdk.Tool{
 		Name:        "cg_run",
 		Description: "Run a command with capture. Returns metadata, exit code, and short head-excerpts of stdout and stderr. The run is recorded on disk under $TMPDIR/cg/<id>/ and can be inspected with the other cg tools. Set wait_timeout_auto to size the wait from earlier runs of the same command. The response reports wait_timeout_ms_used. A timed_out response also carries elapsed_ms and, when earlier runs exist, history.",
 		InputSchema: requiredInputSchema[runInput](),
 	}, func(ctx context.Context, req *mcpsdk.CallToolRequest, in runInput) (*mcpsdk.CallToolResult, runOutput, error) {
-		return handleRun(ctx, reg, g, req, sessionID, in)
+		return handleRun(ctx, reg, g, req, origin, in)
 	})
 }
 
 // handleRun gates and runs one command. A command that needs approval ends the call with input
 // requests and runs nothing. req is nil for callers that skip the protocol, which cannot prompt.
-func handleRun(ctx context.Context, reg *runRegistry, g *gate, req *mcpsdk.CallToolRequest, sessionID string, in runInput) (*mcpsdk.CallToolResult, runOutput, error) {
+func handleRun(ctx context.Context, reg *runRegistry, g *gate, req *mcpsdk.CallToolRequest, origin runOrigin, in runInput) (*mcpsdk.CallToolResult, runOutput, error) {
 	if len(in.Command) == 0 {
 		return nil, runOutput{}, fmt.Errorf("command must contain at least one element")
 	}
@@ -130,7 +130,7 @@ func handleRun(ctx context.Context, reg *runRegistry, g *gate, req *mcpsdk.CallT
 		inner = outcome.Rewrites[0]
 	}
 
-	run, err := model.RunSupervised(in.Command, model.SuperviseOptions{Resolved: resolved, InnerExec: inner, Cwd: in.Cwd, Env: in.Env, SessionID: sessionID})
+	run, err := model.RunSupervised(in.Command, model.SuperviseOptions{Resolved: resolved, InnerExec: inner, Cwd: in.Cwd, Env: in.Env, SessionID: origin.SessionID, Supervisor: origin.Supervisor})
 	if err != nil {
 		var sf *model.StartFailure
 		if errors.As(err, &sf) {

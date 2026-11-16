@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"strings"
 	"syscall"
 	"time"
@@ -47,6 +46,11 @@ func (e *StartFailure) Unwrap() error { return e.Err }
 // same way; empty for runs not spawned by a server.
 type SuperviseOptions struct {
 	Resolved *Resolution
+
+	// Supervisor is the executable identity the server recorded at start. RunSupervised verifies it
+	// before the spawn and execs its target. When nil, RunSupervised records the running executable
+	// itself, which detects nothing.
+	Supervisor *ExecIdentity
 
 	// InnerExec pins offsets of args to the paths the child receives there. See SuperviseSpec.
 	InnerExec map[int]string
@@ -101,12 +105,18 @@ func RunSupervised(args []string, opts SuperviseOptions) (*CaptureRun, error) {
 		return nil, &StartFailure{RunID: cap.ID, Dir: cap.Dir, Err: err}
 	}
 
-	exe, err := os.Executable()
-	if err != nil {
-		return failStart(fmt.Errorf("locating cg executable: %w", err))
+	supervisor := opts.Supervisor
+	if supervisor == nil {
+		supervisor, err = CaptureExecIdentity()
+		if err != nil {
+			return failStart(err)
+		}
+	}
+	if err := supervisor.Verify(); err != nil {
+		return failStart(err)
 	}
 
-	sup := exec.Command(exe, "supervise-run", cap.Dir)
+	sup := supervisor.command("supervise-run", cap.Dir)
 	sup.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 
 	stdin, err := sup.StdinPipe()

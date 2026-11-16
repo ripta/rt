@@ -71,7 +71,7 @@ func connectProgressClient(t *testing.T, rec *progressRecorder) *mcpsdk.ClientSe
 	t.Helper()
 
 	ctx := context.Background()
-	server := newServer("test", time.Now(), "", &gate{blindlyAllow: true})
+	server := newServer("test", time.Now(), "", &gate{blindlyAllow: true}, nil)
 
 	serverTransport, clientTransport := mcpsdk.NewInMemoryTransports()
 	ss, err := server.Connect(ctx, serverTransport, nil)

@@ -4,8 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
-	"os/exec"
 	"syscall"
 	"time"
 )
@@ -46,12 +44,18 @@ func PoolSupervised(spec *PoolSpec) (*PoolRun, error) {
 		return nil, &StartFailure{RunID: id, Dir: dir, Err: err}
 	}
 
-	exe, err := os.Executable()
-	if err != nil {
-		return failStart(fmt.Errorf("locating cg executable: %w", err))
+	supervisor := spec.Supervisor
+	if supervisor == nil {
+		supervisor, err = CaptureExecIdentity()
+		if err != nil {
+			return failStart(err)
+		}
+	}
+	if err := supervisor.Verify(); err != nil {
+		return failStart(err)
 	}
 
-	sup := exec.Command(exe, "supervise-pool", dir)
+	sup := supervisor.command("supervise-pool", dir)
 	sup.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 
 	stdin, err := sup.StdinPipe()

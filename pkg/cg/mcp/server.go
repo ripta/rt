@@ -66,7 +66,12 @@ func runServer(cmd *cobra.Command, opts *serverOptions) error {
 		return fmt.Errorf("generating session id: %w", err)
 	}
 
-	s := newServer(v, time.Now(), sessionID, g)
+	supervisor, err := model.CaptureExecIdentity()
+	if err != nil {
+		return fmt.Errorf("recording the cg executable: %w", err)
+	}
+
+	s := newServer(v, time.Now(), sessionID, g, supervisor)
 	return s.Run(cmd.Context(), &mcpsdk.StdioTransport{})
 }
 
@@ -88,15 +93,24 @@ Use wait=false only to run other work alongside the command. Use cg_wait to resu
 
 The cg CLI reads the same run records as these tools. To inspect many runs without pulling their output into context, write a shell script that calls cg meta, cg grep, or cg wait, all of which print JSON, and have it print only a summary. Runs live under the capture_root that cg_info reports. A sandboxed shell often resolves a different TMPDIR than this server, so set TMPDIR to the parent of capture_root for those commands. Start runs with cg_run or cg_run_many; a sandboxed shell usually cannot write under this server's capture root.`
 
+// runOrigin is what the server stamps on every run it starts. Supervisor is the cg executable
+// recorded at server start. Only tests leave it nil; see model.SuperviseOptions.
+type runOrigin struct {
+	SessionID  string
+	Supervisor *model.ExecIdentity
+}
+
 // newServer constructs a fully-registered MCP server. Pulled out so tests can
 // drive it without going through stdio. startedAt is the server's start time
 // and sessionID names this server process; both are reported by cg_info and
-// fixed for the process's lifetime.
-func newServer(v string, startedAt time.Time, sessionID string, g *gate) *mcpsdk.Server {
+// fixed for the process's lifetime. supervisor is the cg executable recorded at start, checked
+// before every spawn.
+func newServer(v string, startedAt time.Time, sessionID string, g *gate, supervisor *model.ExecIdentity) *mcpsdk.Server {
 	s := mcpsdk.NewServer(&mcpsdk.Implementation{Name: "cg", Version: v}, &mcpsdk.ServerOptions{Instructions: serverInstructions})
 	reg := newRunRegistry()
-	registerRun(s, reg, g, sessionID)
-	registerRunMany(s, reg, g, sessionID)
+	origin := runOrigin{SessionID: sessionID, Supervisor: supervisor}
+	registerRun(s, reg, g, origin)
+	registerRunMany(s, reg, g, origin)
 	registerList(s)
 	registerMeta(s)
 	registerStats(s)

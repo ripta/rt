@@ -86,7 +86,7 @@ func TestRunManyBoundsReject(t *testing.T) {
 
 	for _, test := range runManyBoundsTests {
 		t.Run(test.Name, func(t *testing.T) {
-			_, _, err := handleRunMany(context.Background(), nil, nil, nil, "", test.In)
+			_, _, err := handleRunMany(context.Background(), nil, nil, nil, runOrigin{}, test.In)
 			if err == nil {
 				t.Fatalf("expected validation error, got nil")
 			}
@@ -121,7 +121,7 @@ func assertCaptureRootEmpty(t *testing.T) {
 func TestRunManyParallelismClampsToPoolSize(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 
-	_, out, err := handleRunMany(context.Background(), nil, nil, nil, "", runManyInput{
+	_, out, err := handleRunMany(context.Background(), nil, nil, nil, runOrigin{}, runManyInput{
 		Commands:    [][]string{{"echo", "clamp"}},
 		Repeat:      2,
 		Parallelism: 32,
@@ -143,7 +143,7 @@ func TestRunManyGateDenialSpawnsNothing(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 
 	g := newTestGate(t, "version: 1\nallow:\n  - prefix: [echo]\ndeny:\n  - prefix: [rm]\n", false)
-	_, _, err := handleRunMany(context.Background(), nil, g, nil, "", runManyInput{
+	_, _, err := handleRunMany(context.Background(), nil, g, nil, runOrigin{}, runManyInput{
 		Commands: [][]string{{"echo", "hi"}, {"rm", "-rf", "x"}},
 	})
 	if err == nil {
@@ -159,7 +159,7 @@ func TestRunManyGateDenialSpawnsNothing(t *testing.T) {
 func TestRunManySyncSummary(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 
-	_, out, err := handleRunMany(context.Background(), nil, nil, nil, "", runManyInput{
+	_, out, err := handleRunMany(context.Background(), nil, nil, nil, runOrigin{}, runManyInput{
 		Commands: [][]string{
 			{"echo", "fine"},
 			{"sh", "-c", "echo boom >&2; exit 3"},
@@ -208,7 +208,7 @@ func TestRunManyExcerptBudget(t *testing.T) {
 	// Each failure's stdout tail alone covers the whole pool-wide budget, so
 	// the first record spends it and the second carries the omitted marker.
 	excerpt := maxExcerptBytes
-	_, out, err := handleRunMany(context.Background(), nil, nil, nil, "", runManyInput{
+	_, out, err := handleRunMany(context.Background(), nil, nil, nil, runOrigin{}, runManyInput{
 		Commands:     [][]string{{"sh", "-c", "head -c 20000 /dev/zero; exit 1"}},
 		Repeat:       2,
 		ExcerptBytes: &excerpt,
@@ -238,7 +238,7 @@ func TestRunManyExcerptDisabled(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 
 	zero := 0
-	_, out, err := handleRunMany(context.Background(), nil, nil, nil, "", runManyInput{
+	_, out, err := handleRunMany(context.Background(), nil, nil, nil, runOrigin{}, runManyInput{
 		Commands:     [][]string{{"sh", "-c", "echo boom; exit 1"}},
 		ExcerptBytes: &zero,
 	})
@@ -256,7 +256,7 @@ func TestRunManyExcerptDisabled(t *testing.T) {
 func TestRunManyTimeoutPartialSummary(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 
-	_, out, err := handleRunMany(context.Background(), nil, nil, nil, "", runManyInput{
+	_, out, err := handleRunMany(context.Background(), nil, nil, nil, runOrigin{}, runManyInput{
 		Commands:      [][]string{{"sleep", "1"}},
 		WaitTimeoutMs: 150,
 	})
@@ -294,7 +294,7 @@ func TestRunManyAsyncThenWait(t *testing.T) {
 
 	reg := newRunRegistry()
 	async := false
-	_, started, err := handleRunMany(context.Background(), reg, nil, nil, "", runManyInput{
+	_, started, err := handleRunMany(context.Background(), reg, nil, nil, runOrigin{}, runManyInput{
 		Commands: [][]string{{"echo", "round-trip"}},
 		Wait:     &async,
 	})
@@ -327,7 +327,7 @@ func TestRunManyThroughMCPLayer(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 
 	ctx := context.Background()
-	server := newServer("test", time.Now(), "", &gate{blindlyAllow: true})
+	server := newServer("test", time.Now(), "", &gate{blindlyAllow: true}, nil)
 
 	serverTransport, clientTransport := mcpsdk.NewInMemoryTransports()
 	ss, err := server.Connect(ctx, serverTransport, nil)
@@ -379,7 +379,7 @@ func TestRunManyThroughMCPLayer(t *testing.T) {
 func TestHandleRunManyThreadsSessionID(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 
-	_, out, err := handleRunMany(context.Background(), nil, nil, nil, "SESS", runManyInput{
+	_, out, err := handleRunMany(context.Background(), nil, nil, nil, runOrigin{SessionID: "SESS"}, runManyInput{
 		Commands: [][]string{{"echo", "one"}, {"echo", "two"}},
 	})
 	if err != nil {
