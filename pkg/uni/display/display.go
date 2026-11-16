@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strings"
 	"unicode"
 
 	"golang.org/x/text/unicode/runenames"
@@ -95,6 +96,21 @@ func Default() *Config {
 	}
 
 	return cfg
+}
+
+// ColumnNames returns the sorted names of all available output columns.
+func ColumnNames() []string {
+	return slices.Sorted(maps.Keys(displayFuncs))
+}
+
+// GroupNames returns the sorted names of all available column groups.
+func GroupNames() []string {
+	return slices.Sorted(maps.Keys(displayGroups))
+}
+
+// OutputFlagUsage describes the --output flag, listing every column and group.
+func OutputFlagUsage() string {
+	return fmt.Sprintf("Output columns or groups; columns: %s; groups: %s", strings.Join(ColumnNames(), ", "), strings.Join(GroupNames(), ", "))
 }
 
 func DefaultColumns() []string {

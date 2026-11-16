@@ -31,7 +31,7 @@ func newDescribeCommand() *cobra.Command {
 		RunE:  d.run,
 	}
 
-	c.Flags().StringSliceVarP(&d.output, "output", "o", d.output, "Output columns")
+	c.Flags().StringSliceVarP(&d.output, "output", "o", d.output, display.OutputFlagUsage())
 	c.Flags().StringVarP(&d.table, "table", "t", d.table, "Unicode Table version")
 	return &c
 }
