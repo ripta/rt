@@ -2,10 +2,12 @@ package approvecmd
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/ripta/rt/pkg/cg/approve"
+	"github.com/ripta/rt/pkg/cg/model"
 )
 
 const wrapperRules = "version: 1\nallow:\n  - wrapper: [nice, -n, \"19\"]\n  - prefix: [echo]\n  - wrapper: [watch]\n"
@@ -171,5 +173,53 @@ func TestRuleSectionForTieRefusal(t *testing.T) {
 	deny := approve.Verdict{Decision: approve.DecisionRefuse, Rule: rule, Step: approve.StepDeny}
 	if got := ruleSectionFor(deny); got != "deny" {
 		t.Errorf("section of a deny = %q, want deny", got)
+	}
+}
+
+// TestCheckListsAPathRuleDecidingOverABareRuleOnAWrappedLayer pins the pinned-layer risk: the path rule
+// decides the inner layer and the bare rule shows as outranked.
+func TestCheckListsAPathRuleDecidingOverABareRuleOnAWrappedLayer(t *testing.T) {
+	root := t.TempDir()
+
+	resolved, _ := model.ResolveCommand([]string{"echo", "hi"}, root)
+	path := resolved.RulePath()
+	if path == "" || path == "echo" {
+		t.Skip("echo does not resolve to a path on this host")
+	}
+
+	rules := fmt.Sprintf("version: 1\nallow:\n  - wrapper: [nice]\n  - prefix: [echo, hi]\n  - prefix: [%s, hi]\n", path)
+
+	out, err := runCheck(t, root, rules, "--", "nice", "echo", "hi")
+	if exitCode(t, err) != 0 {
+		t.Fatalf("exit code = %d, want 0; out = %s", exitCode(t, err), out)
+	}
+
+	for _, want := range []string{
+		"wrapper [nice] over prefix [" + path + ", hi]",
+		"deciding  prefix [" + path + ", hi] (count 2, prefix, path, project)",
+		"outranked prefix [echo, hi] (count 2, prefix, bare, project)",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output missing %q:\n%s", want, out)
+		}
+	}
+
+	jsonOut, _ := runCheck(t, root, rules, "--output", "json", "--", "nice", "echo", "hi")
+
+	var res checkResult
+	if jsonErr := json.Unmarshal([]byte(jsonOut), &res); jsonErr != nil {
+		t.Fatalf("unmarshalling %q: %v", jsonOut, jsonErr)
+	}
+	if len(res.Chain) != 2 {
+		t.Fatalf("chain length = %d, want 2: %s", len(res.Chain), jsonOut)
+	}
+
+	if len(res.Matches) != 1 || len(res.Matches[0].Wrappers) != 1 || len(res.Matches[0].Inner) != 1 || !res.Matches[0].Deciding {
+		t.Errorf("top matches = %+v, want one deciding chain", res.Matches)
+	}
+
+	inner := res.Chain[1].Matches
+	if len(inner) != 2 || !inner[0].Deciding || inner[0].Form != "path" || inner[1].Deciding || inner[1].Form != "bare" {
+		t.Errorf("inner matches = %+v, want the path rule deciding over the bare rule", inner)
 	}
 }

@@ -692,6 +692,17 @@ var rankEvalTests = []rankEvalTest{
 		wantDeciding: []string{`exact [make]`},
 		wantChain:    2,
 	},
+	{
+		name:        "a wrapper that lacks the env permit refuses and names itself",
+		allow:       []ruleSpec{wr("nice"), px("make").permits("LD_PRELOAD")},
+		argv:        []string{"nice", "make"},
+		env:         map[string]string{"LD_PRELOAD": "y.so"},
+		want:        DecisionRefuse,
+		wantBadEnvs: []string{"LD_PRELOAD"},
+		wantRule:    `wrapper [nice]`,
+		wantStep:    StepEnvRefusal,
+		wantChain:   1,
+	},
 }
 
 func TestEvaluateRanking(t *testing.T) {
@@ -708,6 +719,15 @@ func TestEvaluateRanking(t *testing.T) {
 func evalRankTest(t *testing.T, tt rankEvalTest, allow, deny, restrict []int) Verdict {
 	t.Helper()
 
+	rs, subj, resolve := rankFixture(t, tt, allow, deny, restrict)
+
+	return rs.Evaluate(subj, tt.env, resolve)
+}
+
+// rankFixture builds the ruleset, subject, and resolver of a case, with the lists in the given orders.
+func rankFixture(t *testing.T, tt rankEvalTest, allow, deny, restrict []int) (*Ruleset, Subject, Resolver) {
+	t.Helper()
+
 	rs := &Ruleset{
 		Mode:     ModeEnforce,
 		Deny:     buildRules(t, tt.deny, deny),
@@ -722,7 +742,7 @@ func evalRankTest(t *testing.T, tt rankEvalTest, allow, deny, restrict []int) Ve
 
 	var calls []string
 
-	return rs.Evaluate(subj, tt.env, stubResolver(pathsOrDefault(tt.paths), &calls))
+	return rs, subj, stubResolver(pathsOrDefault(tt.paths), &calls)
 }
 
 func pathsOrDefault(paths map[string]string) map[string]string {

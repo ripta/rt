@@ -206,7 +206,15 @@ func (rs *Ruleset) Evaluate(subj Subject, env map[string]string, resolve Resolve
 		return Verdict{Decision: DecisionRefuse}
 	}
 
-	e := &evaluation{rs: rs, env: env, resolve: resolve, top: subj, layers: make(map[int]*layer)}
+	return rs.newEvaluation(subj, env, resolve).run()
+}
+
+func (rs *Ruleset) newEvaluation(subj Subject, env map[string]string, resolve Resolver) *evaluation {
+	return &evaluation{rs: rs, env: env, resolve: resolve, top: subj, layers: make(map[int]*layer)}
+}
+
+// run evaluates the typed command: the deny hoist first, then the allow tier from the top layer.
+func (e *evaluation) run() Verdict {
 	if v, ok := e.hoistDeny(); ok {
 		return v
 	}
@@ -261,6 +269,10 @@ type wrapperMatch struct {
 //
 // members is non-empty only when the layer settled on a matching allow. It holds the ranks the layer
 // competes at inside an outer peel.
+//
+// chainInner is set on a peel with members. It is the inner layer's deciding set, the rules the chain
+// stands for. It differs from deciding when the peel refused because a wrapper lacks the env permit,
+// since deciding then names that wrapper alone.
 type settled struct {
 	offset     int
 	decision   Decision
@@ -273,6 +285,7 @@ type settled struct {
 	deciding   []*Rule
 	candidates []*Rule
 	members    []rank
+	chainInner []*Rule
 
 	wrappers []*Rule
 	next     *settled
@@ -564,19 +577,34 @@ func rankedRules(rules []*Rule) []ranked {
 	return out
 }
 
-func (e *evaluation) settleLayer(l *layer) *settled {
-	matched := matching(e.rs.Allow, l)
+// layerPeel settles the peel the allow tier takes through a layer, or returns nil when it takes none.
+func (e *evaluation) layerPeel(l *layer) *settled {
+	wrappers, n := l.allowPeel()
+	if len(wrappers) == 0 {
+		return nil
+	}
+
+	return e.peelOf(l, wrappers, e.settle(l.offset+n))
+}
+
+// decidingAllows ranks the matching allows of a layer against the chain its peel settles. It returns
+// the ordinary allows in the deciding set, and whether the peel is in it too.
+//
+// Both the verdict and the explain call read it, so the listing `cg check` prints cannot rank
+// differently from the verdict. The matching list is an argument, never a result, so the code that
+// serves the gate is not handed the rules the ranking left out.
+func decidingAllows(matched []*Rule, peel *settled) (tied []*Rule, chainIn bool) {
 	ordinary := decidingRules(rankedRules(matched))
-
-	var peel *settled
-	if wrappers, n := l.allowPeel(); len(wrappers) > 0 {
-		peel = e.peelOf(l, wrappers, e.settle(l.offset+n))
+	if peel == nil || len(peel.members) == 0 {
+		return ordinary, false
 	}
 
-	tied, chainIn := ordinary, false
-	if peel != nil && len(peel.members) > 0 {
-		tied, chainIn = rankAgainstChain(matched, ordinary, peel.members)
-	}
+	return rankAgainstChain(matched, ordinary, peel.members)
+}
+
+func (e *evaluation) settleLayer(l *layer) *settled {
+	peel := e.layerPeel(l)
+	tied, chainIn := decidingAllows(matching(e.rs.Allow, l), peel)
 
 	switch {
 	case len(tied) > 0 && chainIn:
@@ -649,6 +677,7 @@ func (e *evaluation) peelOf(l *layer, wrappers []*Rule, inner *settled) *settled
 
 	if len(inner.members) > 0 {
 		s.members = chainMembers(wrappers, inner.members)
+		s.chainInner = inner.deciding
 	}
 
 	switch {
