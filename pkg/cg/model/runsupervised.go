@@ -64,9 +64,10 @@ type SuperviseOptions struct {
 // detached `cg supervise-run` process whose lifetime matches the run's.
 // stdout and stderr are written to $TMPDIR/cg/<ID>/{stdout,stderr}.
 //
-// The supervisor execs opts.Resolved.ExecPath, the canonical path, while
-// keeping args[0] as the child's argv[0], so a fresh PATH lookup at exec time
-// cannot select a different file than the one the approval gate matched.
+// The supervisor execs opts.Resolved.SpawnPath, the resolved path, while keeping
+// args[0] as the child's argv[0], so a fresh PATH lookup at exec time cannot select a
+// different file than the one the approval gate matched. Just before the spawn it
+// checks that the resolved path still evaluates to the canonical path the gate saw.
 //
 // The supervisor runs in its own session courtesy Setsid, so the caller's exit
 // cannot signal it. Done is driven by EOF on the supervisor's status pipe,

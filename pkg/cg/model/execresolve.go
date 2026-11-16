@@ -10,8 +10,9 @@ import (
 
 // Resolution is the executable identity cg derives from a command's argv[0]
 // before it is approved and execed. The approval gate matches against the
-// canonical form and the supervisor execs the same path, so the policy decision
-// and the execution agree on which file runs.
+// canonical form. The supervisor execs the resolved path and checks that it still
+// evaluates to that canonical path, so the policy decision and the execution agree
+// on which file runs.
 type Resolution struct {
 	// Argv is the original command, unchanged.
 	Argv []string
@@ -130,9 +131,9 @@ func (r *Resolution) RulePath() string {
 	return r.ExecPath()
 }
 
-// ExecPath is the path the supervisor execs: the canonical path when available, then
-// the resolved path, falling back to the original argv[0] so a command that
-// could not be resolved still surfaces its start failure through exec.
+// ExecPath is the canonical path when available, then the resolved path, falling
+// back to the original argv[0] so a command that could not be resolved still
+// surfaces its start failure through exec.
 func (r *Resolution) ExecPath() string {
 	if r == nil {
 		return ""
@@ -147,4 +148,40 @@ func (r *Resolution) ExecPath() string {
 	default:
 		return ""
 	}
+}
+
+// SpawnPath is the path the supervisor execs: the resolved path when there is one, and
+// ExecPath otherwise. A program that finds its own files from the path it was exec'd
+// through, such as a Python venv interpreter linked to its base interpreter, only
+// works when that path is the one the user typed. Execing the symlink-evaluated path
+// would hand it the base install.
+func (r *Resolution) SpawnPath() string {
+	if r != nil && r.Resolved != "" {
+		return r.Resolved
+	}
+
+	return r.ExecPath()
+}
+
+// VerifyCanonical checks that the resolved path still evaluates to the canonical path the
+// approval gate matched. Execing the resolved path gives up the pin that execing the
+// canonical path had, so a symlink retargeted after approval would otherwise run a file
+// nobody judged. It is a check made just before the spawn, so a retarget in the window
+// between the check and the exec is not caught. A resolution without both paths has
+// nothing to compare.
+func (r *Resolution) VerifyCanonical() error {
+	if r == nil || r.Resolved == "" || r.Canonical == "" {
+		return nil
+	}
+
+	now, err := filepath.EvalSymlinks(r.Resolved)
+	if err != nil {
+		return fmt.Errorf("re-checking %s before starting it: %w", r.Resolved, err)
+	}
+	if now != r.Canonical {
+		return fmt.Errorf("%s changed since it was approved: it resolved to %s then and resolves to %s now",
+			r.Resolved, r.Canonical, now)
+	}
+
+	return nil
 }
