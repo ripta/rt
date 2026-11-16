@@ -22,7 +22,7 @@
           version = self.shortRev or self.dirtyShortRev or "unknown";
           src = self;
 
-          vendorHash = "sha256-UUKljY+JgEcRdAYa9DfYr7GMuExKCOkzusMy/FYTBmY=";
+          vendorHash = "sha256-kAEplslUsD360h3uM5uDJt3g3L4CU6/dNP0OCHjwHFs=";
 
           subPackages = [ "hypercmd/rt" ];
 
