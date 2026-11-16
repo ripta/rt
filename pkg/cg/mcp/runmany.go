@@ -102,6 +102,7 @@ func registerRunMany(s *mcpsdk.Server, reg *runRegistry, g *gate, sessionID stri
 	mcpsdk.AddTool(s, &mcpsdk.Tool{
 		Name:        "cg_run_many",
 		Description: "Run a flat pool of commands: each command runs repeat times, at most parallelism at once, with on_error deciding what a failure does to the rest. Returns the pool ID and a summary with per-run IDs; failed runs carry tail excerpts. Every run is an ordinary capture run for cg_meta/cg_stdout/cg_grep drill-down, and cg_wait on the pool ID aggregates. Not a workflow engine: no dependencies between runs, no conditionals, no per-run fallback. Set wait_timeout_auto to size the wait from earlier pools. The response reports wait_timeout_ms_used. A timed_out response also carries elapsed_ms and, when earlier runs exist, history.",
+		InputSchema: requiredInputSchema[runManyInput](),
 	}, func(ctx context.Context, req *mcpsdk.CallToolRequest, in runManyInput) (*mcpsdk.CallToolResult, runManyOutput, error) {
 		return handleRunMany(ctx, reg, g, req, sessionID, in)
 	})
