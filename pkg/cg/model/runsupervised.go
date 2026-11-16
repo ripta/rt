@@ -107,7 +107,7 @@ func RunSupervised(args []string, opts SuperviseOptions) (*CaptureRun, error) {
 
 	supervisor := opts.Supervisor
 	if supervisor == nil {
-		supervisor, err = CaptureExecIdentity()
+		supervisor, err = CaptureExecIdentity(nil)
 		if err != nil {
 			return failStart(err)
 		}

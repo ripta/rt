@@ -5,9 +5,12 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/spf13/cobra"
 )
 
 // copyTestBinary copies the running test binary into a temp dir and returns the copy's path. The
@@ -246,5 +249,61 @@ func TestPoolSpecSupervisorAbsentRunsAsBefore(t *testing.T) {
 	}
 	if rec := readManifest(t, dir).Runs[0]; rec.Status != PoolRunFinished {
 		t.Errorf("member = %+v, want finished", rec)
+	}
+}
+
+// TestRunSupervisedThroughAMountedCommand covers a server started as `rt cg mcp`. The multi-call
+// binary knows the supervisors only under its `cg` subcommand, so the spawn must carry that
+// prefix. It cannot show that the real rt root resolves the prefixed argv.
+func TestRunSupervisedThroughAMountedCommand(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	id := newTestIdentity(t, copyTestBinary(t, "rt"))
+	id.Prefix = []string{"cg"}
+
+	run, err := RunSupervised([]string{"echo", "hello"}, SuperviseOptions{Supervisor: id})
+	if err != nil {
+		t.Fatalf("RunSupervised: %v", err)
+	}
+	waitDone(t, run, 5*time.Second)
+
+	out, err := os.ReadFile(filepath.Join(run.Dir, "stdout"))
+	if err != nil {
+		t.Fatalf("read stdout: %v", err)
+	}
+	if string(out) != "hello\n" {
+		t.Errorf("stdout = %q, want %q", out, "hello\n")
+	}
+}
+
+type commandPrefixTest struct {
+	Name   string
+	Path   []string
+	Prefix []string
+}
+
+var commandPrefixTests = []commandPrefixTest{
+	{Name: "standalone cg", Path: []string{"cg", "mcp"}, Prefix: nil},
+	{Name: "mounted under rt", Path: []string{"rt", "cg", "mcp"}, Prefix: []string{"cg"}},
+	{Name: "mounted deeper", Path: []string{"tool", "a", "cg", "mcp"}, Prefix: []string{"a", "cg"}},
+}
+
+func TestCommandPrefix(t *testing.T) {
+	for _, tt := range commandPrefixTests {
+		t.Run(tt.Name, func(t *testing.T) {
+			var parent *cobra.Command
+			for _, name := range tt.Path[:len(tt.Path)-1] {
+				c := &cobra.Command{Use: name}
+				if parent != nil {
+					parent.AddCommand(c)
+				}
+				parent = c
+			}
+			leaf := &cobra.Command{Use: tt.Path[len(tt.Path)-1]}
+			parent.AddCommand(leaf)
+
+			if got := CommandPrefix(leaf); !slices.Equal(got, tt.Prefix) {
+				t.Errorf("CommandPrefix = %q, want %q", got, tt.Prefix)
+			}
+		})
 	}
 }

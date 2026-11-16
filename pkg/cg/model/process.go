@@ -80,14 +80,15 @@ func tiePoolPid(dir string, pid int) error {
 	return nil
 }
 
-// isSupervisorArgv reports whether argv is `<exe> <sub> <dir>`, comparing dir after symlink
-// resolution because the server and the cancelling shell may see the temp root through different
-// paths. argv[0] is not compared: the multi-call binary runs under several names.
+// isSupervisorArgv reports whether argv is `<exe> [<mount>...] <sub> <dir>`, comparing dir after
+// symlink resolution because the server and the cancelling shell may see the temp root through
+// different paths. argv[0] is not compared: the multi-call binary runs under several names. The
+// mount words are not compared either, since they depend on where the binary mounts cg.
 func isSupervisorArgv(argv []string, sub, dir string) bool {
-	if len(argv) != 3 || argv[1] != sub {
+	if len(argv) < 3 || argv[len(argv)-2] != sub {
 		return false
 	}
-	return sameDir(argv[2], dir)
+	return sameDir(argv[len(argv)-1], dir)
 }
 
 func sameDir(a, b string) bool {

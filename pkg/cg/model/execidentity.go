@@ -9,6 +9,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
+	"strings"
+
+	"github.com/spf13/cobra"
 )
 
 // ErrExecutableChanged reports that the cg executable on disk is no longer the one the server
@@ -27,15 +31,43 @@ type ExecIdentity struct {
 	Path   string `json:"path"`
 	Target string `json:"target"`
 	SHA256 string `json:"sha256"`
+
+	// Prefix names the path of the cg command below the executable. It is empty for a standalone
+	// cg and `cg` when the multi-call binary mounts cg as `rt cg`.
+	Prefix []string `json:"prefix,omitempty"`
 }
 
-// CaptureExecIdentity records the identity of the running cg executable.
-func CaptureExecIdentity() (*ExecIdentity, error) {
+// CommandPrefix returns the command path from the executable down to the cg command that owns
+// cmd, without the executable's own name. The supervisors are subcommands of cg. A multi-call
+// binary that mounts cg under another command only knows them behind that mount.
+func CommandPrefix(cmd *cobra.Command) []string {
+	parent := cmd.Parent()
+	if parent == nil {
+		return nil
+	}
+
+	path := strings.Fields(parent.CommandPath())
+	if len(path) <= 1 {
+		return nil
+	}
+	return path[1:]
+}
+
+// CaptureExecIdentity records the identity of the running cg executable. prefix is the cg command
+// path below the executable. See CommandPrefix.
+func CaptureExecIdentity(prefix []string) (*ExecIdentity, error) {
 	exe, err := os.Executable()
 	if err != nil {
 		return nil, fmt.Errorf("locating cg executable: %w", err)
 	}
-	return NewExecIdentity(exe)
+
+	id, err := NewExecIdentity(exe)
+	if err != nil {
+		return nil, err
+	}
+
+	id.Prefix = prefix
+	return id, nil
 }
 
 // NewExecIdentity records the identity of the executable at path. Tests use it to pin a copied
@@ -69,9 +101,10 @@ func changedError(format string, args ...any) error {
 }
 
 // command builds the supervisor command. It execs the verified target and keeps Path as argv[0],
-// because the multi-call binary picks its command from the name it was invoked by.
+// because the multi-call binary picks its command from the name it was invoked by. Prefix goes
+// between argv[0] and the arguments.
 func (id *ExecIdentity) command(args ...string) *exec.Cmd {
-	cmd := exec.Command(id.Target, args...)
+	cmd := exec.Command(id.Target, append(slices.Clone(id.Prefix), args...)...)
 	cmd.Args[0] = id.Path
 	return cmd
 }

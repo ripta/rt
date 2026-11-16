@@ -66,7 +66,7 @@ func runServer(cmd *cobra.Command, opts *serverOptions) error {
 		return fmt.Errorf("generating session id: %w", err)
 	}
 
-	supervisor, err := model.CaptureExecIdentity()
+	supervisor, err := model.CaptureExecIdentity(model.CommandPrefix(cmd))
 	if err != nil {
 		return fmt.Errorf("recording the cg executable: %w", err)
 	}

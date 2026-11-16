@@ -77,6 +77,7 @@ type supervisorArgvTest struct {
 var supervisorArgvTests = []supervisorArgvTest{
 	{Name: "run", Argv: []string{"/bin/cg", "supervise-run", "/tmp/x"}, Sub: "supervise-run", Want: true},
 	{Name: "multi-call name", Argv: []string{"rt", "supervise-run", "/tmp/x"}, Sub: "supervise-run", Want: true},
+	{Name: "mounted prefix", Argv: []string{"rt", "cg", "supervise-run", "/tmp/x"}, Sub: "supervise-run", Want: true},
 	{Name: "other dir", Argv: []string{"cg", "supervise-run", "/tmp/y"}, Sub: "supervise-run", Want: false},
 	{Name: "other subcommand", Argv: []string{"cg", "supervise-pool", "/tmp/x"}, Sub: "supervise-run", Want: false},
 	{Name: "extra argument", Argv: []string{"cg", "supervise-run", "/tmp/x", "/tmp/y"}, Sub: "supervise-run", Want: false},

@@ -46,7 +46,7 @@ func PoolSupervised(spec *PoolSpec) (*PoolRun, error) {
 
 	supervisor := spec.Supervisor
 	if supervisor == nil {
-		supervisor, err = CaptureExecIdentity()
+		supervisor, err = CaptureExecIdentity(nil)
 		if err != nil {
 			return failStart(err)
 		}
