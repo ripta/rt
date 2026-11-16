@@ -879,13 +879,16 @@ type outranksTest struct {
 }
 
 var outranksTests = []outranksTest{
+	{name: "higher count wins", a: rank{count: 3}, b: rank{count: 2, shape: shapeExact, path: true}, ab: true},
 	{name: "kind wins and form ties", a: rank{count: 2, shape: shapeExact, path: true}, b: rank{count: 2, shape: shapePrefix, path: true}, ab: true},
 	{name: "global over builtin", a: rank{count: 1, layer: layerGlobal}, b: rank{count: 1, layer: layerBuiltin}, ab: true},
 	{name: "layer never overrides a kind", a: rank{count: 2, shape: shapePrefix, layer: layerProject}, b: rank{count: 2, shape: shapeExact, layer: layerGlobal}, ba: true},
 }
 
-// TestOutranks pins the pairs the Evaluate cases in rankEvalTests do not reach. Those are a kind win
-// when the form ties, a global rule over a builtin one, and a layer that never overrides a kind.
+// TestOutranks pins the pairs the Evaluate cases in rankEvalTests do not reach. Those are a higher
+// count over a more specific kind and form, which no Evaluate case can build because an exact rule
+// matches only an argv as long as itself, a kind win when the form ties, a global rule over a
+// builtin one, and a layer that never overrides a kind.
 func TestOutranks(t *testing.T) {
 	t.Parallel()
 

@@ -185,12 +185,15 @@ func (g *gate) check(call approvalCall) (gateOutcome, error) {
 // handed. The top layer is never pinned, since the supervisor already runs the path the gate
 // resolved.
 //
-// An inner layer is pinned to the path it resolved to when every rule of the set that settled
-// it is path-form. On a peeled layer that set is the chosen wrapper rules. A bare-name rule
-// accepts any binary of that name, so a layer it settles keeps the wrapper's own lookup. A
-// mixed-form tie is unpinned. So is a tie of a chain and an ordinary allow unless the ordinary
-// rules and the wrapper rules are all path-form. A layer still prompting was approved at the form, which showed its
-// resolved path, so that layer is pinned to the path shown.
+// An inner layer is pinned to the path it resolved to when every rule of the set that settled it is
+// path-form. On a peeled layer that set is the chosen wrapper rules. A bare-name rule accepts any
+// binary of that name, so a layer it settles keeps the wrapper's own lookup.
+//
+// A mixed-form tie is unpinned. So is a tie of a chain and an ordinary allow, unless the ordinary
+// rules and the wrapper rules are all path-form.
+//
+// A layer still prompting was approved at the form, which showed its resolved path, so that layer
+// is pinned to the path shown.
 func pinnedPaths(verdicts []approve.Verdict) []map[int]string {
 	out := make([]map[int]string, len(verdicts))
 
