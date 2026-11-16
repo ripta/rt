@@ -116,7 +116,7 @@ type ruleInfo struct {
 // sandboxInfo describes the sandbox a command would run under. Applicable is false when the
 // definition has no block for this platform, and a run is then refused. Class is the load probe's
 // classification, and ProbeStderr the launcher's message behind it. The probe ran in this process, so
-// a nesting result describes the shell cg check runs in.
+// a nesting result describes the shell cg check runs in, not the server. ProbeScope says so.
 type sandboxInfo struct {
 	Name             string   `json:"name"`
 	File             string   `json:"file"`
@@ -129,7 +129,12 @@ type sandboxInfo struct {
 	Params           []string `json:"params,omitempty"`
 	Class            string   `json:"class,omitempty"`
 	ProbeStderr      string   `json:"probe_stderr,omitempty"`
+	ProbeScope       string   `json:"probe_scope,omitempty"`
 }
+
+// probeScopeShell labels a probe result as the state of the shell cg check runs in. The server probes
+// its own process at start, and a shell inside a sandbox does not mean the server is.
+const probeScopeShell = "shell"
 
 // sandboxInfoFor describes the sandbox a verdict runs under, or returns nil for none.
 func sandboxInfoFor(rs *approve.Ruleset, v approve.Verdict) *sandboxInfo {
@@ -155,6 +160,7 @@ func sandboxInfoFor(rs *approve.Ruleset, v approve.Verdict) *sandboxInfo {
 		info.Params = sb.Seatbelt.Defines
 		info.Class = string(sb.Seatbelt.Class)
 		info.ProbeStderr = sb.Seatbelt.ProbeStderr
+		info.ProbeScope = probeScopeShell
 	}
 
 	return info
@@ -494,8 +500,11 @@ func writeSandboxText(w io.Writer, sb *sandboxInfo) {
 		return
 	}
 
-	fmt.Fprintf(w, "  sandbox: %s (seatbelt profile %s, already_sandboxed: %s, probe: %s)\n", sb.Name, sb.Profile, sb.AlreadySandboxed, sb.Class)
+	fmt.Fprintf(w, "  sandbox: %s (seatbelt profile %s, already_sandboxed: %s, probe in this shell: %s)\n", sb.Name, sb.Profile, sb.AlreadySandboxed, sb.Class)
 
+	if sb.Class == string(model.SandboxNested) {
+		fmt.Fprintln(w, "    this shell is inside a sandbox. The server checks its own state at start, and that can differ.")
+	}
 	if sb.Class != string(model.SandboxApplies) {
 		fmt.Fprintf(w, "    probe stderr: %s\n", sb.ProbeStderr)
 	}

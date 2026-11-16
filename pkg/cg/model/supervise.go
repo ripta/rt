@@ -46,14 +46,14 @@ type SuperviseSpec struct {
 	Parallelism int `json:"parallelism,omitempty"`
 }
 
-// recorded returns the command and sandbox name the run's records carry. A sandboxed run records the
-// command the agent typed, not the sandbox-exec argv that launches it.
-func (s *SuperviseSpec) recorded() ([]string, string) {
+// recorded returns the command, sandbox name, and skip reason the run's records carry. A sandboxed
+// run records the command the agent typed, not the sandbox-exec argv that launches it.
+func (s *SuperviseSpec) recorded() ([]string, string, string) {
 	if s.Sandbox != nil {
-		return s.Sandbox.Command, s.Sandbox.Name
+		return s.Sandbox.Command, s.Sandbox.Name, s.Sandbox.Skipped
 	}
 
-	return s.Argv, ""
+	return s.Argv, "", ""
 }
 
 // resolution reconstructs the Resolution the server computed, for ExecPath and
@@ -152,7 +152,7 @@ func superviseRun(dir string, in io.Reader, out io.Writer) error {
 	cwd := effectiveCwd(spec.Cwd)
 	resolved := spec.resolution()
 
-	command, sandbox := spec.recorded()
+	command, sandbox, skipped := spec.recorded()
 
 	// The server pre-created the capture files, so open without O_CREATE: a
 	// mis-pointed run dir fails loudly instead of minting stray files.
@@ -213,7 +213,7 @@ func superviseRun(dir string, in io.Reader, out io.Writer) error {
 		if cgc != nil {
 			cgc.close()
 		}
-		info := RunInfo{ID: id, Command: command, Sandbox: sandbox, Cwd: cwd, Pool: spec.Pool, SessionID: spec.SessionID, StartedAt: start.UTC()}
+		info := RunInfo{ID: id, Command: command, Sandbox: sandbox, SandboxSkipped: skipped, Cwd: cwd, Pool: spec.Pool, SessionID: spec.SessionID, StartedAt: start.UTC()}
 		_ = WriteStartDebug(dir, buildStartDebug(info, spec.Env, resolved, err))
 		err = fmt.Errorf("starting child: %w", err)
 		writeAck(out, SuperviseAck{StartError: err.Error()})
@@ -221,7 +221,7 @@ func superviseRun(dir string, in io.Reader, out io.Writer) error {
 	}
 
 	_ = WritePidFile(dir, child.Process.Pid)
-	_ = WriteStartInfo(dir, &StartInfo{RunInfo: RunInfo{ID: id, Command: command, Sandbox: sandbox, Cwd: cwd, Pool: spec.Pool, SessionID: spec.SessionID, StartedAt: start.UTC()}})
+	_ = WriteStartInfo(dir, &StartInfo{RunInfo: RunInfo{ID: id, Command: command, Sandbox: sandbox, SandboxSkipped: skipped, Cwd: cwd, Pool: spec.Pool, SessionID: spec.SessionID, StartedAt: start.UTC()}})
 
 	writeAck(out, SuperviseAck{Started: true, Pid: child.Process.Pid})
 
@@ -239,7 +239,7 @@ func superviseRun(dir string, in io.Reader, out io.Writer) error {
 	}
 
 	meta := &Meta{
-		RunInfo:     RunInfo{ID: id, Command: command, Sandbox: sandbox, Cwd: cwd, Pool: spec.Pool, SessionID: spec.SessionID, StartedAt: start.UTC()},
+		RunInfo:     RunInfo{ID: id, Command: command, Sandbox: sandbox, SandboxSkipped: skipped, Cwd: cwd, Pool: spec.Pool, SessionID: spec.SessionID, StartedAt: start.UTC()},
 		FinishedAt:  start.Add(elapsed).UTC(),
 		DurationMs:  elapsed.Milliseconds(),
 		ExitCode:    ExitCodeFromError(waitErr),

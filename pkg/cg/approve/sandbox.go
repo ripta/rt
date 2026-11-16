@@ -87,6 +87,7 @@ func (sb *Sandbox) Spec(command []string, resolved *model.Resolution) (*model.Sa
 		Canonical: resolved.Canonical,
 		Profile:   sb.Seatbelt.Text,
 		Defines:   slices.Clone(sb.Seatbelt.Defines),
+		Class:     sb.Seatbelt.Class,
 	}, true
 }
 

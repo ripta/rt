@@ -168,12 +168,14 @@ func handleRunMany(ctx context.Context, reg *runRegistry, g *gate, req *mcpsdk.C
 
 	pinned := make(map[string]map[int]string, len(distinct))
 	sandboxes := make(map[string]*approve.Sandbox, len(distinct))
+	skips := make(map[string]string, len(distinct))
 	for i, argv := range distinct {
 		if i < len(outcome.Rewrites) {
 			pinned[model.ArgvKey(argv)] = outcome.Rewrites[i]
 		}
 		if sb := outcome.sandboxAt(i); sb != nil {
 			sandboxes[model.ArgvKey(argv)] = sb
+			skips[model.ArgvKey(argv)] = outcome.skipAt(i)
 		}
 	}
 
@@ -191,7 +193,7 @@ func handleRunMany(ctx context.Context, reg *runRegistry, g *gate, req *mcpsdk.C
 		key := model.ArgvKey(argv)
 
 		// A member's proxy variables ride on its own command, never in the pool's shared Env.
-		launch := newLaunch(argv, resolutions[key], pinned[key], nil, sandboxes[key])
+		launch := newLaunch(argv, resolutions[key], pinned[key], nil, sandboxes[key], skips[key])
 
 		pc := model.PoolCommand{Argv: launch.Argv, InnerExec: launch.InnerExec, Sandbox: launch.Sandbox, Env: launch.Env}
 		if launch.Resolved != nil {

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 
@@ -121,6 +122,24 @@ type gateOutcome struct {
 	// from the deciding rule, or nil for an unsandboxed command. A gate that checks nothing returns
 	// nil.
 	Sandboxes []*approve.Sandbox
+
+	// Skips runs parallel to Sandboxes. A non-empty entry says why the command runs without the
+	// profile of the sandbox its rule names, because cg is inside an outer sandbox.
+	Skips []string
+
+	// NestedApproved lists the commands whose nested sandbox the user agreed, at this round's prompt,
+	// to run without. It carries the answer from the round to the final outcome.
+	NestedApproved []int
+}
+
+// skipAt returns why the i-th command runs without its sandbox's profile, or empty when it applies
+// the profile or has no sandbox.
+func (o gateOutcome) skipAt(i int) string {
+	if i < len(o.Skips) {
+		return o.Skips[i]
+	}
+
+	return ""
 }
 
 // sandboxAt returns the sandbox the i-th command runs under.
@@ -145,9 +164,6 @@ func (g *gate) check(call approvalCall) (gateOutcome, error) {
 	if g == nil || (g.blindlyAllow && g.store == nil) {
 		return gateOutcome{}, nil
 	}
-	if g.blindlyAllow {
-		return g.checkBlindly(call)
-	}
 
 	var entry *pendingEntry
 	if call.State != "" {
@@ -158,94 +174,117 @@ func (g *gate) check(call approvalCall) (gateOutcome, error) {
 		}
 	}
 
-	var needs []int
-	verdicts := make([]approve.Verdict, len(call.Argvs))
-	for i := range call.Argvs {
-		v, err := g.evaluate(call, i)
-		if err != nil {
-			return gateOutcome{}, err
-		}
-
-		verdicts[i] = v
-		if v.Decision == approve.DecisionPrompt {
-			needs = append(needs, i)
-		}
+	needs, asks, verdicts, plans, err := g.evaluateAll(call)
+	if err != nil {
+		return gateOutcome{}, err
 	}
 
-	if len(needs) == 0 && entry == nil {
-		return g.permitted(call, verdicts)
+	if len(needs) == 0 && len(asks) == 0 && entry == nil {
+		return g.permitted(call, verdicts, plans, nil)
+	}
+	if len(asks) > 0 && !call.CanPrompt {
+		return gateOutcome{}, nestedFailClosedError(call.Tool, asks, plans)
 	}
 	if len(needs) > 0 && !call.CanPrompt {
 		return gateOutcome{}, g.failClosedError(call.Tool)
 	}
 	if entry == nil {
-		return g.request(call, needs, verdicts)
+		return g.request(call, needs, asks, verdicts, plans)
 	}
 
-	outcome, err := g.answer(call, entry, needs, verdicts)
+	outcome, err := g.answer(call, entry, needs, asks, verdicts, plans)
 	if err != nil {
 		return gateOutcome{}, err
+	}
+	if outcome.Pending != nil {
+		return outcome, nil
 	}
 
 	// A remembered rule may now decide a layer, and the pin follows the rule that decides it. So
 	// the commands are judged again against the rules as they stand after the answers.
-	for i := range call.Argvs {
-		if verdicts[i], err = g.evaluate(call, i); err != nil {
-			return gateOutcome{}, err
-		}
-	}
-	permitted, err := g.permitted(call, verdicts)
+	_, _, verdicts, plans, err = g.evaluateAll(call)
 	if err != nil {
 		return gateOutcome{}, err
 	}
-	outcome.Rewrites, outcome.Sandboxes = permitted.Rewrites, permitted.Sandboxes
+
+	permitted, err := g.permitted(call, verdicts, plans, outcome.NestedApproved)
+	if err != nil {
+		return gateOutcome{}, err
+	}
+	outcome.Rewrites, outcome.Sandboxes, outcome.Skips = permitted.Rewrites, permitted.Sandboxes, permitted.Skips
 
 	return outcome, nil
 }
 
-// checkBlindly is the gate under --blindly-allow, which forces allow-all. Nothing prompts and nothing
-// is denied. The allow tier still ranks, so a command whose deciding rule names a sandbox runs under
-// it. A tie of rules that disagree on the sandbox refuses, since no order may pick one.
-func (g *gate) checkBlindly(call approvalCall) (gateOutcome, error) {
-	verdicts := make([]approve.Verdict, len(call.Argvs))
+// evaluateAll judges every command in the call. needs are the commands that want a rule prompt, and
+// asks the commands whose sandbox wants a prompt before it is skipped. A command is never in both,
+// since a prompt-approved command has no rule and so no sandbox.
+func (g *gate) evaluateAll(call approvalCall) (needs, asks []int, verdicts []approve.Verdict, plans []sandboxPlan, err error) {
+	verdicts = make([]approve.Verdict, len(call.Argvs))
+	plans = make([]sandboxPlan, len(call.Argvs))
 
 	for i := range call.Argvs {
-		resolved := call.Resolutions[i]
-		subject := approve.Subject{Argv: call.Argvs[i], Canonical: resolved.CanonicalArgv(), Resolved: resolved.ResolvedArgv()}
-
-		v := g.store.Ruleset().EvaluateAllowAll(subject, approve.CommandResolver(call.Cwd))
-		if v.Decision == approve.DecisionRefuse {
-			return gateOutcome{}, refusalError(call.Tool, v)
-		}
-		if _, err := g.sandboxFor(call.Tool, v, resolved); err != nil {
-			return gateOutcome{}, err
+		v, plan, err := g.evaluate(call, i)
+		if err != nil {
+			return nil, nil, nil, nil, err
 		}
 
-		verdicts[i] = v
+		verdicts[i], plans[i] = v, plan
+
+		switch {
+		case v.Decision == approve.DecisionPrompt:
+			needs = append(needs, i)
+		case plan.Ask:
+			asks = append(asks, i)
+		}
 	}
 
-	return g.permitted(call, verdicts)
+	return needs, asks, verdicts, plans, nil
 }
 
-// permitted builds the outcome of a call whose commands all run: the inner pins and the sandboxes. A
-// sandbox that cannot be applied is an error, never an unsandboxed run.
+// sandboxPlan is what the deciding rule's sandbox asks of a run.
+//
+// Sandbox is the sandbox the deciding rule names, or nil when it names none. Skip is set when cg is
+// inside an outer sandbox and already_sandboxed lets the command run without the profile. It holds
+// the reason for the run record. Ask is set when already_sandboxed is ask, so the command waits for
+// an approval before it runs without the profile.
+type sandboxPlan struct {
+	Sandbox *approve.Sandbox
+	Skip    string
+	Ask     bool
+}
+
+const (
+	skipByRule     = "cg is inside an outer sandbox and already_sandboxed is run, so the profile was not applied"
+	skipByApproval = "cg is inside an outer sandbox and running without the profile was approved at the prompt, so the profile was not applied"
+)
+
+// permitted builds the outcome of a call whose commands all run: the inner pins, the sandboxes, and
+// the reasons any profile is skipped. approved lists the commands whose nested sandbox the user
+// agreed to run without. A command that waits on that agreement and has none is an error, never an
+// unsandboxed run.
 //
 // Under allow-all the pins apply only to a sandboxed command, since the sandbox profile approves the
 // command and its inner layers as one. Other commands under this mode run as they always have.
-func (g *gate) permitted(call approvalCall, verdicts []approve.Verdict) (gateOutcome, error) {
-	out := gateOutcome{Rewrites: pinnedPaths(verdicts), Sandboxes: make([]*approve.Sandbox, len(verdicts))}
+func (g *gate) permitted(call approvalCall, verdicts []approve.Verdict, plans []sandboxPlan, approved []int) (gateOutcome, error) {
+	out := gateOutcome{Rewrites: pinnedPaths(verdicts), Sandboxes: make([]*approve.Sandbox, len(verdicts)), Skips: make([]string, len(verdicts))}
 
 	allowAll := g.blindlyAllow || g.store.Ruleset().Mode == approve.ModeAllowAll
 
-	for i, v := range verdicts {
-		sb, err := g.sandboxFor(call.Tool, v, call.Resolutions[i])
-		if err != nil {
-			return gateOutcome{}, err
+	for i, plan := range plans {
+		out.Sandboxes[i] = plan.Sandbox
+
+		switch {
+		case plan.Ask && slices.Contains(approved, i):
+			out.Skips[i] = skipByApproval
+		case plan.Ask:
+			return gateOutcome{}, &pendingRefusal{msg: fmt.Sprintf("%s refused: running `%s` without sandbox %q was not approved and the rules changed since; %s",
+				call.Tool, visibleArgs(call.Argvs[i]), plan.Sandbox.Name, pendingAdvice)}
+		default:
+			out.Skips[i] = plan.Skip
 		}
 
-		out.Sandboxes[i] = sb
-
-		if allowAll && sb == nil {
+		if allowAll && plan.Sandbox == nil {
 			out.Rewrites[i] = nil
 		}
 	}
@@ -253,38 +292,77 @@ func (g *gate) permitted(call approvalCall, verdicts []approve.Verdict) (gateOut
 	return out, nil
 }
 
-// sandboxFor finds the sandbox a verdict runs its command under, and refuses a command whose
-// sandbox cannot be applied. A rule that names a sandbox never runs without it.
+// sandboxFor works out what a verdict's sandbox asks of the run, and refuses a command whose
+// sandbox cannot be applied. A rule that names a sandbox never runs without it, except through
+// already_sandboxed: run, or an ask the user approves.
 //
 // The refusals are a sandbox with no block for this platform, a command whose executable did not
 // resolve, since sandbox-exec would search PATH for it, and a profile the load probe could not
-// confirm applies.
-func (g *gate) sandboxFor(tool string, v approve.Verdict, resolved *model.Resolution) (*approve.Sandbox, error) {
+// confirm applies. Under an outer sandbox the stored class is nested, and already_sandboxed decides.
+// Any other class refuses under every value, with the probe's stderr.
+func (g *gate) sandboxFor(tool string, v approve.Verdict, resolved *model.Resolution) (sandboxPlan, error) {
 	name := v.Sandbox()
 	if name == "" {
-		return nil, nil
+		return sandboxPlan{}, nil
 	}
 
 	sb, ok := g.store.Ruleset().Sandbox(name)
 	if !ok {
-		return nil, fmt.Errorf("%s refused: the rule that allows the command names sandbox %q, which is not defined", tool, name)
+		return sandboxPlan{}, fmt.Errorf("%s refused: the rule that allows the command names sandbox %q, which is not defined", tool, name)
 	}
 
 	if sb.Seatbelt == nil {
-		return nil, fmt.Errorf("%s refused: the rule that allows the command names sandbox %q, which has no block for this platform (%s). It defines: %s",
+		return sandboxPlan{}, fmt.Errorf("%s refused: the rule that allows the command names sandbox %q, which has no block for this platform (%s). It defines: %s",
 			tool, name, runtime.GOOS, strings.Join(sb.Declared, ", "))
 	}
 
-	if resolved == nil || resolved.Resolved == "" {
-		return nil, fmt.Errorf("%s refused: sandbox %q needs the command's executable path, and it did not resolve", tool, name)
+	switch sb.Seatbelt.Class {
+	case model.SandboxApplies:
+		if resolved == nil || resolved.Resolved == "" {
+			return sandboxPlan{}, fmt.Errorf("%s refused: sandbox %q needs the command's executable path, and it did not resolve", tool, name)
+		}
+
+		return sandboxPlan{Sandbox: sb}, nil
+
+	case model.SandboxNested:
+		switch sb.Seatbelt.AlreadySandboxed {
+		case approve.AlreadyRun:
+			return sandboxPlan{Sandbox: sb, Skip: skipByRule}, nil
+		case approve.AlreadyAsk:
+			return sandboxPlan{Sandbox: sb, Ask: true}, nil
+		}
+
+		return sandboxPlan{}, fmt.Errorf("%s refused: sandbox %q cannot be applied because cg is already inside another sandbox, which Seatbelt cannot nest (the profile check at load reported: %s). "+
+			"already_sandboxed is %s for it; set already_sandboxed to run or ask in %s to run the command without the profile",
+			tool, name, sb.Seatbelt.ProbeStderr, sb.Seatbelt.AlreadySandboxed, sb.File)
 	}
 
-	if sb.Seatbelt.Class != model.SandboxApplies {
-		return nil, fmt.Errorf("%s refused: sandbox %q cannot be applied: the profile check at load classified it as %s: %s",
-			tool, name, sb.Seatbelt.Class, sb.Seatbelt.ProbeStderr)
+	return sandboxPlan{}, fmt.Errorf("%s refused: sandbox %q cannot be applied: the profile check at load classified it as %s: %s",
+		tool, name, sb.Seatbelt.Class, sb.Seatbelt.ProbeStderr)
+}
+
+// nestedFailClosedError refuses commands that wait on a prompt the client cannot show. It points at
+// the sandbox's own setting. It never recommends --blindly-allow, which still prompts for these.
+func nestedFailClosedError(tool string, asks []int, plans []sandboxPlan) error {
+	var names []string
+	for _, i := range asks {
+		if name := plans[i].Sandbox.Name; !slices.Contains(names, name) {
+			names = append(names, name)
+		}
 	}
 
-	return sb, nil
+	return fmt.Errorf("%s refused: sandbox %s cannot be applied because cg is already inside another sandbox, already_sandboxed is ask for it, and the client cannot prompt for approval; "+
+		"set already_sandboxed to run or refuse for it in %s",
+		tool, quotedList(names), plans[asks[0]].Sandbox.File)
+}
+
+func quotedList(names []string) string {
+	quoted := make([]string, len(names))
+	for i, name := range names {
+		quoted[i] = fmt.Sprintf("%q", name)
+	}
+
+	return strings.Join(quoted, ", ")
 }
 
 // pinnedPaths works out, for each judged command, the inner executables a wrapper must be
@@ -327,23 +405,35 @@ func pinnedPaths(verdicts []approve.Verdict) []map[int]string {
 // evaluate checks one command against the live ruleset. A deny, restrict, or dangerous-env
 // refusal comes back as an error. Evaluate refuses a dangerous env override before it returns a
 // prompt verdict, so a prompt verdict always has a clean env.
-func (g *gate) evaluate(call approvalCall, i int) (approve.Verdict, error) {
+//
+// Under --blindly-allow only the allow tier ranks, since the mode skips every other check. The plan
+// is what the deciding rule's sandbox asks of the run.
+func (g *gate) evaluate(call approvalCall, i int) (approve.Verdict, sandboxPlan, error) {
 	resolved := call.Resolutions[i]
 	subject := approve.Subject{Argv: call.Argvs[i], Canonical: resolved.CanonicalArgv(), Resolved: resolved.ResolvedArgv()}
 
-	v := g.store.Ruleset().Evaluate(subject, call.Env, approve.CommandResolver(call.Cwd))
-	if v.Decision != approve.DecisionRefuse {
-		if _, err := g.sandboxFor(call.Tool, v, resolved); err != nil {
-			return v, err
+	if g.blindlyAllow {
+		v := g.store.Ruleset().EvaluateAllowAll(subject, approve.CommandResolver(call.Cwd))
+		if v.Decision == approve.DecisionRefuse {
+			return v, sandboxPlan{}, refusalError(call.Tool, v)
 		}
 
-		return v, nil
-	}
-	if len(v.BadEnvs) > 0 {
-		return v, envRefusalError(call.Tool, v, g.store.Project.Path)
+		plan, err := g.sandboxFor(call.Tool, v, resolved)
+
+		return v, plan, err
 	}
 
-	return v, refusalError(call.Tool, v)
+	v := g.store.Ruleset().Evaluate(subject, call.Env, approve.CommandResolver(call.Cwd))
+	if v.Decision != approve.DecisionRefuse {
+		plan, err := g.sandboxFor(call.Tool, v, resolved)
+
+		return v, plan, err
+	}
+	if len(v.BadEnvs) > 0 {
+		return v, sandboxPlan{}, envRefusalError(call.Tool, v, g.store.Project.Path)
+	}
+
+	return v, sandboxPlan{}, refusalError(call.Tool, v)
 }
 
 // refusalError builds the error for a deny or restrict match, naming the rule

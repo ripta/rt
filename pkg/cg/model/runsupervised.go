@@ -56,6 +56,7 @@ type SuperviseOptions struct {
 	InnerExec map[int]string
 
 	// Sandbox marks args as the encoded launch SandboxLaunch built. Resolved then names sandbox-exec.
+	// A skipped sandbox leaves args as typed and only records why the profile was not applied.
 	Sandbox *SandboxSpec
 
 	Cwd       string
@@ -103,12 +104,12 @@ func RunSupervised(args []string, opts SuperviseOptions) (*CaptureRun, error) {
 	// failure: the server writes debug.json and the run dir is preserved for
 	// post-mortem inspection.
 	failStart := func(err error) (*CaptureRun, error) {
-		command, sandbox := args, ""
+		command, sandbox, skipped := args, "", ""
 		if opts.Sandbox != nil {
-			command, sandbox = opts.Sandbox.Command, opts.Sandbox.Name
+			command, sandbox, skipped = opts.Sandbox.Command, opts.Sandbox.Name, opts.Sandbox.Skipped
 		}
 
-		info := RunInfo{ID: cap.ID, Command: command, Sandbox: sandbox, Cwd: cwd, Pool: opts.Pool, SessionID: opts.SessionID, StartedAt: time.Now().UTC()}
+		info := RunInfo{ID: cap.ID, Command: command, Sandbox: sandbox, SandboxSkipped: skipped, Cwd: cwd, Pool: opts.Pool, SessionID: opts.SessionID, StartedAt: time.Now().UTC()}
 		_ = WriteStartDebug(cap.Dir, buildStartDebug(info, opts.Env, resolved, err))
 		return nil, &StartFailure{RunID: cap.ID, Dir: cap.Dir, Err: err}
 	}

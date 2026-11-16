@@ -26,6 +26,10 @@ type RunInfo struct {
 	// the sandbox-exec argv.
 	Sandbox string `json:"sandbox,omitempty"`
 
+	// SandboxSkipped is why the sandbox's profile was not applied, when cg ran inside an outer
+	// sandbox. It is empty for a run that applied its profile.
+	SandboxSkipped string `json:"sandbox_skipped,omitempty"`
+
 	Cwd       string    `json:"cwd,omitempty"`
 	Pool      string    `json:"pool,omitempty"`
 	SessionID string    `json:"session_id,omitempty"`

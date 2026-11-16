@@ -124,6 +124,15 @@ type SandboxSpec struct {
 	Canonical string   `json:"canonical,omitempty"`
 	Profile   string   `json:"profile"`
 	Defines   []string `json:"defines,omitempty"`
+
+	// Class is the load probe's classification of the profile, which the preflight compares its own
+	// result against. An empty class is a spec from a server that only ever ran profiles that applied.
+	Class SandboxClass `json:"class,omitempty"`
+
+	// Skipped is set when the command runs without the profile, because cg is inside an outer sandbox
+	// and the user's rule or approval allows that. It holds the reason for the run record. The
+	// command is then launched as typed, with no sandbox-exec argv, and nothing is preflighted.
+	Skipped string `json:"skipped,omitempty"`
 }
 
 // SandboxLaunch encodes a sandboxed run into the spec fields every supervisor honors. The argv runs
@@ -154,9 +163,18 @@ func SandboxLaunch(sb *SandboxSpec, inner map[int]string) ([]string, *Resolution
 // that imports another file can stop compiling after load, and this turns that into a refusal that
 // names the compile error, not the command's own exit status 65.
 //
-// A result other than applies refuses with the probe's stderr. cg never falls back to running
-// without the profile.
+// The probe is classified the way the load probe was. A class that differs from the load-time one
+// refuses with the probe's stderr, and so does any class other than applies. cg never falls back to
+// running without the profile. A skipped profile has nothing to preflight.
 func (s *SandboxSpec) Preflight() error {
+	return s.preflight(ProbeSeatbelt)
+}
+
+func (s *SandboxSpec) preflight(probeSeatbelt func(profile string, defines []string) SandboxProbe) error {
+	if s.Skipped != "" {
+		return nil
+	}
+
 	if s.Resolved == "" {
 		return fmt.Errorf("sandbox %q: the command has no resolved path to run", s.Name)
 	}
@@ -165,10 +183,18 @@ func (s *SandboxSpec) Preflight() error {
 		return fmt.Errorf("sandbox %q: %w", s.Name, err)
 	}
 
-	probe := ProbeSeatbelt(s.Profile, s.Defines)
+	want := s.Class
+	if want == "" {
+		want = SandboxApplies
+	}
+
+	probe := probeSeatbelt(s.Profile, s.Defines)
 	switch {
 	case probe.CompileFailed:
 		return fmt.Errorf("sandbox %q: its profile no longer compiles: %s", s.Name, probe.Stderr)
+	case probe.Class != want:
+		return fmt.Errorf("sandbox %q: its profile was classified as %s at load and %s now: %s",
+			s.Name, want, probe.Class, probe.Stderr)
 	case probe.Class != SandboxApplies:
 		return fmt.Errorf("sandbox %q: the profile cannot be applied (%s): %s", s.Name, probe.Class, probe.Stderr)
 	}

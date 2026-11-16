@@ -57,6 +57,12 @@ type pendingCommand struct {
 	// Form is the id of the approval form that covered this command, empty when it was not
 	// prompted. Several commands share a form, and the retry reads their answer through it.
 	Form string
+
+	// NestedForm is the id of the sandbox form that asked whether to run this command without its
+	// profile, empty when it was not asked. NestedSandbox is the sandbox the form named. The retry
+	// refuses a command whose deciding rule now names a different one.
+	NestedForm    string
+	NestedSandbox string
 }
 
 // pendingLayer is the resolution of one inner command of a wrapper chain, at its offset into
@@ -220,6 +226,8 @@ func cloneCommands(cmds []pendingCommand) []pendingCommand {
 	for i, c := range cmds {
 		out[i].Prompted = c.Prompted
 		out[i].Form = c.Form
+		out[i].NestedForm = c.NestedForm
+		out[i].NestedSandbox = c.NestedSandbox
 		out[i].PromptOffset = c.PromptOffset
 		out[i].Suggestion = c.Suggestion
 		out[i].Suggestion.Tokens = slices.Clone(c.Suggestion.Tokens)
@@ -273,9 +281,9 @@ type carriedRound struct {
 	// later round has no divergence form to read it from.
 	Strategy approve.WriteStrategy
 
-	// Approved holds the indexes of the commands an earlier round actually got an accept for. A
-	// command the later round still needs, but that is neither here nor in a failed form, was
-	// allowed by a rule when the earlier round ran. Nobody approved it.
+	// Approved holds the indexes of the commands an earlier round actually got an accept for, from a
+	// rule form or a sandbox form. A command the later round still needs, but that is neither here nor
+	// in a failed form, was allowed by a rule when the earlier round ran. Nobody approved it.
 	Approved []int
 
 	// Failed maps the id of each form the round asks again to what that form shows.

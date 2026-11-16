@@ -996,7 +996,20 @@ allow:
 - Under `mode: allow-all` and `--blindly-allow`, a command whose deciding rule names a sandbox
   still runs under it. Every other command runs unsandboxed.
 - A sandboxed command is refused when the sandbox has no block for the platform, or when the load
-  probe could not confirm the profile applies, such as when cg already runs inside a sandbox.
+  probe could not confirm the profile applies.
+- Seatbelt cannot nest a sandbox inside another. The load probe also tells whether cg itself runs
+  inside a sandbox, and `already_sandboxed` says what happens then. `refuse` refuses the command
+  and names the outer sandbox as the reason. `run` runs it without the profile, sets none of the
+  sandbox's `proxy` variables, and records on the run that the profile was skipped and why. `ask`
+  prompts for approval to run it without the profile, with no remember, even under
+  `--blindly-allow` and `mode: allow-all`. A client that cannot prompt gets a refusal. Outside a
+  sandbox, all three values apply the profile.
+- A probe result that is neither a compile failure nor the exact nesting message of
+  `sandbox-exec` refuses the command under every `already_sandboxed` value. Each run compiles the
+  profile again before it starts, and a result that differs from the load-time one refuses the
+  run with the probe's message.
+- `cg check` runs the probe in its own shell, so it labels the result as that shell's state. The
+  server probes its own process at start, and the two can differ.
 
 
 `enc`

@@ -20,12 +20,22 @@ type launch struct {
 
 // newLaunch encodes a command for the supervisor. An unsandboxed command passes through as typed.
 //
+// A command whose profile is skipped, because cg is inside an outer sandbox, also passes through as
+// typed. It sets none of the sandbox's proxy variables, and its spec only records the sandbox's name
+// and why the profile was not applied. A supervisor that does not know the field runs it as typed.
+//
 // A sandboxed command is encoded into the spec fields every supervisor honors: sandbox-exec with the
 // frozen profile text and the command's own resolved path. The inner pins are inlined, so the run
 // never relies on the inner-exec pin. Only a supervisor that knows the sandbox field also records the
 // typed command and runs the preflight.
-func newLaunch(command []string, resolved *model.Resolution, inner map[int]string, env map[string]string, sb *approve.Sandbox) launch {
+func newLaunch(command []string, resolved *model.Resolution, inner map[int]string, env map[string]string, sb *approve.Sandbox, skipped string) launch {
 	l := launch{Argv: command, Resolved: resolved, InnerExec: inner, Env: env}
+
+	if skipped != "" && sb != nil {
+		l.Sandbox = &model.SandboxSpec{Name: sb.Name, Command: command, Class: sb.Seatbelt.Class, Skipped: skipped}
+
+		return l
+	}
 
 	spec, ok := sb.Spec(command, resolved)
 	if !ok {

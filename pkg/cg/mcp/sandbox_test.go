@@ -348,13 +348,6 @@ var sandboxGateRefusalTests = []sandboxGateTest{
 		WantErr:  "classified it as unknown: sandbox-exec: something odd",
 	},
 	{
-		Name:     "a nested classification refuses until nesting is handled",
-		Platform: "darwin",
-		Class:    model.SandboxNested,
-		Stderr:   "sandbox-exec: sandbox_apply: Operation not permitted",
-		WantErr:  "classified it as nested",
-	},
-	{
 		Name:     "a command whose executable does not resolve refuses",
 		Platform: "darwin",
 		Class:    model.SandboxApplies,
