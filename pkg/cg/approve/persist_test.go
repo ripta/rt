@@ -347,3 +347,42 @@ func TestAppendKeepsRulesDifferingOutsideTheMatchPayload(t *testing.T) {
 		t.Errorf("permit_unsafe_envs entry was dropped:\n%s", got)
 	}
 }
+
+// TestAppendKeepsDenyRulesDifferingInMessage proves a remember keeps two deny rules that
+// differ only in message, and still drops a deny rule equal to another in every field. It would
+// catch a dedupe identity that ignores message. The dedupe of identical allow entries is owned
+// by TestAppendSortsAndDedupesEntries.
+func TestAppendKeepsDenyRulesDifferingInMessage(t *testing.T) {
+	t.Parallel()
+
+	content := "version: 1\n" +
+		"deny:\n" +
+		"  - prefix: [rm]\n" +
+		"    message: use trash\n" +
+		"  - prefix: [rm]\n" +
+		"    message: ask first\n" +
+		"  - prefix: [rm]\n" +
+		"    message: ask first\n"
+	root := writeProject(t, content)
+	s := loadProject(t, root)
+
+	if err := s.AppendProjectAllowPrefix([]string{"go", "test"}, WriteDirect); err != nil {
+		t.Fatalf("AppendProjectAllowPrefix: %v", err)
+	}
+
+	raw, err := os.ReadFile(ProjectPath(root, ""))
+	if err != nil {
+		t.Fatalf("reading written file: %v", err)
+	}
+	got := string(raw)
+
+	if n := strings.Count(got, "prefix: [rm]"); n != 2 {
+		t.Errorf("expected two [rm] deny entries, got %d:\n%s", n, got)
+	}
+	if n := strings.Count(got, "message: use trash"); n != 1 {
+		t.Errorf("expected the 'use trash' deny to survive once, got %d:\n%s", n, got)
+	}
+	if n := strings.Count(got, "message: ask first"); n != 1 {
+		t.Errorf("expected the duplicate 'ask first' deny to collapse to one, got %d:\n%s", n, got)
+	}
+}
