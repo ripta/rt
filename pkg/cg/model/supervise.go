@@ -161,7 +161,14 @@ func superviseRun(dir string, in io.Reader, out io.Writer) error {
 		return err
 	}
 
-	child := exec.Command(resolved.ExecPath(), args...)
+	if err := resolved.VerifyCanonical(); err != nil {
+		stdout.Close()
+		stderr.Close()
+		writeAck(out, SuperviseAck{StartError: err.Error()})
+		return err
+	}
+
+	child := exec.Command(resolved.SpawnPath(), args...)
 	child.Args[0] = spec.Argv[0]
 	child.Dir = cwd
 	child.Stdout = stdout
