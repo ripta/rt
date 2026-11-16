@@ -65,6 +65,7 @@ func registerRun(s *mcpsdk.Server, reg *runRegistry, g *gate, sessionID string) 
 	mcpsdk.AddTool(s, &mcpsdk.Tool{
 		Name:        "cg_run",
 		Description: "Run a command with capture. Returns metadata, exit code, and short head-excerpts of stdout and stderr. The run is recorded on disk under $TMPDIR/cg/<id>/ and can be inspected with the other cg tools. Set wait_timeout_auto to size the wait from earlier runs of the same command. The response reports wait_timeout_ms_used. A timed_out response also carries elapsed_ms and, when earlier runs exist, history.",
+		InputSchema: requiredInputSchema[runInput](),
 	}, func(ctx context.Context, req *mcpsdk.CallToolRequest, in runInput) (*mcpsdk.CallToolResult, runOutput, error) {
 		return handleRun(ctx, reg, g, req, sessionID, in)
 	})
