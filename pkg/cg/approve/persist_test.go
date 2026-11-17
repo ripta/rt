@@ -306,3 +306,44 @@ func TestOverwriteDropsDiskChanges(t *testing.T) {
 		t.Errorf("overwrite lost the in-memory make rule")
 	}
 }
+
+// TestAppendKeepsRulesDifferingOutsideTheMatchPayload proves a remember does not delete a
+// hand-written rule that differs from another only in as_basename or permit_unsafe_envs. It
+// would catch a dedupe identity that covers only the kind and the match payload.
+func TestAppendKeepsRulesDifferingOutsideTheMatchPayload(t *testing.T) {
+	t.Parallel()
+
+	content := "version: 1\n" +
+		"allow:\n" +
+		"  - regex: \"^make test$\"\n" +
+		"  - regex: \"^make test$\"\n" +
+		"    as_basename: true\n" +
+		"  - prefix: [make]\n" +
+		"  - prefix: [make]\n" +
+		"    permit_unsafe_envs: [CC]\n"
+	root := writeProject(t, content)
+	s := loadProject(t, root)
+
+	if err := s.AppendProjectAllowPrefix([]string{"go", "test"}, WriteDirect); err != nil {
+		t.Fatalf("AppendProjectAllowPrefix: %v", err)
+	}
+
+	raw, err := os.ReadFile(ProjectPath(root, ""))
+	if err != nil {
+		t.Fatalf("reading written file: %v", err)
+	}
+	got := string(raw)
+
+	if n := strings.Count(got, "regex:"); n != 2 {
+		t.Errorf("expected both regex entries to survive, got %d:\n%s", n, got)
+	}
+	if !strings.Contains(got, "as_basename: true") {
+		t.Errorf("as_basename entry was dropped:\n%s", got)
+	}
+	if n := strings.Count(got, "prefix: [make]"); n != 2 {
+		t.Errorf("expected both [make] entries to survive, got %d:\n%s", n, got)
+	}
+	if !strings.Contains(got, "permit_unsafe_envs") {
+		t.Errorf("permit_unsafe_envs entry was dropped:\n%s", got)
+	}
+}

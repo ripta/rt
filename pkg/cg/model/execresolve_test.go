@@ -244,7 +244,7 @@ type rulePathTest struct {
 }
 
 var rulePathTests = []rulePathTest{
-	{name: "same basename prefers canonical", res: Resolution{Argv: []string{"go"}, Resolved: "/opt/bin/go", Canonical: "/opt/cellar/go/bin/go"}, want: "/opt/cellar/go/bin/go"},
+	{name: "same basename prefers resolved", res: Resolution{Argv: []string{"python3"}, Resolved: "/p/.venv/bin/python3", Canonical: "/usr/bin/python3"}, want: "/p/.venv/bin/python3"},
 	{name: "basename flip prefers resolved", res: Resolution{Argv: []string{"cargo"}, Resolved: "/home/u/.cargo/bin/cargo", Canonical: "/home/u/.cargo/bin/rustup"}, want: "/home/u/.cargo/bin/cargo"},
 	{name: "no canonical falls back to resolved", res: Resolution{Argv: []string{"foo"}, Resolved: "/r/foo"}, want: "/r/foo"},
 	{name: "no resolution falls back to argv0", res: Resolution{Argv: []string{"foo"}}, want: "foo"},
@@ -283,6 +283,31 @@ func TestRulePathShimOnDisk(t *testing.T) {
 	}
 	if got := r.RulePath(); got != filepath.Join(dir, "cargo") {
 		t.Errorf("RulePath() = %q, want the invoked shim %q", got, filepath.Join(dir, "cargo"))
+	}
+}
+
+// TestRulePathVenvOnDisk exercises RulePath against a real venv-style link: a
+// same-named symlink to a base interpreter in another directory. The path must keep
+// the venv, since the base interpreter cannot import the venv's packages and a rule
+// on it would cover every venv that links to it.
+func TestRulePathVenvOnDisk(t *testing.T) {
+	base := t.TempDir()
+	venv := t.TempDir()
+	plantExec(t, base, "python3")
+	if err := os.Symlink(filepath.Join(base, "python3"), filepath.Join(venv, "python3")); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+	t.Setenv("PATH", venv)
+
+	r, err := ResolveCommand([]string{"python3", "-V"}, "")
+	if err != nil {
+		t.Fatalf("ResolveCommand: %v", err)
+	}
+	if filepath.Dir(r.Canonical) == filepath.Dir(r.Resolved) {
+		t.Fatalf("Canonical = %q, want the base interpreter outside the venv %q", r.Canonical, venv)
+	}
+	if got := r.RulePath(); got != filepath.Join(venv, "python3") {
+		t.Errorf("RulePath() = %q, want the venv interpreter %q", got, filepath.Join(venv, "python3"))
 	}
 }
 

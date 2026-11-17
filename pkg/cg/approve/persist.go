@@ -2,6 +2,7 @@ package approve
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -281,11 +282,10 @@ func buildRuleEntry(rule *Rule, isDeny bool) *yaml.Node {
 
 // canonicalizeRuleSeqs sorts and de-duplicates the deny and allow rule
 // sequences in root so the written file stays tidy: entries are ordered by their
-// command text and exact duplicates are dropped, keeping the first occurrence so
-// its comments and any message survive. Rule order does not affect matching,
-// which refuses on any deny match and runs on any allow match, so reordering is
-// safe. The env gate keeps this true by accepting any matching allow rule that
-// permits the override.
+// command text and entries equal in every field are dropped, keeping the first
+// occurrence so its comments survive. Entries that match the same command but
+// differ in any field, such as as_basename, permit_unsafe_envs, or message, are
+// distinct rules. They are all kept in their original relative order.
 func canonicalizeRuleSeqs(root *yaml.Node) {
 	for _, key := range []string{"deny", "allow"} {
 		if seq := findSeq(root, key); seq != nil {
@@ -332,10 +332,8 @@ func sortDedupeEntries(entries []*yaml.Node) []*yaml.Node {
 		if !ks[i].recognized {
 			return ks[i].idx < ks[j].idx
 		}
-		if ks[i].sortKey != ks[j].sortKey {
-			return ks[i].sortKey < ks[j].sortKey
-		}
-		return ks[i].ident < ks[j].ident
+
+		return ks[i].sortKey < ks[j].sortKey
 	})
 
 	out := make([]*yaml.Node, 0, len(ks))
@@ -353,9 +351,10 @@ func sortDedupeEntries(entries []*yaml.Node) []*yaml.Node {
 	return out
 }
 
-// ruleKeys derives a sort key, the rule's command text, and an identity key, its
-// kind plus payload, from a rule entry node. ok is false when the node does not
-// decode to exactly one recognized rule kind.
+// ruleKeys derives a sort key, the rule's command text, and an identity key from
+// a rule entry node. The identity is the entry's whole mapping, so a field this
+// build does not know about still distinguishes two rules. ok is false when the
+// node does not decode to exactly one recognized rule kind.
 func ruleKeys(n *yaml.Node) (sortKey, ident string, ok bool) {
 	var r Rule
 	if err := n.Decode(&r); err != nil {
@@ -364,18 +363,32 @@ func ruleKeys(n *yaml.Node) (sortKey, ident string, ok bool) {
 
 	switch {
 	case len(r.Exact) > 0:
-		return strings.Join(r.Exact, " "), "exact\x00" + strings.Join(r.Exact, "\x00"), true
+		sortKey = strings.Join(r.Exact, " ")
 	case len(r.Prefix) > 0:
-		return strings.Join(r.Prefix, " "), "prefix\x00" + strings.Join(r.Prefix, "\x00"), true
+		sortKey = strings.Join(r.Prefix, " ")
 	case len(r.Wrapper) > 0:
-		return strings.Join(r.Wrapper, " "), "wrapper\x00" + strings.Join(r.Wrapper, "\x00"), true
+		sortKey = strings.Join(r.Wrapper, " ")
 	case r.Glob != "":
-		return r.Glob, "glob\x00" + r.Glob, true
+		sortKey = r.Glob
 	case r.Regex != "":
-		return r.Regex, "regex\x00" + r.Regex, true
+		sortKey = r.Regex
+	default:
+		return "", "", false
 	}
 
-	return "", "", false
+	var fields map[string]any
+	if err := n.Decode(&fields); err != nil {
+		return "", "", false
+	}
+
+	// JSON sorts map keys and delimits every string, so no two distinct
+	// mappings share an encoding.
+	enc, err := json.Marshal(fields)
+	if err != nil {
+		return "", "", false
+	}
+
+	return sortKey, string(enc), true
 }
 
 // ensureSeq returns the sequence value node for key in root, creating it (or

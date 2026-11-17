@@ -115,16 +115,17 @@ func (r *Resolution) ResolvedArgv() []string {
 	return out
 }
 
-// RulePath is the executable path a suggested approval rule pins. It is the
-// canonical path, except when symlink evaluation changes the executable's
-// basename: that marks a multiplexer shim whose argv[0] is the command
-// identity, so the resolved path is used and the rule keeps naming the tool
-// that was invoked. When resolution is incomplete it falls back like ExecPath.
+// RulePath is the executable path a suggested approval rule pins, and the path an inner
+// wrapped command is handed. It is the resolved path, the form the user invoked, so that
+// a venv interpreter linked to its base interpreter keeps its venv and a multiplexer shim
+// keeps naming the tool that was invoked. The canonical path would run, and a rule on it
+// would allow, every file the link reaches. When resolution is incomplete it falls back
+// like ExecPath.
 func (r *Resolution) RulePath() string {
 	if r == nil {
 		return ""
 	}
-	if r.Canonical != "" && r.Resolved != "" && filepath.Base(r.Canonical) != filepath.Base(r.Resolved) {
+	if r.Resolved != "" {
 		return r.Resolved
 	}
 
