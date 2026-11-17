@@ -10,6 +10,7 @@ import (
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/ripta/rt/pkg/cg/approve"
 	"github.com/ripta/rt/pkg/cg/model"
 )
 
@@ -166,9 +167,15 @@ func handleRunMany(ctx context.Context, reg *runRegistry, g *gate, req *mcpsdk.C
 	warning := outcome.Warning
 
 	pinned := make(map[string]map[int]string, len(distinct))
+	sandboxes := make(map[string]*approve.Sandbox, len(distinct))
+	skips := make(map[string]string, len(distinct))
 	for i, argv := range distinct {
 		if i < len(outcome.Rewrites) {
 			pinned[model.ArgvKey(argv)] = outcome.Rewrites[i]
+		}
+		if sb := outcome.sandboxAt(i); sb != nil {
+			sandboxes[model.ArgvKey(argv)] = sb
+			skips[model.ArgvKey(argv)] = outcome.skipAt(i)
 		}
 	}
 
@@ -183,10 +190,15 @@ func handleRunMany(ctx context.Context, reg *runRegistry, g *gate, req *mcpsdk.C
 		Supervisor:  origin.Supervisor,
 	}
 	for _, argv := range in.Commands {
-		pc := model.PoolCommand{Argv: argv, InnerExec: pinned[model.ArgvKey(argv)]}
-		if r := resolutions[model.ArgvKey(argv)]; r != nil {
-			pc.Resolved = r.Resolved
-			pc.Canonical = r.Canonical
+		key := model.ArgvKey(argv)
+
+		// A member's proxy variables ride on its own command, never in the pool's shared Env.
+		launch := newLaunch(argv, resolutions[key], pinned[key], nil, sandboxes[key], skips[key])
+
+		pc := model.PoolCommand{Argv: launch.Argv, InnerExec: launch.InnerExec, Sandbox: launch.Sandbox, Env: launch.Env}
+		if launch.Resolved != nil {
+			pc.Resolved = launch.Resolved.Resolved
+			pc.Canonical = launch.Resolved.Canonical
 		}
 		spec.Commands = append(spec.Commands, pc)
 	}

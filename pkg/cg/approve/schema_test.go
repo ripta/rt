@@ -40,8 +40,12 @@ var parseTests = []parseTest{
 	},
 	{
 		name:    "wrong version",
-		yaml:    "version: 2\n",
+		yaml:    "version: 3\n",
 		wantErr: ErrUnknownVersion,
+	},
+	{
+		name: "version 2 loads",
+		yaml: "version: 2\n",
 	},
 	{
 		name: "all four rule kinds across entries",

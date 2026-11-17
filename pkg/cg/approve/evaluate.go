@@ -202,12 +202,64 @@ func (rs *Ruleset) Evaluate(subj Subject, env map[string]string, resolve Resolve
 
 	switch rs.Mode {
 	case ModeAllowAll:
-		return Verdict{Decision: DecisionRun}
+		return rs.EvaluateAllowAll(subj, resolve)
 	case ModeDenyAll:
 		return Verdict{Decision: DecisionRefuse}
 	}
 
 	return rs.newEvaluation(subj, env, resolve).run()
+}
+
+// EvaluateAllowAll is Evaluate's answer under mode allow-all, which the server also uses under
+// --blindly-allow. Every command runs. The allow tier still ranks, so the deciding rule can supply its
+// sandbox, and a wrapper still peels to the inner rule that decides.
+//
+// Deny, restrict, and the dangerous-environment gate stay off, as they are in this mode. A command no
+// allow rule matches runs with no rule and so no sandbox. The one refusal is a tie of allow rules that
+// disagree on a field, since picking one would let the order of the file choose the sandbox.
+func (rs *Ruleset) EvaluateAllowAll(subj Subject, resolve Resolver) Verdict {
+	if len(subj.Argv) == 0 {
+		return Verdict{Decision: DecisionRefuse}
+	}
+
+	e := rs.newEvaluation(subj, nil, resolve)
+	v := e.verdict(e.settle(0))
+
+	switch {
+	case v.Decision == DecisionRun:
+		return v
+	case v.Decision == DecisionRefuse && v.tieRefused():
+		return v
+	}
+
+	return Verdict{Decision: DecisionRun}
+}
+
+// tieRefused reports whether the verdict is a refusal from allow rules that disagree, at the typed
+// command or at a layer behind a wrapper.
+func (v Verdict) tieRefused() bool {
+	if v.Step == StepTieRefusal {
+		return true
+	}
+
+	for _, layer := range v.Chain {
+		if layer.Step == StepTieRefusal {
+			return true
+		}
+	}
+
+	return false
+}
+
+// Sandbox names the sandbox the verdict runs the command under, or "" for none. It comes from the
+// deciding rule. A chain's deciding rule is the inner command's, so a wrapped command runs under the
+// sandbox of its inner rule. A refusal and a prompt run nothing.
+func (v Verdict) Sandbox() string {
+	if v.Decision != DecisionRun || v.Rule == nil {
+		return ""
+	}
+
+	return v.Rule.Sandbox
 }
 
 func (rs *Ruleset) newEvaluation(subj Subject, env map[string]string, resolve Resolver) *evaluation {
@@ -701,11 +753,13 @@ func (e *evaluation) peelOf(l *layer, wrappers []*Rule, inner *settled) *settled
 }
 
 // allowFields is every per-rule field of an allow rule other than the match and permit_unsafe_envs.
-// It is empty until such a field exists. Add the field here and the tie check compares it.
-type allowFields struct{}
+// Add a field here and the tie check compares it.
+type allowFields struct {
+	Sandbox string
+}
 
 // fieldsOf reads the fields a tied rule is compared on.
-func fieldsOf(*Rule) allowFields { return allowFields{} }
+func fieldsOf(r *Rule) allowFields { return allowFields{Sandbox: r.Sandbox} }
 
 // fieldsAgree reports whether every rule of a tied set carries the same fields. A chain's fields are
 // those of its inner deciding rules.

@@ -55,6 +55,10 @@ type SuperviseOptions struct {
 	// InnerExec pins offsets of args to the paths the child receives there. See SuperviseSpec.
 	InnerExec map[int]string
 
+	// Sandbox marks args as the encoded launch SandboxLaunch built. Resolved then names sandbox-exec.
+	// A skipped sandbox leaves args as typed and only records why the profile was not applied.
+	Sandbox *SandboxSpec
+
 	Cwd       string
 	Env       map[string]string
 	Pool      string
@@ -100,7 +104,12 @@ func RunSupervised(args []string, opts SuperviseOptions) (*CaptureRun, error) {
 	// failure: the server writes debug.json and the run dir is preserved for
 	// post-mortem inspection.
 	failStart := func(err error) (*CaptureRun, error) {
-		info := RunInfo{ID: cap.ID, Command: args, Cwd: cwd, Pool: opts.Pool, SessionID: opts.SessionID, StartedAt: time.Now().UTC()}
+		command, sandbox, skipped := args, "", ""
+		if opts.Sandbox != nil {
+			command, sandbox, skipped = opts.Sandbox.Command, opts.Sandbox.Name, opts.Sandbox.Skipped
+		}
+
+		info := RunInfo{ID: cap.ID, Command: command, Sandbox: sandbox, SandboxSkipped: skipped, Cwd: cwd, Pool: opts.Pool, SessionID: opts.SessionID, StartedAt: time.Now().UTC()}
 		_ = WriteStartDebug(cap.Dir, buildStartDebug(info, opts.Env, resolved, err))
 		return nil, &StartFailure{RunID: cap.ID, Dir: cap.Dir, Err: err}
 	}
@@ -132,7 +141,7 @@ func RunSupervised(args []string, opts SuperviseOptions) (*CaptureRun, error) {
 		return failStart(fmt.Errorf("starting supervisor: %w", err))
 	}
 
-	spec := SuperviseSpec{Argv: args, InnerExec: opts.InnerExec, Cwd: cwd, Env: opts.Env, Pool: opts.Pool, SessionID: opts.SessionID, Parallelism: opts.Parallelism}
+	spec := SuperviseSpec{Argv: args, InnerExec: opts.InnerExec, Sandbox: opts.Sandbox, Cwd: cwd, Env: opts.Env, Pool: opts.Pool, SessionID: opts.SessionID, Parallelism: opts.Parallelism}
 	if resolved != nil {
 		spec.Resolved = resolved.Resolved
 		spec.Canonical = resolved.Canonical

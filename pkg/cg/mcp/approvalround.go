@@ -99,15 +99,13 @@ func planForms(rs *approve.Ruleset, needs []int, targets map[int]promptTarget) [
 // changed on disk since it was loaded, and stores what the user was shown under a fresh nonce.
 // Nothing runs and nothing is written until the client retries with the answers.
 //
+// A command whose sandbox cannot nest under cg's outer sandbox, and says already_sandboxed: ask,
+// gets a sandbox form after the rule forms. It has no rule and no remember. A round with only such
+// forms shows no divergence form.
+//
 // A project file that cannot be read is treated as unchanged. The retry reads it again, and a
 // remember that cannot read it either is skipped with a warning.
-func (g *gate) request(call approvalCall, needs []int, verdicts []approve.Verdict) (gateOutcome, error) {
-	changed, current, err := g.store.CheckProjectDivergence()
-	unreadable := err != nil
-	if unreadable {
-		changed, current = false, nil
-	}
-
+func (g *gate) request(call approvalCall, needs, asks []int, verdicts []approve.Verdict, plans []sandboxPlan) (gateOutcome, error) {
 	commands := make([]pendingCommand, len(call.Argvs))
 	for i := range call.Argvs {
 		commands[i].Resolution = call.Resolutions[i]
@@ -124,10 +122,25 @@ func (g *gate) request(call approvalCall, needs []int, verdicts []approve.Verdic
 		targets[i] = promptTargetOf(call, i, verdicts[i])
 	}
 
+	// The divergence form exists to make a remember safe. A round with no rule form offers no
+	// remember, so it asks nothing about the file.
+	var changed, unreadable bool
+	var current []byte
+	if len(needs) > 0 {
+		var err error
+		changed, current, err = g.store.CheckProjectDivergence()
+		if unreadable = err != nil; unreadable {
+			changed, current = false, nil
+		}
+	}
+
 	plan := planForms(g.store.Ruleset(), needs, targets)
-	forms := make(mcpsdk.InputRequestMap, len(plan)+1)
+	nested := planNestedForms(asks, plans)
+	total := len(plan) + len(nested)
+
+	forms := make(mcpsdk.InputRequestMap, total+1)
 	for pos, form := range plan {
-		id := approvalID(pos, len(plan))
+		id := approvalID(pos, total)
 
 		argvs := make([][]string, len(form.Commands))
 		formTargets := make([]approve.EditTarget, len(form.Commands))
@@ -141,7 +154,7 @@ func (g *gate) request(call approvalCall, needs []int, verdicts []approve.Verdic
 		}
 
 		forms[id] = &mcpsdk.ElicitParams{
-			Message: approvalMessage(argvs, call.Cwd, pos+1, len(plan)),
+			Message: approvalMessage(argvs, call.Cwd, pos+1, total),
 			RequestedSchema: approvalSchema(formSpec{
 				Suggestion: form.Suggestion,
 				Inner:      form.Inner,
@@ -150,6 +163,8 @@ func (g *gate) request(call approvalCall, needs []int, verdicts []approve.Verdic
 			}),
 		}
 	}
+
+	maps.Copy(forms, nestedRequests(call, nested, commands, len(plan), total))
 
 	if changed {
 		forms[divergenceID] = &mcpsdk.ElicitParams{
@@ -197,7 +212,7 @@ func (g *gate) request(call approvalCall, needs []int, verdicts []approve.Verdic
 //
 // A form whose commands are all allowed now gates nothing. Its answer is read only for the
 // remember, and a problem with it becomes a warning instead of a refusal.
-func (g *gate) answer(call approvalCall, entry *pendingEntry, needs []int, verdicts []approve.Verdict) (gateOutcome, error) {
+func (g *gate) answer(call approvalCall, entry *pendingEntry, needs, asks []int, verdicts []approve.Verdict, plans []sandboxPlan) (gateOutcome, error) {
 	resolve := approve.CommandResolver(call.Cwd)
 
 	needed := make([]bool, len(call.Argvs))
@@ -223,6 +238,12 @@ func (g *gate) answer(call approvalCall, entry *pendingEntry, needs []int, verdi
 		}
 	}
 
+	for _, i := range asks {
+		if refusal := staleNested(call, entry, i, plans[i], resolve); refusal != nil {
+			return gateOutcome{}, refusal
+		}
+	}
+
 	var declined []int
 	var rules []rememberRule
 	var notes []string
@@ -234,6 +255,12 @@ func (g *gate) answer(call approvalCall, entry *pendingEntry, needs []int, verdi
 		rules = entry.Carry.Rules
 		notes = entry.Carry.Notes
 		approved = slices.Clone(entry.Carry.Approved)
+
+		for _, i := range asks {
+			if !slices.Contains(approved, i) {
+				return gateOutcome{}, &pendingRefusal{msg: fmt.Sprintf("%s refused: running `%s` without its sandbox was not approved in the earlier round and the rules changed since; %s", call.Tool, visibleArgs(call.Argvs[i]), pendingAdvice)}
+			}
+		}
 
 		for _, i := range needs {
 			if _, again := entry.Carry.Failed[entry.Commands[i].Form]; again || slices.Contains(approved, i) {
@@ -304,7 +331,14 @@ func (g *gate) answer(call approvalCall, entry *pendingEntry, needs []int, verdi
 		rules = addRememberRule(rules, kind, tokens, true)
 	}
 
-	refusing := answerErr != nil || len(declined) > 0
+	approvedNested, nestedDeclined, nestedErr := readNested(call, entry, asks, plans)
+	if answerErr == nil {
+		answerErr = nestedErr
+	}
+
+	approved = append(approved, approvedNested...)
+
+	refusing := answerErr != nil || len(declined) > 0 || len(nestedDeclined) > 0
 	if len(failed) > 0 && !refusing && call.MultiRound {
 		if plan := g.planWrite(entry, call.Responses); plan.Skip == nil {
 			return g.askAgain(call, entry, formIDs, failed, rules, notes, approved, plan.Strategy)
@@ -329,18 +363,34 @@ func (g *gate) answer(call approvalCall, entry *pendingEntry, needs []int, verdi
 
 		return gateOutcome{}, fmt.Errorf("%s refused: %w", call.Tool, answerErr)
 	}
-	if len(declined) > 0 {
-		slices.Sort(declined)
+	if len(declined) > 0 || len(nestedDeclined) > 0 {
+		var refusals []string
 
-		argvs := make([][]string, len(declined))
-		for j, i := range declined {
-			argvs[j] = call.Argvs[i]
+		if len(declined) > 0 {
+			slices.Sort(declined)
+
+			argvs := make([][]string, len(declined))
+			for j, i := range declined {
+				argvs[j] = call.Argvs[i]
+			}
+
+			refusals = append(refusals, declinedError(call.Tool, argvs, len(call.Argvs) > 1, warning).Error())
+			warning = ""
 		}
 
-		return gateOutcome{}, declinedError(call.Tool, argvs, len(call.Argvs) > 1, warning)
+		if len(nestedDeclined) > 0 {
+			nestedErr := nestedDeclinedError(call.Tool, nestedDeclined, len(call.Argvs) > 1).Error()
+			if warning != "" {
+				nestedErr += "\n" + warning
+			}
+
+			refusals = append(refusals, nestedErr)
+		}
+
+		return gateOutcome{}, errors.New(strings.Join(refusals, "\n"))
 	}
 
-	return gateOutcome{Warning: warning}, nil
+	return gateOutcome{Warning: warning, NestedApproved: approvedNested}, nil
 }
 
 // failedEdit is a form whose remember the gate could not save as submitted.
@@ -366,6 +416,9 @@ func (g *gate) askAgain(call approvalCall, entry *pendingEntry, formIDs []string
 		Failed:   make(map[string]askAgain, len(failed)),
 	}
 
+	nestedIDs, _ := entryNestedForms(entry)
+	total := len(formIDs) + len(nestedIDs)
+
 	forms := make(mcpsdk.InputRequestMap, len(failed))
 	for _, f := range failed {
 		again := askAgain{ExtraArgs: f.Failure.ExtraArgs, Note: g.editNote(f.Failure, f.Targets)}
@@ -387,7 +440,7 @@ func (g *gate) askAgain(call approvalCall, entry *pendingEntry, formIDs []string
 		suggestion := entry.Commands[f.Asking[0]].Suggestion
 
 		forms[f.ID] = &mcpsdk.ElicitParams{
-			Message: askAgainMessage(argvs, call.Cwd, slices.Index(formIDs, f.ID)+1, len(formIDs)),
+			Message: askAgainMessage(argvs, call.Cwd, slices.Index(formIDs, f.ID)+1, total),
 			RequestedSchema: approvalSchema(formSpec{
 				Suggestion: suggestion,
 				Prefill:    again.Prefill,

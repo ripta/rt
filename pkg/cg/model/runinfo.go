@@ -19,8 +19,17 @@ import (
 // SessionID names the cg mcp server process that spawned this run; empty for
 // runs not spawned by a server, including the standalone cg run CLI.
 type RunInfo struct {
-	ID        string    `json:"id"`
-	Command   []string  `json:"command"`
+	ID      string   `json:"id"`
+	Command []string `json:"command"`
+
+	// Sandbox names the sandbox the run was launched under. Command is then the typed command, not
+	// the sandbox-exec argv.
+	Sandbox string `json:"sandbox,omitempty"`
+
+	// SandboxSkipped is why the sandbox's profile was not applied, when cg ran inside an outer
+	// sandbox. It is empty for a run that applied its profile.
+	SandboxSkipped string `json:"sandbox_skipped,omitempty"`
+
 	Cwd       string    `json:"cwd,omitempty"`
 	Pool      string    `json:"pool,omitempty"`
 	SessionID string    `json:"session_id,omitempty"`

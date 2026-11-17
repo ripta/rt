@@ -130,7 +130,9 @@ func handleRun(ctx context.Context, reg *runRegistry, g *gate, req *mcpsdk.CallT
 		inner = outcome.Rewrites[0]
 	}
 
-	run, err := model.RunSupervised(in.Command, model.SuperviseOptions{Resolved: resolved, InnerExec: inner, Cwd: in.Cwd, Env: in.Env, SessionID: origin.SessionID, Supervisor: origin.Supervisor})
+	launch := newLaunch(in.Command, resolved, inner, in.Env, outcome.sandboxAt(0), outcome.skipAt(0))
+
+	run, err := model.RunSupervised(launch.Argv, model.SuperviseOptions{Resolved: launch.Resolved, InnerExec: launch.InnerExec, Sandbox: launch.Sandbox, Cwd: in.Cwd, Env: launch.Env, SessionID: origin.SessionID, Supervisor: origin.Supervisor})
 	if err != nil {
 		var sf *model.StartFailure
 		if errors.As(err, &sf) {

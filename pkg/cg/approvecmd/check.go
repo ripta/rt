@@ -8,6 +8,7 @@ package approvecmd
 import (
 	"fmt"
 	"io"
+	"runtime"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -40,6 +41,10 @@ type checkResult struct {
 	BadEnvs    []string    `json:"bad_envs,omitempty"`
 	Chain      []chainInfo `json:"chain,omitempty"`
 	Skipped    []skipInfo  `json:"skipped,omitempty"`
+
+	// Sandbox is the sandbox the command would run under, from the deciding rule. It is absent for
+	// an unsandboxed command, under allow-all as well.
+	Sandbox *sandboxInfo `json:"sandbox,omitempty"`
 
 	// Matches lists every allow that matched the typed command's layer, ranked. Each chain entry
 	// carries the same list for its own layer.
@@ -105,6 +110,60 @@ type ruleInfo struct {
 	Kind    string `json:"kind"`
 	Pattern string `json:"pattern"`
 	Message string `json:"message,omitempty"`
+	Sandbox string `json:"sandbox,omitempty"`
+}
+
+// sandboxInfo describes the sandbox a command would run under. Applicable is false when the
+// definition has no block for this platform, and a run is then refused. Class is the load probe's
+// classification, and ProbeStderr the launcher's message behind it. The probe ran in this process, so
+// a nesting result describes the shell cg check runs in, not the server. ProbeScope says so.
+type sandboxInfo struct {
+	Name             string   `json:"name"`
+	File             string   `json:"file"`
+	Platform         string   `json:"platform"`
+	Backends         []string `json:"backends,omitempty"`
+	Applicable       bool     `json:"applicable"`
+	Profile          string   `json:"profile,omitempty"`
+	AlreadySandboxed string   `json:"already_sandboxed,omitempty"`
+	Proxy            string   `json:"proxy,omitempty"`
+	Params           []string `json:"params,omitempty"`
+	Class            string   `json:"class,omitempty"`
+	ProbeStderr      string   `json:"probe_stderr,omitempty"`
+	ProbeScope       string   `json:"probe_scope,omitempty"`
+}
+
+// probeScopeShell labels a probe result as the state of the shell cg check runs in. The server probes
+// its own process at start, and a shell inside a sandbox does not mean the server is.
+const probeScopeShell = "shell"
+
+// sandboxInfoFor describes the sandbox a verdict runs under, or returns nil for none.
+func sandboxInfoFor(rs *approve.Ruleset, v approve.Verdict) *sandboxInfo {
+	name := v.Sandbox()
+	if name == "" {
+		return nil
+	}
+
+	info := &sandboxInfo{Name: name, Platform: runtime.GOOS}
+
+	sb, ok := rs.Sandbox(name)
+	if !ok {
+		return info
+	}
+
+	info.File, info.Backends = sb.File, sb.Declared
+
+	if sb.Seatbelt != nil {
+		info.Applicable = true
+		info.Profile = sb.Seatbelt.Profile
+		info.AlreadySandboxed = string(sb.Seatbelt.AlreadySandboxed)
+		info.Proxy = sb.Seatbelt.Proxy
+		info.Params = sb.Seatbelt.Defines
+		info.Class = string(sb.Seatbelt.Class)
+		info.ProbeStderr = sb.Seatbelt.ProbeStderr
+		info.ProbeScope = probeScopeShell
+	}
+
+	return info
 }
 
 // NewCheckCommand returns the `cg check` subcommand. It evaluates a command
@@ -180,6 +239,7 @@ func (opts *checkOptions) run(cmd *cobra.Command, args []string) error {
 		verdicts[i] = store.Ruleset().Evaluate(subject, opts.Env, resolver)
 		explained[i] = store.Ruleset().Explain(subject, opts.Env, resolver)
 		results[i] = checkResultFrom(argv, verdicts[i], explained[i])
+		results[i].Sandbox = sandboxInfoFor(store.Ruleset(), verdicts[i])
 	}
 
 	aggregate := aggregateDecision(verdicts)
@@ -199,9 +259,9 @@ func (opts *checkOptions) run(cmd *cobra.Command, args []string) error {
 		}
 	} else {
 		if opts.Shell {
-			writeCheckShellText(cmd.OutOrStdout(), shellSrc, commands, verdicts, explained, store.Project.Path)
+			writeCheckShellText(cmd.OutOrStdout(), shellSrc, commands, verdicts, explained, results, store.Project.Path)
 		} else {
-			writeCheckText(cmd.OutOrStdout(), commands[0], verdicts[0], explained[0], store.Project.Path)
+			writeCheckText(cmd.OutOrStdout(), commands[0], verdicts[0], explained[0], results[0].Sandbox, store.Project.Path)
 		}
 
 		for _, warning := range warnings {
@@ -351,7 +411,7 @@ func formName(m approve.Match) string {
 
 // ruleInfoFor describes a rule for the JSON output.
 func ruleInfoFor(r *approve.Rule) ruleInfo {
-	return ruleInfo{Kind: r.Kind().String(), Pattern: r.Pattern(), Message: r.Message}
+	return ruleInfo{Kind: r.Kind().String(), Pattern: r.Pattern(), Message: r.Message, Sandbox: r.Sandbox}
 }
 
 // chainInfoFrom describes one chain layer for the JSON output.
@@ -388,7 +448,7 @@ func resolvedPath(res *model.Resolution) string {
 }
 
 // writeCheckText renders a verdict as a short human-readable report.
-func writeCheckText(w io.Writer, argv []string, v approve.Verdict, layers []approve.LayerMatches, projectPath string) {
+func writeCheckText(w io.Writer, argv []string, v approve.Verdict, layers []approve.LayerMatches, sb *sandboxInfo, projectPath string) {
 	fmt.Fprintf(w, "%s: %s\n", decisionString(v.Decision), model.EscapeArgs(argv))
 
 	if v.Rule != nil {
@@ -402,6 +462,7 @@ func writeCheckText(w io.Writer, argv []string, v approve.Verdict, layers []appr
 		}
 	}
 
+	writeSandboxText(w, sb)
 	writeTiedText(w, v)
 
 	if len(v.Chain) == 0 {
@@ -423,6 +484,32 @@ func writeCheckText(w io.Writer, argv []string, v approve.Verdict, layers []appr
 
 	if v.Decision == approve.DecisionPrompt {
 		fmt.Fprintln(w, "  hint: no rule matched; cg_run would prompt for interactive approval, or fail closed without one")
+	}
+}
+
+// writeSandboxText names the sandbox a command would run under, and whether it can be applied.
+func writeSandboxText(w io.Writer, sb *sandboxInfo) {
+	if sb == nil {
+		return
+	}
+
+	if !sb.Applicable {
+		fmt.Fprintf(w, "  sandbox: %s, which has no block for this platform (%s); defined in %s for: %s\n",
+			sb.Name, sb.Platform, sb.File, strings.Join(sb.Backends, ", "))
+
+		return
+	}
+
+	fmt.Fprintf(w, "  sandbox: %s (seatbelt profile %s, already_sandboxed: %s, probe in this shell: %s)\n", sb.Name, sb.Profile, sb.AlreadySandboxed, sb.Class)
+
+	if sb.Class == string(model.SandboxNested) {
+		fmt.Fprintln(w, "    this shell is inside a sandbox. The server checks its own state at start, and that can differ.")
+	}
+	if sb.Class != string(model.SandboxApplies) {
+		fmt.Fprintf(w, "    probe stderr: %s\n", sb.ProbeStderr)
+	}
+	if sb.Proxy != "" {
+		fmt.Fprintf(w, "    proxy: %s\n", sb.Proxy)
 	}
 }
 
@@ -551,12 +638,12 @@ func chainRuleLabel(cl approve.ChainLayer) string {
 
 // writeCheckShellText renders the aggregate decision for the original shell
 // string, followed by each extracted command's own verdict via writeCheckText.
-func writeCheckShellText(w io.Writer, shellSrc string, commands [][]string, verdicts []approve.Verdict, explained [][]approve.LayerMatches, projectPath string) {
+func writeCheckShellText(w io.Writer, shellSrc string, commands [][]string, verdicts []approve.Verdict, explained [][]approve.LayerMatches, results []checkResult, projectPath string) {
 	fmt.Fprintf(w, "%s: %s\n", decisionString(aggregateDecision(verdicts)), shellSrc)
 
 	for i, argv := range commands {
 		fmt.Fprintf(w, "\n[%d] ", i+1)
-		writeCheckText(w, argv, verdicts[i], explained[i], projectPath)
+		writeCheckText(w, argv, verdicts[i], explained[i], results[i].Sandbox, projectPath)
 	}
 }
 

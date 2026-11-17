@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -71,11 +72,20 @@ func parseDocument(raw []byte, env *tildeEnv) (*yaml.Node, *Document, error) {
 // version means the rest of the document cannot be trusted to have decoded
 // against the expected shape at all.
 func validateDocument(node *yaml.Node, doc *Document, env *tildeEnv) error {
-	if doc.Version != 1 {
+	if doc.Version != 1 && doc.Version != 2 {
 		return ErrUnknownVersion
 	}
 
 	var errs []error
+
+	root := rootMapping(node)
+
+	if doc.Version == 2 {
+		errs = append(errs, strictKeys(root)...)
+		errs = append(errs, validateSandboxes(root, doc)...)
+	} else if sandboxes := findMapValue(root, "sandboxes"); sandboxes != nil {
+		errs = append(errs, fmt.Errorf("line %d: %w", sandboxes.Line, ErrSandboxNeedsV2))
+	}
 
 	switch doc.Mode {
 	case "", ModeEnforce, ModeAllowAll, ModeDenyAll:
@@ -83,10 +93,9 @@ func validateDocument(node *yaml.Node, doc *Document, env *tildeEnv) error {
 		errs = append(errs, fmt.Errorf("%w: %q", ErrUnknownMode, doc.Mode))
 	}
 
-	root := rootMapping(node)
-	errs = append(errs, validateEntries(findMapValue(root, "deny"), doc.Deny, sectionDeny, env)...)
-	errs = append(errs, validateEntries(findMapValue(root, "allow"), doc.Allow, sectionAllow, env)...)
-	errs = append(errs, validateEntries(findMapValue(root, "restrict"), doc.Restrict, sectionRestrict, env)...)
+	errs = append(errs, validateEntries(findMapValue(root, "deny"), doc.Deny, sectionDeny, doc.Version, env)...)
+	errs = append(errs, validateEntries(findMapValue(root, "allow"), doc.Allow, sectionAllow, doc.Version, env)...)
+	errs = append(errs, validateEntries(findMapValue(root, "restrict"), doc.Restrict, sectionRestrict, doc.Version, env)...)
 
 	return errors.Join(errs...)
 }
@@ -98,7 +107,7 @@ func validateDocument(node *yaml.Node, doc *Document, env *tildeEnv) error {
 // caller sees every broken rule in the sequence at once; an entry whose
 // validateRule fails skips compileRule, since the rule kind compileRule relies
 // on was not established.
-func validateEntries(seq *yaml.Node, rules []Rule, section ruleSection, env *tildeEnv) []error {
+func validateEntries(seq *yaml.Node, rules []Rule, section ruleSection, version int, env *tildeEnv) []error {
 	var errs []error
 	for i := range rules {
 		var entry *yaml.Node
@@ -106,7 +115,7 @@ func validateEntries(seq *yaml.Node, rules []Rule, section ruleSection, env *til
 			entry = seq.Content[i]
 		}
 
-		if err := validateRule(entry, &rules[i], section); err != nil {
+		if err := validateRule(entry, &rules[i], section, version); err != nil {
 			errs = append(errs, err)
 			continue
 		}
@@ -130,14 +139,14 @@ func validateEntries(seq *yaml.Node, rules []Rule, section ruleSection, env *til
 // kind and the per-section field constraints, then records the kind on the typed
 // rule. Inspecting the node keys distinguishes a present-but-empty value from an
 // absent key, which the typed decode alone cannot.
-func validateRule(entry *yaml.Node, rule *Rule, section ruleSection) error {
+func validateRule(entry *yaml.Node, rule *Rule, section ruleSection, version int) error {
 	line := 0
 	if entry != nil {
 		line = entry.Line
 	}
 
 	var kinds []RuleKind
-	var hasMessage, hasPermit, hasAsBasename bool
+	var hasMessage, hasPermit, hasAsBasename, hasSandbox bool
 	if entry != nil && entry.Kind == yaml.MappingNode {
 		for k := 0; k+1 < len(entry.Content); k += 2 {
 			key := entry.Content[k].Value
@@ -152,6 +161,8 @@ func validateRule(entry *yaml.Node, rule *Rule, section ruleSection) error {
 				hasPermit = true
 			case "as_basename":
 				hasAsBasename = true
+			case "sandbox":
+				hasSandbox = true
 			}
 		}
 	}
@@ -174,6 +185,19 @@ func validateRule(entry *yaml.Node, rule *Rule, section ruleSection) error {
 	}
 	if hasAsBasename && (kinds[0] == KindExact || kinds[0] == KindPrefix || kinds[0] == KindWrapper) {
 		return fmt.Errorf("line %d: %w", line, ErrAsBasenameOnTokens)
+	}
+
+	if hasSandbox {
+		switch {
+		case version != 2:
+			return fmt.Errorf("line %d: %w", line, ErrSandboxNeedsV2)
+		case section != sectionAllow || kinds[0] == KindWrapper:
+			return fmt.Errorf("line %d: %w", line, ErrSandboxNotOnPlain)
+		case rule.Sandbox == "":
+			return fmt.Errorf("line %d: %w", line, ErrSandboxEmptyName)
+		case slices.ContainsFunc(rule.PermitUnsafeEnvs, func(name string) bool { return strings.HasPrefix(name, "DYLD_") }):
+			return fmt.Errorf("line %d: %w", line, ErrSandboxWithDYLD)
+		}
 	}
 
 	rule.kind = kinds[0]

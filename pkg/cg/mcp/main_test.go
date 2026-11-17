@@ -33,6 +33,11 @@ func TestMain(m *testing.M) {
 		os.Exit(spawnPoolMain(os.Args[2:]))
 	}
 
+	// nested-gate is the helper TestNestedGateUnderARealOuterSandbox runs inside an outer sandbox.
+	if len(os.Args) > 1 && os.Args[1] == "nested-gate" {
+		os.Exit(nestedGateMain(os.Args[2:]))
+	}
+
 	// Supervisors spawned by tests inherit this, so no test writes the real state dir.
 	state, err := os.MkdirTemp("", "cg-state-")
 	if err != nil {
