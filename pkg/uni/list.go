@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/text/unicode/rangetable"
 	"golang.org/x/text/unicode/runenames"
+	"golang.org/x/text/width"
 
 	"github.com/ripta/rt/pkg/uni/display"
 )
@@ -26,7 +27,7 @@ func newListCommand() *cobra.Command {
 	}
 
 	c := cobra.Command{
-		Use:                   "list [--categories <CATEGORIES>] [--range <START>-<END>] [--scripts <SCRIPTS>] [--all | <RUNE-NAME-FILTER...>]",
+		Use:                   "list [--categories <CATEGORIES>] [--range <START>-<END>] [--scripts <SCRIPTS>] [--widths <WIDTHS>] [--all | <RUNE-NAME-FILTER...>]",
 		DisableFlagsInUseLine: true,
 		SilenceErrors:         true,
 
@@ -36,12 +37,13 @@ func newListCommand() *cobra.Command {
 	}
 
 	c.Flags().BoolVarP(&l.all, "all", "A", l.all, "List all")
-	c.Flags().StringSliceVarP(&l.cats, "categories", "C", l.cats, "Categories to limit to (see `uni catsegories`); by default all categories")
+	c.Flags().StringSliceVarP(&l.cats, "categories", "C", l.cats, "Categories to limit to (see `uni categories`); by default all categories")
 	c.Flags().BoolVarP(&l.count, "count", "c", l.count, "Show count of matches")
-	c.Flags().StringSliceVarP(&l.output, "output", "o", l.output, "Output columns")
+	c.Flags().StringSliceVarP(&l.output, "output", "o", l.output, display.OutputFlagUsage())
 	c.Flags().StringSliceVarP(&l.ranges, "range", "r", l.ranges, "Range of runes to limit to (e.g. a-z, U+0000-U+007F); by default all runes")
 	c.Flags().StringSliceVarP(&l.scripts, "scripts", "S", l.scripts, "Scripts to limit to (see `uni scripts`); by default all scripts")
 	c.Flags().StringVarP(&l.table, "table", "t", l.table, "Unicode Table version")
+	c.Flags().StringSliceVarP(&l.widths, "widths", "W", l.widths, "East Asian Widths to limit to, by key or name, prefix with ! to exclude (see `uni widths`); by default all widths")
 	return &c
 }
 
@@ -53,6 +55,7 @@ type lister struct {
 	ranges  []string
 	scripts []string
 	table   string
+	widths  []string
 }
 
 func (l *lister) run(c *cobra.Command, args []string) error {
@@ -121,6 +124,22 @@ func (l *lister) run(c *cobra.Command, args []string) error {
 		}
 	}
 
+	widthIncludes := map[width.Kind]bool{}
+	widthExcludes := map[width.Kind]bool{}
+	for _, w := range l.widths {
+		name, exclude := strings.CutPrefix(w, "!")
+		ew, ok := display.LookupWidth(name)
+		if !ok {
+			return fmt.Errorf("east asian width %q does not exist; see `uni widths`", w)
+		}
+
+		if exclude {
+			widthExcludes[ew.Kind] = true
+		} else {
+			widthIncludes[ew.Kind] = true
+		}
+	}
+
 	count := 0
 	norm := strings.Split(strings.ToUpper(strings.Join(args, ":")), ":")
 	rangetable.Visit(t, func(r rune) {
@@ -140,6 +159,16 @@ func (l *lister) run(c *cobra.Command, args []string) error {
 			}
 		}
 
+		if len(widthIncludes) > 0 || len(widthExcludes) > 0 {
+			k := width.LookupRune(r).Kind()
+			if widthExcludes[k] {
+				return
+			}
+			if len(widthIncludes) > 0 && !widthIncludes[k] {
+				return
+			}
+		}
+
 		name := runenames.Name(r)
 		if runeMatches(norm, name) {
 			if cols := disp.Generate(r); len(cols) > 0 {
@@ -156,8 +185,8 @@ func (l *lister) run(c *cobra.Command, args []string) error {
 }
 
 func (l *lister) validate(_ *cobra.Command, args []string) error {
-	if len(args) < 1 && !l.all && len(l.cats) == 0 && len(l.ranges) == 0 {
-		return errors.New("at least one argument, or an explicit --all flag, or one or more --categories, or one or more --range is required")
+	if len(args) < 1 && !l.all && len(l.cats) == 0 && len(l.ranges) == 0 && len(l.widths) == 0 {
+		return errors.New("at least one argument, or an explicit --all flag, or one or more --categories, --range, or --widths is required")
 	}
 	return nil
 }

@@ -19,6 +19,7 @@ func NewCommand() *cobra.Command {
 	c.AddCommand(newNFKCCommand())
 	c.AddCommand(newNFKDCommand())
 	c.AddCommand(newScriptsCommand())
+	c.AddCommand(newWidthsCommand())
 	c.AddCommand(newSortCommand())
 	return &c
 }
