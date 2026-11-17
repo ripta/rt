@@ -1318,6 +1318,14 @@ Hᴇʟʟᴏ Wᴏʀʟᴅ
 𝐻𝑒𝑙𝑙𝑜 𝑊𝑜𝑟𝑙𝑑
 ```
 
+Mapping only swaps each character in place, so `upside-down` does not reorder. Pipe through `rev`, which
+ships with macOS and util-linux, to flip the text for real:
+
+```
+❯ echo Hello World | uni map upside-down | rev
+plɹoM ollǝH
+```
+
 Canonically compose runes:
 
 ```
