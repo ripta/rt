@@ -36,13 +36,16 @@ var displayFuncs = map[string]displayFunc{
 	"script": func(r rune) string {
 		return fmt.Sprintf("<%s>", RuneToScript(r))
 	},
+	"width": func(r rune) string {
+		return fmt.Sprintf("<%s>", RuneToWidth(r))
+	},
 	"name": func(r rune) string {
 		return runenames.Name(r)
 	},
 }
 
 var displayGroups = map[string][]string{
-	"all":     {"id", "rune", "hexbytes", "cats", "script", "name"},
+	"all":     {"id", "rune", "hexbytes", "cats", "script", "width", "name"},
 	"bytes":   {"id", "rune", "hexbytes"},
 	"default": {"id", "rune", "hexbytes", "cats", "name"},
 	"short":   {"id", "rune", "hexbytes", "name"},
