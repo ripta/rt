@@ -446,7 +446,21 @@ Second, `cg_cancel` signals only runs and pools the current server started. It
 takes the pid from the supervisor's status pipe, never from a file under the
 capture root, because anything running as the same user can write there. After
 a restart, cancelling a pre-existing in-flight run is an error; use `cg cancel`
-from a shell instead.
+from a shell instead. `cg cancel` does read the pid from the run's `pid` file,
+so it first confirms the pid's parent is `cg supervise-run` for that run's
+directory, or for a pool that the pid itself is `cg supervise-pool` for the
+pool's directory. A pid that fails the check is refused and never signalled.
+This check needs a platform where cg can read another process's parent and
+arguments, which today means macOS and Linux. A run started by `cg --capture`
+in a shell has no supervisor, so `cg cancel` refuses it. Stop it with ctrl-C in
+its shell.
+
+Each run also starts a supervisor from the cg executable on disk. The server
+records that executable's path, its symlink target, and a SHA-256 of the file at
+start. Before every spawn, including each pool member and each repeat, it
+resolves and hashes the file again. When the target or the hash differs, for
+example after installing a new cg, the run is refused with a message to restart
+cg. Hashing the file adds a small delay to each spawn.
 
 If a supervisor dies before recording the run's exit — a SIGKILL, say — the
 run never gets its `meta.json`. Such a run lists as `abandoned` in `cg ls` and

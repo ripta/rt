@@ -114,7 +114,7 @@ func callStats(t *testing.T, args map[string]any) *mcpsdk.CallToolResult {
 	t.Helper()
 
 	ctx := context.Background()
-	server := newServer("test", time.Now(), "SESS", &gate{blindlyAllow: true})
+	server := newServer("test", time.Now(), "SESS", &gate{blindlyAllow: true}, nil)
 
 	serverTransport, clientTransport := mcpsdk.NewInMemoryTransports()
 	ss, err := server.Connect(ctx, serverTransport, nil)

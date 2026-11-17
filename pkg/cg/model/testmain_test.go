@@ -2,7 +2,9 @@ package model
 
 import (
 	"errors"
+	"fmt"
 	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -13,12 +15,21 @@ import (
 // package's own test binary; without this dispatch, that invocation would
 // just run the test suite again instead of supervising, recursively forking
 // forever. The bare `supervise` form is the pre-rename alias.
+//
+// A copy of the test binary named "rt" models the multi-call binary. It knows the supervisors only
+// under the "cg" subcommand, so `rt supervise-run` fails the way the real one does.
 func TestMain(m *testing.M) {
-	if len(os.Args) > 1 {
-		switch os.Args[1] {
-		case "supervise-run", "supervise-pool", "supervise":
-			os.Exit(cgMain())
+	if len(os.Args) > 2 && os.Args[1] == "cg" && isSuperviseName(os.Args[2]) {
+		os.Args = append(os.Args[:1:1], os.Args[2:]...)
+		os.Exit(cgMain())
+	}
+
+	if len(os.Args) > 1 && isSuperviseName(os.Args[1]) {
+		if filepath.Base(os.Args[0]) == "rt" {
+			fmt.Fprintf(os.Stderr, "Error: unknown command %q for \"rt\"\n", os.Args[1])
+			os.Exit(1)
 		}
+		os.Exit(cgMain())
 	}
 
 	if len(os.Args) >= 3 && os.Args[1] == "history-append" {
@@ -35,6 +46,14 @@ func TestMain(m *testing.M) {
 	code := m.Run()
 	os.RemoveAll(state)
 	os.Exit(code)
+}
+
+func isSuperviseName(name string) bool {
+	switch name {
+	case "supervise-run", "supervise-pool", "supervise":
+		return true
+	}
+	return false
 }
 
 func cgMain() int {

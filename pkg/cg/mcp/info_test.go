@@ -69,7 +69,7 @@ func serverInfoSessionID(t *testing.T, sessionID string) string {
 	t.Helper()
 
 	ctx := context.Background()
-	server := newServer("test", time.Now(), sessionID, &gate{blindlyAllow: true})
+	server := newServer("test", time.Now(), sessionID, &gate{blindlyAllow: true}, nil)
 
 	serverTransport, clientTransport := mcpsdk.NewInMemoryTransports()
 	ss, err := server.Connect(ctx, serverTransport, nil)
@@ -106,7 +106,7 @@ func serverInfoSessionID(t *testing.T, sessionID string) string {
 
 func TestServerSendsInstructionsOnInitialize(t *testing.T) {
 	ctx := context.Background()
-	server := newServer("test", time.Now(), "SESS", &gate{blindlyAllow: true})
+	server := newServer("test", time.Now(), "SESS", &gate{blindlyAllow: true}, nil)
 
 	serverTransport, clientTransport := mcpsdk.NewInMemoryTransports()
 	ss, err := server.Connect(ctx, serverTransport, nil)
@@ -169,7 +169,7 @@ func TestInfoReportsRuleWarnings(t *testing.T) {
 	g := newTestGate(t, "version: 1\nallow:\n  - wrapper: [sudo, -u]\n  - prefix: [echo]\n", false)
 
 	ctx := context.Background()
-	server := newServer("test", time.Now(), "SESS", g)
+	server := newServer("test", time.Now(), "SESS", g, nil)
 
 	serverTransport, clientTransport := mcpsdk.NewInMemoryTransports()
 	ss, err := server.Connect(ctx, serverTransport, nil)

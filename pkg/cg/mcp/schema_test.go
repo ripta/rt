@@ -27,7 +27,7 @@ type listedSchema struct {
 // arguments, where null and absence mean the same thing.
 func TestRequiredArgumentsRejectNull(t *testing.T) {
 	ctx := context.Background()
-	server := newServer("test", time.Now(), "SESS", &gate{blindlyAllow: true})
+	server := newServer("test", time.Now(), "SESS", &gate{blindlyAllow: true}, nil)
 
 	serverTransport, clientTransport := mcpsdk.NewInMemoryTransports()
 	ss, err := server.Connect(ctx, serverTransport, nil)

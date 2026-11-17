@@ -65,16 +65,22 @@ type CancelResult struct {
 	Finished       bool   `json:"finished"`
 }
 
-// CancelRun signals the process group of run id. An already-finished or
-// already-gone run returns {signaled: false, finished: true} without error. An
-// unknown ID surfaces as ErrUnknownRunID. When EscalateAfter > 0, it waits up
-// to that long for the child to exit and sends EscalateSignal if it is still
-// running.
+// CancelRun signals the process group of run id and reports the outcome.
 //
-// A pool ID drives the pool signal protocol instead: the signal goes to the
-// pool supervisor itself, where SIGTERM stops scheduling and lets in-flight
-// runs finish, and SIGINT additionally cancels them. Finished and abandoned
-// pools report finished without signalling.
+// The pid file only names a candidate, because a command that can write the run directory can
+// rewrite it. Before signalling, CancelRun confirms the pid's parent is `cg supervise-run` for the
+// run's directory. For a pool it confirms the pid itself is `cg supervise-pool` for the pool's
+// directory. A pid that fails the check is refused, and a pid that names no process is a finished run.
+//
+// An already-finished or already-gone run returns {signaled: false, finished: true} without error.
+// An unknown ID surfaces as ErrUnknownRunID.
+//
+// When EscalateAfter > 0, CancelRun waits up to that long for the child to exit and sends
+// EscalateSignal if it is still running.
+//
+// A pool ID drives the pool signal protocol instead: the signal goes to the pool supervisor itself,
+// where SIGTERM stops scheduling and lets in-flight runs finish, and SIGINT additionally cancels
+// them. Finished and abandoned pools report finished without signalling.
 func CancelRun(ctx context.Context, id string, opts CancelOptions) (CancelResult, error) {
 	sig, err := ParseSignal(opts.Signal, syscall.SIGTERM)
 	if err != nil {
@@ -114,6 +120,10 @@ func CancelRun(ctx context.Context, id string, opts CancelOptions) (CancelResult
 		return CancelResult{}, fmt.Errorf("cannot cancel %s: no pid recorded for this run: %w", id, perr)
 	}
 
+	if terr := tieRunPid(dir, pid); terr != nil {
+		return refuseUntied(out, id, terr, "run")
+	}
+
 	if kerr := syscall.Kill(-pid, sig); kerr != nil {
 		if errors.Is(kerr, syscall.ESRCH) {
 			out.Finished = true
@@ -144,6 +154,25 @@ func CancelRun(ctx context.Context, id string, opts CancelOptions) (CancelResult
 	return out, nil
 }
 
+// refuseUntied turns a failed pid check into the cancel outcome. A pid that names no process is a
+// finished run. Anything else is a refusal, since the pid file is not proof of whose process it names.
+// kind is "run" or "pool" and picks the hint, because only a run can have been started by `cg --capture`.
+func refuseUntied(out CancelResult, id string, err error, kind string) (CancelResult, error) {
+	if errors.Is(err, ErrProcessGone) {
+		out.Finished = true
+		return out, nil
+	}
+	if !errors.Is(err, ErrPidNotTied) {
+		return CancelResult{}, fmt.Errorf("refusing to cancel %s: %w", id, err)
+	}
+
+	hint := "The pid file may have been rewritten."
+	if kind == "run" {
+		hint = "A run started by `cg --capture` in a shell has no supervisor, so stop it with ctrl-C in that shell. Otherwise the pid file may have been rewritten."
+	}
+	return CancelResult{}, fmt.Errorf("refusing to cancel %s: %w. %s", id, err, hint)
+}
+
 // cancelPool signals the pool supervisor with sig. The pid is positive on
 // purpose: the supervisor is its own session leader and members run in their
 // own sessions, so a group signal would reach nothing else anyway, and the
@@ -159,6 +188,10 @@ func cancelPool(ctx context.Context, out CancelResult, dir string, m *PoolManife
 	if finished {
 		out.Finished = true
 		return out, nil
+	}
+
+	if terr := tiePoolPid(dir, pid); terr != nil {
+		return refuseUntied(out, out.ID, terr, "pool")
 	}
 
 	if kerr := syscall.Kill(pid, sig); kerr != nil {
