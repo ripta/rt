@@ -26,8 +26,8 @@ type Suggestion struct {
 }
 
 // Suggest derives the rule pre-filled into the prompt for argv, resolved as res. The rule is
-// the whole argv. Its first token is the path the rule pins, or argv[0] as written
-// when resolution found none.
+// the whole argv. Its first token is the program's path, spelled as portableHead chooses:
+// project-relative, ~/..., or absolute. It is argv[0] as written when resolution found no path.
 //
 // "Heads a wrapper rule" reads the first token the way matching does: a bare token compares
 // with the invoked basename, and a path token compares with the canonical or resolved path.
@@ -70,36 +70,77 @@ func (rs *Ruleset) Suggest(argv []string, res *model.Resolution) Suggestion {
 	return Suggestion{Tokens: tokens, HeadsWrapper: heads, NearMiss: near}
 }
 
-// portableHead spells a program in the project as a project-relative path, so a remembered rule
-// works for anyone in any checkout. The project file is committed, and an absolute path would hold
-// one person's home directory and one worktree's name.
+// portableHead spells a program as a path that works for anyone, in any checkout and on any
+// machine. The project file is committed, and an absolute path would hold one person's home
+// directory and one worktree's name.
 //
-// The relative spelling is offered only when it matches the command, so a project root reached
-// through a symlink keeps the absolute path that does. Any other path comes back unchanged.
+// A program in the project gets a project-relative spelling. A program under the home directory
+// and outside the project gets ~/... instead. Each spelling is offered only when it matches the
+// command, so a project root or home directory reached through a symlink keeps the absolute path
+// that does. Any other path comes back unchanged.
 func (rs *Ruleset) portableHead(path string, canonical, resolved, basename matchForm) string {
-	if rs.projectRoot == "" || !filepath.IsAbs(path) {
+	if !filepath.IsAbs(path) {
 		return path
 	}
 
-	target := path
-	if rs.checkoutAlias != nil {
-		if alias := rs.checkoutAlias(path); alias != "" {
-			target = alias
+	if rs.projectRoot != "" {
+		if rel, inside := relativeTo(rs.projectRoot, rs.aliasedPath(path)); inside {
+			if head := rs.relativeHead("./"+rel, canonical, resolved, basename); head != "" {
+				return head
+			}
+
+			return path
 		}
 	}
 
-	rel, err := filepath.Rel(rs.projectRoot, target)
-	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+	// A root home would claim every absolute path as ~/...
+	if rs.tilde == nil || rs.tilde.home == "" || filepath.Dir(rs.tilde.home) == rs.tilde.home {
 		return path
 	}
 
-	candidate := "./" + filepath.ToSlash(rel)
+	if rel, inside := relativeTo(rs.tilde.home, path); inside {
+		if head := rs.relativeHead("~/"+rel, canonical, resolved, basename); head != "" {
+			return head
+		}
+	}
 
+	return path
+}
+
+// aliasedPath maps a path in a linked worktree to the same file in the project checkout.
+func (rs *Ruleset) aliasedPath(path string) string {
+	if rs.checkoutAlias != nil {
+		if alias := rs.checkoutAlias(path); alias != "" {
+			return alias
+		}
+	}
+
+	return path
+}
+
+// relativeTo returns the slash-separated path below dir, and whether path lies strictly inside it.
+func relativeTo(dir, path string) (string, bool) {
+	rel, err := filepath.Rel(dir, path)
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+
+	return filepath.ToSlash(rel), true
+}
+
+// relativeHead compiles a candidate first token the way a load does, and returns it only when it
+// matches the command. A ~/ candidate takes its home from the ruleset's own environment.
+func (rs *Ruleset) relativeHead(candidate string, canonical, resolved, basename matchForm) string {
 	rule := Rule{Prefix: []string{candidate}, kind: KindPrefix}
+
+	if err := rs.tilde.expandRule(&rule, sectionAllow); err != nil || rule.inert {
+		return ""
+	}
+
 	compileMatch(&rule, rs.projectRoot)
 
 	if !tokenRuleMatches(&rule, canonical, resolved, basename) {
-		return path
+		return ""
 	}
 
 	return candidate

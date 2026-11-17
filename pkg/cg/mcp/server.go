@@ -45,7 +45,7 @@ server's capture_root; set TMPDIR to its parent to read the server's runs.`,
 	c.Flags().BoolVar(&opts.blindlyAllow, "blindly-allow", false,
 		"disable the cg_run approval gate for this server process (forces allow-all)")
 	c.Flags().StringSliceVar(&opts.projectConfig, "project-config", nil,
-		"project-specific approval rules files, relative to the project root, tried in order (first existing wins; default "+strings.Join(approve.DefaultProjectFiles(), ", ")+")")
+		"project-specific approval rules files, tried in order (first existing wins; default "+strings.Join(approve.DefaultProjectFiles(), ", ")+"). A relative value joins the project root. An absolute value, or one starting with ~, names that exact file")
 	return c
 }
 

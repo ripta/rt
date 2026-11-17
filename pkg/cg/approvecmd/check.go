@@ -111,7 +111,7 @@ func NewCheckCommand() *cobra.Command {
 	c.Flags().StringVar(&opts.Cwd, "cwd", "", "working directory to resolve COMMAND against; defaults to the current directory")
 	c.Flags().StringToStringVar(&opts.Env, "env", nil, "environment override to check for dangerous variables (repeatable, KEY=VALUE)")
 	c.Flags().StringSliceVar(&opts.ProjectConfig, "project-config", nil,
-		"project-specific approval rules files, relative to the project root, tried in order (first existing wins; default "+strings.Join(approve.DefaultProjectFiles(), ", ")+")")
+		"project-specific approval rules files, tried in order (first existing wins; default "+strings.Join(approve.DefaultProjectFiles(), ", ")+"). A relative value joins the project root. An absolute value, or one starting with ~, names that exact file")
 	c.Flags().StringVarP(&opts.Output, "output", "o", "text", "output format: text or json")
 	c.Flags().BoolVar(&opts.Shell, "shell", false, "treat COMMAND as a single shell command string; check every command it chains or nests instead of a pre-split argv")
 

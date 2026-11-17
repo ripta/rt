@@ -86,6 +86,10 @@ func (k RuleKind) String() string {
 //
 // baseArgv is cmpArgv with its first token reduced to a basename. It is set only for a path-form
 // rule, where it lets a deny match an inner layer of a wrapper chain by program name.
+//
+// A first token that starts with ~ is a third shape: home-relative. Such a rule is never
+// project-relative. An inert rule is an allow rule whose ~user could not be resolved, and it
+// matches no command. The decoded document keeps the ~ spelling.
 type Rule struct {
 	Exact   []string `yaml:"exact,omitempty"`
 	Prefix  []string `yaml:"prefix,omitempty"`
@@ -103,6 +107,11 @@ type Rule struct {
 	relative     bool
 	cmpArgv      []string
 	baseArgv     []string
+
+	tilde       bool
+	tildeHead   string
+	inert       bool
+	inertReason string
 }
 
 // Kind reports which matching strategy this rule uses, set by the loader.
@@ -145,6 +154,7 @@ type Ruleset struct {
 
 	checkoutAlias func(path string) string
 	projectRoot   string
+	tilde         *tildeEnv
 }
 
 // Store owns the two layers and the live ruleset. It performs disk I/O at load
@@ -163,6 +173,10 @@ type Store struct {
 	// fixed at load. The live-append path reuses it so a remembered relative rule
 	// anchors the same way a reloaded one would.
 	projectRoot string
+
+	// tilde is the home directory and user lookup the load read. Every later parse and compile
+	// in the session uses it, never a fresh $HOME.
+	tilde *tildeEnv
 
 	mu    sync.Mutex
 	rules atomic.Pointer[Ruleset]

@@ -135,3 +135,92 @@ func TestInnerVerdictLayerCarriesItsPermittingRules(t *testing.T) {
 		t.Errorf("top layer = step %v pathForm %v candidates %d, want the permitting path-form wrapper rule", top.Step, top.PathForm, len(top.Candidates))
 	}
 }
+
+type homeSuggestTest struct {
+	Name string
+
+	// Path and Canonical are relative to the fixture: HOME/ is the home directory and ROOT/ the
+	// project root. An empty Canonical models a program that cannot be canonicalized.
+	Path      string
+	Canonical string
+	NoHome    bool
+	RootHome  bool
+	Want      string
+}
+
+var homeSuggestTests = []homeSuggestTest{
+	{Name: "a program under the home directory pre-fills ~/", Path: "HOME/bin/foo", Canonical: "HOME/bin/foo", Want: "~/bin/foo"},
+	{Name: "a program in a nested home directory keeps its path", Path: "HOME/a/b/foo", Canonical: "HOME/a/b/foo", Want: "~/a/b/foo"},
+	{Name: "a link in the home directory is spelled as invoked", Path: "HOME/bin/foo", Canonical: "/opt/real/foo", Want: "~/bin/foo"},
+	{Name: "a program in the project keeps its project-relative spelling", Path: "ROOT/bin/foo", Canonical: "ROOT/bin/foo", Want: "./bin/foo"},
+	{Name: "a program outside the home directory stays absolute", Path: "/opt/bin/foo", Canonical: "/opt/bin/foo", Want: "/opt/bin/foo"},
+	{Name: "a sibling directory that shares the home prefix stays absolute", Path: "/home/mentor/bin/foo", Canonical: "/home/mentor/bin/foo", Want: "/home/mentor/bin/foo"},
+	{Name: "another user's home stays absolute", Path: "/home/alice/bin/foo", Canonical: "/home/alice/bin/foo", Want: "/home/alice/bin/foo"},
+	{Name: "the home directory itself stays absolute", Path: "HOME", Canonical: "HOME", Want: "HOME"},
+	{Name: "a home reached through a symlink alias stays absolute", Path: "/alias/me/bin/foo", Canonical: "HOME/bin/foo", Want: "/alias/me/bin/foo"},
+	{Name: "a program that cannot be canonicalized would not match, so it stays absolute", Path: "HOME/bin/foo", Want: "HOME/bin/foo"},
+	{Name: "a filesystem-root home never claims every path", Path: "/usr/bin/foo", Canonical: "/usr/bin/foo", RootHome: true, Want: "/usr/bin/foo"},
+	{Name: "a ruleset with no home never offers ~/", Path: "HOME/bin/foo", Canonical: "HOME/bin/foo", NoHome: true, Want: "HOME/bin/foo"},
+}
+
+func TestSuggestHomePrefill(t *testing.T) {
+	t.Parallel()
+
+	home := t.TempDir()
+	rs := loadHomeRuleset(t, home, false)
+	bare := loadHomeRuleset(t, home, true)
+	atRoot := loadHomeRuleset(t, "/", false)
+	root := rs.projectRoot
+
+	fill := func(s string) string {
+		if s == "HOME" || strings.HasPrefix(s, "HOME/") {
+			return home + strings.TrimPrefix(s, "HOME")
+		}
+		if strings.HasPrefix(s, "ROOT/") {
+			return root + strings.TrimPrefix(s, "ROOT")
+		}
+
+		return s
+	}
+
+	for _, tt := range homeSuggestTests {
+		t.Run(tt.Name, func(t *testing.T) {
+			argv := []string{"foo", "x"}
+			res := &model.Resolution{Argv: argv, Resolved: fill(tt.Path), Canonical: fill(tt.Canonical)}
+
+			subject := rs
+			switch {
+			case tt.NoHome:
+				subject = bare
+			case tt.RootHome:
+				subject = atRoot
+			}
+
+			got := subject.Suggest(argv, res)
+			if want := []string{fill(tt.Want), "x"}; !slices.Equal(got.Tokens, want) {
+				t.Errorf("Suggest tokens = %v, want %v", got.Tokens, want)
+			}
+		})
+	}
+}
+
+// loadHomeRuleset loads an empty project with home as the stored home directory. A ruleset without
+// a home stands for the zero Ruleset a probe uses.
+func loadHomeRuleset(t *testing.T, home string, noHome bool) *Ruleset {
+	t.Helper()
+
+	opts := tildeOptions(t, "", "version: 1\n")
+	opts.Home = func() (string, error) { return home, nil }
+
+	s, err := Load(opts)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	rs := s.Ruleset()
+	if noHome {
+		return &Ruleset{projectRoot: rs.projectRoot}
+	}
+
+	return rs
+}

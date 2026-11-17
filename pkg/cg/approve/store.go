@@ -37,18 +37,30 @@ type LoadOptions struct {
 	// ProjectRoot, in preference order. The first path that exists is loaded as
 	// the project layer. An empty list resolves to DefaultProjectFiles.
 	ProjectFiles []string
+	// Home reads the home directory a leading ~ expands to. It is called once per load. Nil
+	// resolves to os.UserHomeDir, the lookup that locates the global rules file.
+	Home func() (string, error)
+	// LookupUser reads a named user's home directory for ~user. It is consulted even when the
+	// user is the one running cg. Nil resolves to the system user database.
+	LookupUser func(name string) (string, error)
 }
 
 // DefaultGlobalPath returns ~/.config/cg/approve.yaml. The path is built from
 // the home directory explicitly rather than os.UserConfigDir so it stays
 // ~/.config on macOS.
 func DefaultGlobalPath() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("resolving home directory: %w", err)
+	env := newTildeEnv(nil, nil)
+
+	return env.globalPath()
+}
+
+// globalPath returns the default global rules file under the home directory the load read.
+func (e *tildeEnv) globalPath() (string, error) {
+	if e.homeErr != nil {
+		return "", e.homeErr
 	}
 
-	return filepath.Join(home, ".config", "cg", "approve.yaml"), nil
+	return filepath.Join(e.home, ".config", "cg", "approve.yaml"), nil
 }
 
 // DefaultProjectRoot returns CLAUDE_PROJECT_DIR when set and non-empty,
@@ -67,10 +79,14 @@ func DefaultProjectRoot() (string, error) {
 }
 
 // ProjectPath returns the project rules file for a project root. rel is the
-// file path relative to root; an empty rel resolves to DefaultProjectFile.
+// file path relative to root; an empty rel resolves to DefaultProjectFile. An absolute rel names
+// that exact file, since joining it onto root would nest it.
 func ProjectPath(root, rel string) string {
 	if rel == "" {
 		rel = DefaultProjectFile
+	}
+	if filepath.IsAbs(rel) {
+		return filepath.Clean(rel)
 	}
 
 	return filepath.Join(root, rel)
@@ -82,28 +98,42 @@ func ProjectPath(root, rel string) string {
 // still chosen and surfaces its error at load. When none exist, the first listed
 // path is the write target so a remembered rule lands at the operator's
 // preferred location. An empty list resolves to DefaultProjectFiles.
-func resolveProjectPath(root string, rels []string) string {
+//
+// A value that starts with ~ is expanded, and one that is absolute after expansion names that
+// exact file. Every value is expanded first, so an unresolvable one fails even when an earlier
+// candidate exists.
+func resolveProjectPath(root string, rels []string, env *tildeEnv) (string, error) {
 	if len(rels) == 0 {
 		rels = DefaultProjectFiles()
 	}
 
-	for _, rel := range rels {
-		p := ProjectPath(root, rel)
+	paths := make([]string, len(rels))
+	for i, rel := range rels {
+		p, err := env.projectFile(root, rel)
+		if err != nil {
+			return "", err
+		}
+		paths[i] = p
+	}
+
+	for _, p := range paths {
 		if _, err := os.Stat(p); err == nil || !os.IsNotExist(err) {
-			return p
+			return p, nil
 		}
 	}
 
-	return ProjectPath(root, rels[0])
+	return paths[0], nil
 }
 
 // Load reads the global and project layers, merges them into a frozen ruleset,
 // and returns the store. A missing layer file is not an error; it is treated as
 // an empty layer. A present file that fails to parse or validate fails the load.
 func Load(opts LoadOptions) (*Store, error) {
+	env := newTildeEnv(opts.Home, opts.LookupUser)
+
 	globalPath := opts.GlobalPath
 	if globalPath == "" {
-		p, err := DefaultGlobalPath()
+		p, err := env.globalPath()
 		if err != nil {
 			return nil, err
 		}
@@ -119,22 +149,27 @@ func Load(opts LoadOptions) (*Store, error) {
 		projectRoot = root
 	}
 
-	global, err := loadLayer(globalPath)
+	projectPath, err := resolveProjectPath(projectRoot, opts.ProjectFiles, env)
 	if err != nil {
 		return nil, err
 	}
 
-	project, err := loadLayer(resolveProjectPath(projectRoot, opts.ProjectFiles))
+	global, err := loadLayer(globalPath, env)
 	if err != nil {
 		return nil, err
 	}
 
-	rules, err := buildRuleset(global, project, projectRoot)
+	project, err := loadLayer(projectPath, env)
 	if err != nil {
 		return nil, err
 	}
 
-	s := &Store{Global: global, Project: project, projectRoot: projectRoot}
+	rules, err := buildRuleset(global, project, projectRoot, env)
+	if err != nil {
+		return nil, err
+	}
+
+	s := &Store{Global: global, Project: project, projectRoot: projectRoot, tilde: env}
 	s.rules.Store(rules)
 
 	return s, nil
@@ -152,6 +187,7 @@ type LayerDiagnosis struct {
 
 	layer Layer
 	root  string
+	tilde *tildeEnv
 }
 
 // Diagnose validates the global and project layers independently for `cg
@@ -161,9 +197,11 @@ type LayerDiagnosis struct {
 // failures Load also surfaces before it can even locate the layer files, such
 // as a home directory or working directory lookup failure.
 func Diagnose(opts LoadOptions) (global, project LayerDiagnosis, err error) {
+	env := newTildeEnv(opts.Home, opts.LookupUser)
+
 	globalPath := opts.GlobalPath
 	if globalPath == "" {
-		p, err := DefaultGlobalPath()
+		p, err := env.globalPath()
 		if err != nil {
 			return LayerDiagnosis{}, LayerDiagnosis{}, err
 		}
@@ -179,10 +217,13 @@ func Diagnose(opts LoadOptions) (global, project LayerDiagnosis, err error) {
 		projectRoot = root
 	}
 
-	projectPath := resolveProjectPath(projectRoot, opts.ProjectFiles)
+	projectPath, err := resolveProjectPath(projectRoot, opts.ProjectFiles, env)
+	if err != nil {
+		return LayerDiagnosis{}, LayerDiagnosis{}, err
+	}
 
-	globalLayer, globalErr := loadLayer(globalPath)
-	projectLayer, projectErr := loadLayer(projectPath)
+	globalLayer, globalErr := loadLayer(globalPath, env)
+	projectLayer, projectErr := loadLayer(projectPath, env)
 
 	// loadLayer returns a zero-value Layer on a read or parse error, path and
 	// Present included, since Load only needs the error and never reads those
@@ -205,6 +246,7 @@ func Diagnose(opts LoadOptions) (global, project LayerDiagnosis, err error) {
 			Warnings: documentWarnings(projectLayer.Doc),
 			layer:    projectLayer,
 			root:     projectRoot,
+			tilde:    env,
 		},
 		nil
 }
@@ -218,7 +260,7 @@ func MergedWarnings(global, project LayerDiagnosis) (warnings []Warning, ok bool
 		return nil, false
 	}
 
-	rs, err := buildRuleset(global.layer, project.layer, project.root)
+	rs, err := buildRuleset(global.layer, project.layer, project.root, project.tilde)
 	if err != nil {
 		return nil, false
 	}
@@ -228,7 +270,7 @@ func MergedWarnings(global, project LayerDiagnosis) (warnings []Warning, ok bool
 
 // loadLayer reads and parses one layer file. A missing file yields a layer with
 // Present=false; any other read or parse error is returned with the path.
-func loadLayer(path string) (Layer, error) {
+func loadLayer(path string, env *tildeEnv) (Layer, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -237,7 +279,7 @@ func loadLayer(path string) (Layer, error) {
 		return Layer{}, fmt.Errorf("reading %s: %w", path, err)
 	}
 
-	node, doc, err := ParseDocument(raw)
+	node, doc, err := parseDocument(raw, env)
 	if err != nil {
 		return Layer{}, fmt.Errorf("%s: %w", path, err)
 	}
@@ -262,8 +304,8 @@ func loadLayer(path string) (Layer, error) {
 // so the most specific layer's message reaches the agent. Restrict is evaluated after
 // allow and the slices carry no layer provenance, so any allow from either layer
 // carves out of any restrict from either layer.
-func buildRuleset(global, project Layer, projectRoot string) (*Ruleset, error) {
-	rs := &Ruleset{Mode: ModeEnforce, checkoutAlias: newCheckoutAlias(projectRoot), projectRoot: projectRoot}
+func buildRuleset(global, project Layer, projectRoot string, env *tildeEnv) (*Ruleset, error) {
+	rs := &Ruleset{Mode: ModeEnforce, checkoutAlias: newCheckoutAlias(projectRoot), projectRoot: projectRoot, tilde: env}
 
 	if global.Doc != nil && global.Doc.Mode != "" {
 		rs.Mode = global.Doc.Mode

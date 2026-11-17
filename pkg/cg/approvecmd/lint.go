@@ -68,7 +68,7 @@ func NewLintCommand() *cobra.Command {
 	}
 
 	c.Flags().StringSliceVar(&opts.ProjectConfig, "project-config", nil,
-		"project-specific approval rules files, relative to the project root, tried in order (first existing wins; default "+strings.Join(approve.DefaultProjectFiles(), ", ")+")")
+		"project-specific approval rules files, tried in order (first existing wins; default "+strings.Join(approve.DefaultProjectFiles(), ", ")+"). A relative value joins the project root. An absolute value, or one starting with ~, names that exact file")
 	c.Flags().StringVarP(&opts.Output, "output", "o", "text", "output format: text or json")
 
 	return c

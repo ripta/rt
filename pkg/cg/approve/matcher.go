@@ -144,7 +144,7 @@ func tokenRuleMatches(rule *Rule, canonical, resolved, basename matchForm) bool 
 // as a prefix but needs at least one token after them; glob and regex match the
 // precomputed quoted join.
 func formMatches(rule *Rule, form matchForm) bool {
-	if !form.ok {
+	if !form.ok || rule.inert {
 		return false
 	}
 
@@ -183,10 +183,11 @@ func matchRuleTokens(rule *Rule, form matchForm, exact bool) bool {
 // matches the invoked basename; an absolute path matches the canonical or resolved
 // path as written; a relative path matches those paths after being resolved
 // against projectRoot. For glob and regex rules there is no token to read, so
-// as_basename selects the form. The relative token is joined and cleaned but not
-// symlink evaluated, matching how an absolute token compares literally against the
-// subject's path forms, and so the rule does not require the file to exist at
-// load.
+// as_basename selects the form. The relative token is joined and cleaned but not symlink
+// evaluated, matching how an absolute token compares literally against the subject's path forms,
+// and so the rule does not require the file to exist at load.
+//
+// A first token that starts with ~ is already expanded to an absolute path by the time it gets here.
 func compileMatch(rule *Rule, projectRoot string) {
 	switch rule.kind {
 	case KindGlob, KindRegex:
@@ -194,6 +195,10 @@ func compileMatch(rule *Rule, projectRoot string) {
 	case KindExact, KindPrefix, KindWrapper:
 		tokens := tokensOf(rule)
 		if len(tokens) == 0 {
+			return
+		}
+		if isTilde(tokens[0]) {
+			compileTilde(rule, tokens)
 			return
 		}
 		if !hasPathSeparator(tokens[0]) {
@@ -211,6 +216,27 @@ func compileMatch(rule *Rule, projectRoot string) {
 		rule.baseArgv = slices.Clone(cmp)
 		rule.baseArgv[0] = filepath.Base(cmp[0])
 	}
+}
+
+// compileTilde compiles a rule whose first token starts with ~. The head was expanded to an absolute
+// path when the rule was parsed, so the rule compares like any absolute rule. A rule that was never
+// expanded is inert rather than guessed at, so a missed expansion fails toward not matching.
+func compileTilde(rule *Rule, tokens []string) {
+	if !rule.tilde || rule.inert {
+		rule.inert = true
+		rule.cmpArgv = nil
+		rule.baseArgv = nil
+
+		return
+	}
+
+	cmp := slices.Clone(tokens)
+	cmp[0] = rule.tildeHead
+	rule.cmpArgv = cmp
+	rule.relative = false
+
+	rule.baseArgv = slices.Clone(cmp)
+	rule.baseArgv[0] = filepath.Base(cmp[0])
 }
 
 // hasPathSeparator reports whether s carries a path separator, which marks it as

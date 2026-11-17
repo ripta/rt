@@ -68,6 +68,12 @@ func (s *Store) CheckEdit(tokens []string, extraArgs bool, targets []EditTarget)
 	} else {
 		rule.Prefix = slices.Clone(tokens)
 	}
+
+	// Expanding as an allow rule keeps an unresolvable ~user on the inert path, which misses every
+	// target, instead of the fail-load path. An unresolvable home directory misses the same way.
+	if err := s.tilde.expandRule(&rule, sectionAllow); err != nil {
+		return 0, &EditRejection{Reason: EditMismatch}
+	}
 	compileMatch(&rule, s.projectRoot)
 
 	for i, target := range targets {
@@ -94,8 +100,18 @@ func (s *Store) CheckEdit(tokens []string, extraArgs bool, targets []EditTarget)
 }
 
 // PathNamedBy returns the absolute path a rule's first token names, or empty for a bare program
-// name, which compares by basename and names no path.
+// name, which compares by basename and names no path. A token that starts with ~ names its expanded
+// path, or nothing when it cannot be expanded. TildeProblem says why.
 func (s *Store) PathNamedBy(token string) string {
+	if isTilde(token) {
+		path, err := s.tilde.expand(token)
+		if err != nil {
+			return ""
+		}
+
+		return path
+	}
+
 	if !hasPathSeparator(token) {
 		return ""
 	}
@@ -105,6 +121,21 @@ func (s *Store) PathNamedBy(token string) string {
 	}
 
 	return filepath.Clean(filepath.Join(s.projectRoot, token))
+}
+
+// TildeProblem says why a first token that starts with ~ cannot be expanded on this machine. It
+// returns empty for any other token and for one that expands. A remembered rule holding such a
+// token compiles inert and misses every command.
+func (s *Store) TildeProblem(token string) string {
+	if !isTilde(token) {
+		return ""
+	}
+
+	if _, err := s.tilde.expand(token); err != nil {
+		return err.Error()
+	}
+
+	return ""
 }
 
 // FormHeadsWrapper reports whether a remembered rule for these targets is exact-only: a target's
@@ -127,14 +158,23 @@ func (s *Store) formHeadsWrapper(first string, targets []EditTarget) bool {
 // CollidesWithWrapper reports whether a submitted first token, read with its own token shape,
 // names a program that heads a wrapper allow rule. A bare token collides with a head that equals
 // it or whose basename equals it. A path token collides with a head that equals it or that equals
-// its basename. A project-relative token or head is compared after joining the project root.
+// its basename. A project-relative token or head is compared after joining the project root. A token
+// that starts with ~ is a path token, compared after expansion.
 func (s *Store) CollidesWithWrapper(first string) bool {
 	if first == "" {
 		return false
 	}
 
 	isPath := hasPathSeparator(first)
-	if isPath && !filepath.IsAbs(first) {
+	switch {
+	case isTilde(first):
+		expanded, err := s.tilde.expand(first)
+		if err != nil {
+			return false
+		}
+
+		first, isPath = expanded, true
+	case isPath && !filepath.IsAbs(first):
 		first = filepath.Clean(filepath.Join(s.projectRoot, first))
 	}
 
