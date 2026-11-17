@@ -300,10 +300,10 @@ func loadLayer(path string, env *tildeEnv) (Layer, error) {
 // cannot be re-allowed.
 //
 // Each tier lists project rules, then global rules, then the built-in deny set.
-// The order never changes a decision. It picks which matching rule a verdict names,
-// so the most specific layer's message reaches the agent. Restrict is evaluated after
-// allow and the slices carry no layer provenance, so any allow from either layer
-// carves out of any restrict from either layer.
+// Each rule records the layer it came from, which is the last step of the specificity
+// ranking. The list order never changes a decision or the rule a verdict names.
+// Restrict stays a tier below allow, so any allow from either layer carves out of any
+// restrict from either layer.
 func buildRuleset(global, project Layer, projectRoot string, env *tildeEnv) (*Ruleset, error) {
 	rs := &Ruleset{Mode: ModeEnforce, checkoutAlias: newCheckoutAlias(projectRoot), projectRoot: projectRoot, tilde: env}
 
@@ -315,16 +315,16 @@ func buildRuleset(global, project Layer, projectRoot string, env *tildeEnv) (*Ru
 	}
 
 	if project.Doc != nil {
-		rs.Deny = append(rs.Deny, project.Doc.Deny...)
-		rs.Allow = append(rs.Allow, project.Doc.Allow...)
-		rs.Restrict = append(rs.Restrict, project.Doc.Restrict...)
+		rs.Deny = appendLayer(rs.Deny, project.Doc.Deny, layerProject)
+		rs.Allow = appendLayer(rs.Allow, project.Doc.Allow, layerProject)
+		rs.Restrict = appendLayer(rs.Restrict, project.Doc.Restrict, layerProject)
 	}
 	if global.Doc != nil {
-		rs.Deny = append(rs.Deny, global.Doc.Deny...)
-		rs.Allow = append(rs.Allow, global.Doc.Allow...)
-		rs.Restrict = append(rs.Restrict, global.Doc.Restrict...)
+		rs.Deny = appendLayer(rs.Deny, global.Doc.Deny, layerGlobal)
+		rs.Allow = appendLayer(rs.Allow, global.Doc.Allow, layerGlobal)
+		rs.Restrict = appendLayer(rs.Restrict, global.Doc.Restrict, layerGlobal)
 	}
-	rs.Deny = append(rs.Deny, builtinDenyRules()...)
+	rs.Deny = appendLayer(rs.Deny, builtinDenyRules(), layerBuiltin)
 
 	for i := range rs.Deny {
 		compileMatch(&rs.Deny[i], projectRoot)
@@ -337,4 +337,16 @@ func buildRuleset(global, project Layer, projectRoot string, env *tildeEnv) (*Ru
 	}
 
 	return rs, nil
+}
+
+// appendLayer appends src to dst and marks each appended rule with the layer it came from.
+func appendLayer(dst, src []Rule, layer ruleLayer) []Rule {
+	start := len(dst)
+	dst = append(dst, src...)
+
+	for i := start; i < len(dst); i++ {
+		dst[i].layer = layer
+	}
+
+	return dst
 }

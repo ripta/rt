@@ -249,3 +249,26 @@ func TestMergedWarningsSkippedWhenALayerFailsToParse(t *testing.T) {
 		t.Error("MergedWarnings ok = true, want false when a layer failed to parse")
 	}
 }
+
+func TestCoveringPrefixWarningSaysWhenThePrefixDecides(t *testing.T) {
+	t.Parallel()
+
+	_, project, err := Diagnose(LoadOptions{
+		GlobalPath:  filepath.Join(t.TempDir(), "no-global.yaml"),
+		ProjectRoot: writeProject(t, "version: 1\nallow:\n  - prefix: [nice]\n  - wrapper: [nice, -n, \"19\"]\n"),
+	})
+	if err != nil {
+		t.Fatalf("Diagnose() error: %v", err)
+	}
+
+	merged, ok := MergedWarnings(LayerDiagnosis{}, project)
+	if !ok || len(merged) != 1 {
+		t.Fatalf("merged warnings = %+v (ok %v), want one", merged, ok)
+	}
+
+	for _, want := range []string{"decides only when the inner command has no rule of its own", "outranks the prefix"} {
+		if !strings.Contains(merged[0].Message, want) {
+			t.Errorf("message %q missing %q", merged[0].Message, want)
+		}
+	}
+}

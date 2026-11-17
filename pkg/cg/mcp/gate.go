@@ -185,10 +185,15 @@ func (g *gate) check(call approvalCall) (gateOutcome, error) {
 // handed. The top layer is never pinned, since the supervisor already runs the path the gate
 // resolved.
 //
-// An inner layer is pinned to the path it resolved to when every rule that permits it is
-// path-form. A bare-name rule accepts any binary of that name, so a layer it permits keeps
-// the wrapper's own lookup. A layer still prompting was approved at the form, which showed its
-// resolved path, so that layer is pinned to the path shown.
+// An inner layer is pinned to the path it resolved to when every rule of the set that settled it is
+// path-form. On a peeled layer that set is the chosen wrapper rules. A bare-name rule accepts any
+// binary of that name, so a layer it settles keeps the wrapper's own lookup.
+//
+// A mixed-form tie is unpinned. So is a tie of a chain and an ordinary allow, unless the ordinary
+// rules and the wrapper rules are all path-form.
+//
+// A layer still prompting was approved at the form, which showed its resolved path, so that layer
+// is pinned to the path shown.
 func pinnedPaths(verdicts []approve.Verdict) []map[int]string {
 	out := make([]map[int]string, len(verdicts))
 
@@ -234,8 +239,15 @@ func (g *gate) evaluate(call approvalCall, i int) (approve.Verdict, error) {
 // refusalError builds the error for a deny or restrict match, naming the rule
 // kind and appending the rule's message when set so the agent sees why the
 // command was blocked. A refusal behind a wrapper rule names the layer that refused and
-// the rule that refused it.
+// the rule that refused it. Equally specific rules all decide, so a refusal names every one
+// of them with its message. A refusal from equally specific allow rules that disagree names
+// those rules.
 func refusalError(tool string, v approve.Verdict) error {
+	if refusalStep(v) == approve.StepTieRefusal {
+		return fmt.Errorf("%s refused: %s matches equally specific allow rules that disagree: %s",
+			tool, refusedName(v), ruleLabels("allow", v.Deciding))
+	}
+
 	kind := "deny"
 	if v.Restricted {
 		kind = "restrict"
@@ -246,10 +258,52 @@ func refusalError(tool string, v approve.Verdict) error {
 		what = fmt.Sprintf("%s matches %s", layerName(layer), ruleLabel(kind, v.Rule))
 	}
 
+	if len(v.Deciding) > 1 {
+		parts := make([]string, len(v.Deciding))
+		for i, rule := range v.Deciding {
+			parts[i] = ruleLabel(kind, rule)
+			if rule.Message != "" {
+				parts[i] += ": " + rule.Message
+			}
+		}
+
+		return fmt.Errorf("%s refused: %s matches %d equally specific %s rules; %s",
+			tool, refusedName(v), len(v.Deciding), kind, strings.Join(parts, "; "))
+	}
+
 	if v.Rule != nil && v.Rule.Message != "" {
 		return fmt.Errorf("%s refused: %s: %s", tool, what, v.Rule.Message)
 	}
 	return fmt.Errorf("%s refused: %s", tool, what)
+}
+
+// refusalStep is the step that settled the layer the refusal came from.
+func refusalStep(v approve.Verdict) approve.Step {
+	if layer, ok := refusingLayer(v); ok {
+		return layer.Step
+	}
+
+	return v.Step
+}
+
+// refusedName names what a refusal is about: the typed command, or the inner command of the layer
+// the chain refused at.
+func refusedName(v approve.Verdict) string {
+	if layer, ok := refusingLayer(v); ok {
+		return layerName(layer)
+	}
+
+	return "the command"
+}
+
+// ruleLabels names several rules with the list they came from.
+func ruleLabels(list string, rules []*approve.Rule) string {
+	parts := make([]string, len(rules))
+	for i, rule := range rules {
+		parts[i] = ruleLabel(list, rule)
+	}
+
+	return strings.Join(parts, ", ")
 }
 
 // envRefusalError builds the error for a DecisionRefuse produced by the

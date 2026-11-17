@@ -302,3 +302,65 @@ func TestCheckShellOutputJSON(t *testing.T) {
 		t.Errorf("commands = %+v, want [run, refuse]", res.Commands)
 	}
 }
+
+const undercountRules = "version: 1\nallow:\n  - prefix: [git, push]\n  - regex: '^git (push|pull) --force( |$)'\n    as_basename: true\n"
+
+// TestCheckListsAPatternRankedBelowAPrefix pins the undercount risk: a pattern the ranking counts at
+// 1 matched, and the broader-looking prefix at 2 decides. Without the listing, the user cannot tell
+// that rule from one that did not match.
+func TestCheckListsAPatternRankedBelowAPrefix(t *testing.T) {
+	out, err := runCheck(t, t.TempDir(), undercountRules, "--", "git", "push", "--force")
+	if exitCode(t, err) != 0 {
+		t.Fatalf("exit code = %d, want 0; out = %s", exitCode(t, err), out)
+	}
+
+	for _, want := range []string{
+		"matching allows, most specific first:",
+		"deciding  prefix [git, push] (count 2, prefix, bare, project)",
+		`outranked regex "^git (push|pull) --force( |$)" (count 1, pattern, bare, project)`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output missing %q:\n%s", want, out)
+		}
+	}
+
+	if strings.Index(out, "deciding  prefix") > strings.Index(out, "outranked regex") {
+		t.Errorf("the deciding rule should list first:\n%s", out)
+	}
+
+	jsonOut, _ := runCheck(t, t.TempDir(), undercountRules, "--output", "json", "--", "git", "push", "--force")
+
+	var res checkResult
+	if jsonErr := json.Unmarshal([]byte(jsonOut), &res); jsonErr != nil {
+		t.Fatalf("unmarshalling %q: %v", jsonOut, jsonErr)
+	}
+
+	if len(res.Matches) != 2 {
+		t.Fatalf("matches = %+v, want 2", res.Matches)
+	}
+
+	first, second := res.Matches[0], res.Matches[1]
+	if first.Rule == nil || first.Rule.Kind != "prefix" || first.Count != 2 || first.Kind != "prefix" || first.Form != "bare" || first.Layer != "project" || !first.Deciding {
+		t.Errorf("first match = %+v, want the deciding prefix at count 2", first)
+	}
+	if second.Rule == nil || second.Rule.Kind != "regex" || second.Count != 1 || second.Kind != "pattern" || second.Deciding {
+		t.Errorf("second match = %+v, want the outranked regex at count 1", second)
+	}
+}
+
+func TestCheckListsNothingWhenNoAllowMatched(t *testing.T) {
+	out, _ := runCheck(t, t.TempDir(), undercountRules, "--output", "json", "--", "make", "test")
+
+	var res checkResult
+	if jsonErr := json.Unmarshal([]byte(out), &res); jsonErr != nil {
+		t.Fatalf("unmarshalling %q: %v", out, jsonErr)
+	}
+	if len(res.Matches) != 0 || strings.Contains(out, `"matches"`) {
+		t.Errorf("matches = %+v, want none: %s", res.Matches, out)
+	}
+
+	text, _ := runCheck(t, t.TempDir(), undercountRules, "--", "make", "test")
+	if strings.Contains(text, "matching allows") {
+		t.Errorf("text should not list matches:\n%s", text)
+	}
+}

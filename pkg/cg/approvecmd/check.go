@@ -28,14 +28,22 @@ type checkOptions struct {
 // checkResult is the `cg check --output json` payload: the evaluated command,
 // the verdict, and the rule that produced it, when there is one.
 type checkResult struct {
-	Command    []string    `json:"command"`
-	Decision   string      `json:"decision"`
-	Section    string      `json:"section,omitempty"`
-	Rule       *ruleInfo   `json:"rule,omitempty"`
+	Command  []string  `json:"command"`
+	Decision string    `json:"decision"`
+	Section  string    `json:"section,omitempty"`
+	Rule     *ruleInfo `json:"rule,omitempty"`
+
+	// Deciding lists every rule of a tie: the matching rules no other outranks. It is empty when
+	// one rule decided, which Rule then names.
+	Deciding   []ruleInfo  `json:"deciding,omitempty"`
 	Restricted bool        `json:"restricted,omitempty"`
 	BadEnvs    []string    `json:"bad_envs,omitempty"`
 	Chain      []chainInfo `json:"chain,omitempty"`
 	Skipped    []skipInfo  `json:"skipped,omitempty"`
+
+	// Matches lists every allow that matched the typed command's layer, ranked. Each chain entry
+	// carries the same list for its own layer.
+	Matches []matchInfo `json:"matches,omitempty"`
 
 	// Warnings describe the loaded rules, not this command, and do not affect the
 	// verdict. A --shell run carries them once, on the aggregate payload.
@@ -45,16 +53,33 @@ type checkResult struct {
 // chainInfo is the JSON-facing description of one layer of a wrapper chain, from
 // the typed command inward. Resolved is the path an inner layer's executable
 // resolved to, and is empty when it did not resolve. Candidates and PathForm
-// describe the rules of the step that settled the layer.
+// describe the deciding set of the step that settled the layer.
 type chainInfo struct {
-	Offset     int        `json:"offset"`
-	Command    []string   `json:"command"`
-	Resolved   string     `json:"resolved,omitempty"`
-	Wrappers   []ruleInfo `json:"wrappers,omitempty"`
-	Step       string     `json:"step"`
-	Rule       *ruleInfo  `json:"rule,omitempty"`
-	Candidates []ruleInfo `json:"candidates,omitempty"`
-	PathForm   bool       `json:"path_form,omitempty"`
+	Offset     int         `json:"offset"`
+	Command    []string    `json:"command"`
+	Resolved   string      `json:"resolved,omitempty"`
+	Wrappers   []ruleInfo  `json:"wrappers,omitempty"`
+	Step       string      `json:"step"`
+	Rule       *ruleInfo   `json:"rule,omitempty"`
+	Candidates []ruleInfo  `json:"candidates,omitempty"`
+	PathForm   bool        `json:"path_form,omitempty"`
+	Matches    []matchInfo `json:"matches,omitempty"`
+}
+
+// matchInfo is the JSON-facing description of one allow that matched a layer. Rule is set for an
+// ordinary rule. A wrapper chain that competed with the ordinary rules sets Wrappers, the wrapper rules
+// the peel chose, and Inner, the rules the inner layer settled on.
+//
+// Count, Kind, Form, and Layer are the rank the match competed at. Deciding marks the deciding set.
+type matchInfo struct {
+	Rule     *ruleInfo  `json:"rule,omitempty"`
+	Wrappers []ruleInfo `json:"wrappers,omitempty"`
+	Inner    []ruleInfo `json:"inner,omitempty"`
+	Count    int        `json:"count"`
+	Kind     string     `json:"kind"`
+	Form     string     `json:"form"`
+	Layer    string     `json:"layer"`
+	Deciding bool       `json:"deciding"`
 }
 
 // skipInfo is the JSON-facing description of a wrapper rule that matched a layer
@@ -145,6 +170,7 @@ func (opts *checkOptions) run(cmd *cobra.Command, args []string) error {
 	resolver := approve.CommandResolver(opts.Cwd)
 	verdicts := make([]approve.Verdict, len(commands))
 	results := make([]checkResult, len(commands))
+	explained := make([][]approve.LayerMatches, len(commands))
 	for i, argv := range commands {
 		// A command that fails to resolve is not an error here: it just means
 		// canonical/resolved path rules cannot match, mirroring how the cg_run gate
@@ -152,7 +178,8 @@ func (opts *checkOptions) run(cmd *cobra.Command, args []string) error {
 		resolved, _ := model.ResolveCommand(argv, opts.Cwd)
 		subject := approve.Subject{Argv: argv, Canonical: resolved.CanonicalArgv(), Resolved: resolved.ResolvedArgv()}
 		verdicts[i] = store.Ruleset().Evaluate(subject, opts.Env, resolver)
-		results[i] = checkResultFrom(argv, verdicts[i])
+		explained[i] = store.Ruleset().Explain(subject, opts.Env, resolver)
+		results[i] = checkResultFrom(argv, verdicts[i], explained[i])
 	}
 
 	aggregate := aggregateDecision(verdicts)
@@ -172,9 +199,9 @@ func (opts *checkOptions) run(cmd *cobra.Command, args []string) error {
 		}
 	} else {
 		if opts.Shell {
-			writeCheckShellText(cmd.OutOrStdout(), shellSrc, commands, verdicts, store.Project.Path)
+			writeCheckShellText(cmd.OutOrStdout(), shellSrc, commands, verdicts, explained, store.Project.Path)
 		} else {
-			writeCheckText(cmd.OutOrStdout(), commands[0], verdicts[0], store.Project.Path)
+			writeCheckText(cmd.OutOrStdout(), commands[0], verdicts[0], explained[0], store.Project.Path)
 		}
 
 		for _, warning := range warnings {
@@ -243,7 +270,7 @@ func aggregateDecision(verdicts []approve.Verdict) approve.Decision {
 }
 
 // checkResultFrom builds the JSON payload for a verdict.
-func checkResultFrom(argv []string, v approve.Verdict) checkResult {
+func checkResultFrom(argv []string, v approve.Verdict, layers []approve.LayerMatches) checkResult {
 	res := checkResult{
 		Command:    argv,
 		Decision:   decisionString(v.Decision),
@@ -255,15 +282,71 @@ func checkResultFrom(argv []string, v approve.Verdict) checkResult {
 		info := ruleInfoFor(v.Rule)
 		res.Rule = &info
 	}
+	if len(v.Deciding) > 1 {
+		for _, r := range v.Deciding {
+			res.Deciding = append(res.Deciding, ruleInfoFor(r))
+		}
+	}
 
 	for _, cl := range v.Chain {
-		res.Chain = append(res.Chain, chainInfoFrom(cl))
+		info := chainInfoFrom(cl)
+		if lm, ok := layerAt(layers, cl.Offset); ok {
+			info.Matches = matchInfosFrom(lm)
+		}
+
+		res.Chain = append(res.Chain, info)
+	}
+	if lm, ok := layerAt(layers, 0); ok {
+		res.Matches = matchInfosFrom(lm)
 	}
 	for _, sk := range v.Skipped {
 		res.Skipped = append(res.Skipped, skipInfo{Offset: sk.Offset, Rule: ruleInfoFor(sk.Rule), Reason: sk.Reason.String()})
 	}
 
 	return res
+}
+
+// layerAt finds the explained layer at an offset.
+func layerAt(layers []approve.LayerMatches, offset int) (approve.LayerMatches, bool) {
+	for _, lm := range layers {
+		if lm.Offset == offset {
+			return lm, true
+		}
+	}
+
+	return approve.LayerMatches{}, false
+}
+
+// matchInfosFrom describes the matches of one layer for the JSON output, in ranked order.
+func matchInfosFrom(lm approve.LayerMatches) []matchInfo {
+	var out []matchInfo
+
+	for _, m := range lm.Matches {
+		info := matchInfo{Count: m.Count, Kind: m.Kind, Form: formName(m), Layer: m.Layer, Deciding: m.Deciding()}
+
+		if m.Rule != nil {
+			rule := ruleInfoFor(m.Rule)
+			info.Rule = &rule
+		}
+		for _, r := range m.Wrappers {
+			info.Wrappers = append(info.Wrappers, ruleInfoFor(r))
+		}
+		for _, r := range m.Inner {
+			info.Inner = append(info.Inner, ruleInfoFor(r))
+		}
+
+		out = append(out, info)
+	}
+
+	return out
+}
+
+func formName(m approve.Match) string {
+	if m.PathForm {
+		return "path"
+	}
+
+	return "bare"
 }
 
 // ruleInfoFor describes a rule for the JSON output.
@@ -305,7 +388,7 @@ func resolvedPath(res *model.Resolution) string {
 }
 
 // writeCheckText renders a verdict as a short human-readable report.
-func writeCheckText(w io.Writer, argv []string, v approve.Verdict, projectPath string) {
+func writeCheckText(w io.Writer, argv []string, v approve.Verdict, layers []approve.LayerMatches, projectPath string) {
 	fmt.Fprintf(w, "%s: %s\n", decisionString(v.Decision), model.EscapeArgs(argv))
 
 	if v.Rule != nil {
@@ -319,7 +402,15 @@ func writeCheckText(w io.Writer, argv []string, v approve.Verdict, projectPath s
 		}
 	}
 
-	writeChainText(w, v)
+	writeTiedText(w, v)
+
+	if len(v.Chain) == 0 {
+		if lm, ok := layerAt(layers, 0); ok {
+			writeMatchesText(w, lm, "  ")
+		}
+	}
+
+	writeChainText(w, v, layers)
 
 	if len(v.BadEnvs) > 0 {
 		fmt.Fprintf(w, "  blocked env: %s\n", strings.Join(v.BadEnvs, ", "))
@@ -335,10 +426,27 @@ func writeCheckText(w io.Writer, argv []string, v approve.Verdict, projectPath s
 	}
 }
 
+// writeTiedText names every rule of a tie. The rules are equally specific, so they decide together.
+func writeTiedText(w io.Writer, v approve.Verdict) {
+	if len(v.Deciding) < 2 {
+		return
+	}
+
+	fmt.Fprintf(w, "  decided together by %d equally specific rules:\n", len(v.Deciding))
+
+	for _, r := range v.Deciding {
+		fmt.Fprintf(w, "    %s", r.String())
+		if r.Message != "" {
+			fmt.Fprintf(w, ": %s", r.Message)
+		}
+		fmt.Fprintln(w)
+	}
+}
+
 // writeChainText renders the wrapper chain behind a verdict, then the wrapper
 // rules that matched and did not peel. Every layer of a chain must permit a
 // dangerous override, so a refusal names the layer that refused it.
-func writeChainText(w io.Writer, v approve.Verdict) {
+func writeChainText(w io.Writer, v approve.Verdict, layers []approve.LayerMatches) {
 	if len(v.Chain) > 0 {
 		fmt.Fprintln(w, "  chain:")
 	}
@@ -370,6 +478,10 @@ func writeChainText(w io.Writer, v approve.Verdict) {
 		default:
 			fmt.Fprintf(w, "        %s\n", chainRuleLabel(cl))
 		}
+
+		if lm, ok := layerAt(layers, cl.Offset); ok {
+			writeMatchesText(w, lm, "        ")
+		}
 	}
 
 	if len(v.Chain) > 0 && len(v.BadEnvs) > 0 {
@@ -379,6 +491,45 @@ func writeChainText(w io.Writer, v approve.Verdict) {
 	for _, sk := range v.Skipped {
 		fmt.Fprintf(w, "  wrapper %s did not peel at offset %d: %s\n", sk.Rule.Pattern(), sk.Offset, sk.Reason)
 	}
+}
+
+// writeMatchesText lists every allow that matched a layer, in ranked order. The deciding set is
+// marked with a word, so the mark survives without color. A rule outranked by another still shows,
+// which tells a rule that did not match from one that matched and ranked lower.
+func writeMatchesText(w io.Writer, lm approve.LayerMatches, indent string) {
+	if len(lm.Matches) == 0 {
+		return
+	}
+
+	fmt.Fprintf(w, "%smatching allows, most specific first:\n", indent)
+
+	for _, m := range lm.Matches {
+		mark := "outranked"
+		if m.Deciding() {
+			mark = "deciding"
+		}
+
+		fmt.Fprintf(w, "%s  %-9s %s (count %d, %s, %s, %s)\n", indent, mark, matchLabel(m), m.Count, m.Kind, formName(m), m.Layer)
+	}
+}
+
+// matchLabel names a match: the rule, or the wrapper chain with the rules its inner layer settled on.
+func matchLabel(m approve.Match) string {
+	if m.Rule != nil {
+		return m.Rule.String()
+	}
+
+	wrappers := make([]string, len(m.Wrappers))
+	for i, r := range m.Wrappers {
+		wrappers[i] = r.Pattern()
+	}
+
+	inner := make([]string, len(m.Inner))
+	for i, r := range m.Inner {
+		inner[i] = r.String()
+	}
+
+	return fmt.Sprintf("wrapper %s over %s", strings.Join(wrappers, " or "), strings.Join(inner, " and "))
 }
 
 // chainRuleLabel names a chain layer's rule with the list it came from: a wrapper
@@ -400,12 +551,12 @@ func chainRuleLabel(cl approve.ChainLayer) string {
 
 // writeCheckShellText renders the aggregate decision for the original shell
 // string, followed by each extracted command's own verdict via writeCheckText.
-func writeCheckShellText(w io.Writer, shellSrc string, commands [][]string, verdicts []approve.Verdict, projectPath string) {
+func writeCheckShellText(w io.Writer, shellSrc string, commands [][]string, verdicts []approve.Verdict, explained [][]approve.LayerMatches, projectPath string) {
 	fmt.Fprintf(w, "%s: %s\n", decisionString(aggregateDecision(verdicts)), shellSrc)
 
 	for i, argv := range commands {
 		fmt.Fprintf(w, "\n[%d] ", i+1)
-		writeCheckText(w, argv, verdicts[i], projectPath)
+		writeCheckText(w, argv, verdicts[i], explained[i], projectPath)
 	}
 }
 
@@ -430,9 +581,19 @@ func ruleSectionFor(v approve.Verdict) string {
 		return ""
 	case v.Restricted:
 		return "restrict"
-	case v.Decision == approve.DecisionRun || len(v.BadEnvs) > 0:
+	case v.Decision == approve.DecisionRun || len(v.BadEnvs) > 0 || lastStep(v) == approve.StepTieRefusal:
 		return "allow"
 	default:
 		return "deny"
 	}
+}
+
+// lastStep is the step that settled the layer behind the verdict: the last chain layer's, or the
+// typed command's when no wrapper was involved.
+func lastStep(v approve.Verdict) approve.Step {
+	if n := len(v.Chain); n > 0 {
+		return v.Chain[n-1].Step
+	}
+
+	return v.Step
 }

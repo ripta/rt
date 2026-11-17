@@ -108,6 +108,12 @@ type Rule struct {
 	cmpArgv      []string
 	baseArgv     []string
 
+	// layer is the file the rule came from, and rankCount and rankShape are what the specificity
+	// ranking reads from its match. The loader sets layer. compileMatch sets the other two.
+	layer     ruleLayer
+	rankCount int
+	rankShape rankShape
+
 	tilde       bool
 	tildeHead   string
 	inert       bool

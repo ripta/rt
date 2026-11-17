@@ -262,6 +262,14 @@ var attributionTests = []attributionTest{
 		WantPrefix:  []string{"git", "push"},
 	},
 	{
+		Name:        "global deny over builtin at equal specificity",
+		Global:      "version: 1\ndeny:\n  - prefix: [bash]\n    message: global\n",
+		Project:     "version: 1\n",
+		Argv:        []string{"bash", "x"},
+		WantMessage: "global",
+		WantPrefix:  []string{"bash"},
+	},
+	{
 		Name:       "project allow over global",
 		Global:     "version: 1\nallow:\n  - prefix: [make]\n",
 		Project:    "version: 1\nallow:\n  - prefix: [make, test]\n",
@@ -341,6 +349,89 @@ func TestLoadEnvPermitCrossLayer(t *testing.T) {
 	if got.Decision != DecisionRun {
 		t.Errorf("decision = %v (bad envs %v), want run via the project permit", got.Decision, got.BadEnvs)
 	}
+}
+
+// TestLoadRecordsEachRuleLayer covers the layer a rule carries after the layers are concatenated.
+// The ranking breaks equal rules by layer, so a builtin deny must rank as builtin and not as the
+// project or global rule it sits beside in the list.
+func TestLoadRecordsEachRuleLayer(t *testing.T) {
+	t.Parallel()
+
+	global := writeGlobal(t, "version: 1\nallow:\n  - prefix: [g]\ndeny:\n  - prefix: [gd]\nrestrict:\n  - prefix: [gr]\n")
+	root := writeProject(t, "version: 1\nallow:\n  - prefix: [p]\ndeny:\n  - prefix: [pd]\nrestrict:\n  - prefix: [pr]\n")
+
+	s, err := Load(LoadOptions{GlobalPath: global, ProjectRoot: root})
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+
+	rs := s.Ruleset()
+	want := map[string]ruleLayer{"g": layerGlobal, "gd": layerGlobal, "gr": layerGlobal, "p": layerProject, "pd": layerProject, "pr": layerProject, "sh": layerBuiltin}
+
+	seen := make(map[string]bool)
+	for _, tier := range [][]Rule{rs.Allow, rs.Deny, rs.Restrict} {
+		for _, r := range tier {
+			layer, ok := want[r.Prefix[0]]
+			if !ok {
+				continue
+			}
+
+			seen[r.Prefix[0]] = true
+			if r.layer != layer {
+				t.Errorf("rule %s layer = %d, want %d", describeRule(&r), r.layer, layer)
+			}
+		}
+	}
+
+	for name := range want {
+		if !seen[name] {
+			t.Errorf("no rule for %q found in the ruleset", name)
+		}
+	}
+}
+
+// TestLoadGlobalRuleMoreSpecificThanProjectDecides covers the ranking across layers: specificity
+// comes before layer, so a global exact rule decides over a project prefix rule that permits an
+// override, and a project rule decides over an otherwise equal global one.
+func TestLoadGlobalRuleMoreSpecificThanProjectDecides(t *testing.T) {
+	t.Parallel()
+
+	env := map[string]string{"PATH": "/custom"}
+	subj := identitySubject([]string{"make", "test"})
+
+	t.Run("more specific global rule", func(t *testing.T) {
+		t.Parallel()
+
+		global := writeGlobal(t, "version: 1\nallow:\n  - exact: [make, test]\n")
+		root := writeProject(t, "version: 1\nallow:\n  - prefix: [make]\n    permit_unsafe_envs: [PATH]\n")
+
+		s, err := Load(LoadOptions{GlobalPath: global, ProjectRoot: root})
+		if err != nil {
+			t.Fatalf("Load() error: %v", err)
+		}
+
+		got := s.Ruleset().Evaluate(subj, env, nil)
+		if got.Decision != DecisionRefuse || got.Rule == nil || got.Rule.kind != KindExact {
+			t.Errorf("verdict = %v rule %v, want a refusal naming the global exact rule", got.Decision, got.Rule)
+		}
+	})
+
+	t.Run("equal rules break to the project", func(t *testing.T) {
+		t.Parallel()
+
+		global := writeGlobal(t, "version: 1\nallow:\n  - prefix: [make, test]\n")
+		root := writeProject(t, "version: 1\nallow:\n  - prefix: [make, test]\n    permit_unsafe_envs: [PATH]\n")
+
+		s, err := Load(LoadOptions{GlobalPath: global, ProjectRoot: root})
+		if err != nil {
+			t.Fatalf("Load() error: %v", err)
+		}
+
+		got := s.Ruleset().Evaluate(subj, env, nil)
+		if got.Decision != DecisionRun || len(got.Deciding) != 1 || got.Deciding[0].layer != layerProject {
+			t.Errorf("verdict = %v deciding %v, want a run decided by the project rule alone", got.Decision, got.Deciding)
+		}
+	})
 }
 
 func TestLoadCapturesSnapshot(t *testing.T) {

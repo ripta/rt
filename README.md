@@ -672,6 +672,78 @@ restrict:
 Here `git show` and `git log` run, every other `git` subcommand is refused with
 the message, and a command outside the `git` scope still prompts.
 
+### The most specific rule decides
+
+Several allow rules can match one command. The most specific one decides the whole
+call. It decides whether the command runs, which dangerous `env` overrides it
+permits, and every other field the rule carries. A broader rule never rescues a call
+the most specific rule refuses. A `deny` still wins over every allow, whatever the
+specificity.
+
+```yaml
+allow:
+  - exact: [make, test]
+  - prefix: [make]
+    permit_unsafe_envs: [PATH]
+```
+
+`make test` with a `PATH` override is refused here. The `exact` rule is more specific
+and does not permit `PATH`. The `prefix` rule's permit does not widen it. `make build`
+with the override runs, since only the `prefix` rule matches it.
+
+Rules rank in three steps, and the first step that separates two rules decides.
+
+1. The count. A rule counts the leading argv tokens it pins. `exact` and `prefix` count
+   their tokens. A `glob` or `regex` counts the literal leading tokens it requires, each
+   ending at a literal space or at the end of the text. The count stops at a pattern not
+   anchored at the start with `^`, a case-folded literal, a multi-line `^`, and a literal
+   that needs shell quoting. `^go test( |$)` counts 2. An unanchored `push --force`
+   counts 0. A higher count outranks a lower one.
+2. Kind and form together. At equal count, `exact` outranks a pattern, and a pattern
+   outranks `prefix`. A path-form rule outranks a bare-name one. A pattern whose only
+   constraint after its counted tokens is a boundary, such as `^make test( |$)`, ranks as
+   `prefix`. One that ends right after them, such as `^make test$`, ranks as `exact`. One
+   rule outranks another when it wins one of the two and ties the other. When one rule
+   wins on kind and the other wins on form, neither outranks the other.
+3. The layer. At equal kind and form, a project rule outranks a global rule.
+
+The rules no other rule outranks are the deciding set. The order of the rules in a file
+never changes it, so a remember or a restart does not change a verdict.
+
+A deciding set of more than one rule is a tie. Rules tie when they are equal on every step,
+or when neither outranks the other. A `glob` or `regex` without `as_basename` is path-form.
+A bare pattern needs `as_basename: true` to compare with a bare-name rule. A bare
+`regex: "^make test x"` with `as_basename: true` ties with `prefix: [/usr/bin/make, test]`,
+since it wins on kind and loses on form. Tied rules decide together. The call runs only
+when every tied rule runs after its env check. When one refuses, the call is refused and
+names the rule missing the fewest variables, then the rule whose text sorts first. `cg check`
+lists every tied rule.
+
+A path-form rule outranks a bare-name one at equal count and kind. When a path-form rule
+decides a wrapped inner command, cg hands the wrapper that path. A remembered
+`prefix: [/usr/bin/make, test]` therefore outranks a hand-written `prefix: [make, test]`, and
+the wrapped `make` is pinned. Write the carve-out with a path-form first token to keep it
+deciding.
+
+`cg check` lists every allow that matched each layer, so a rule that matched and ranked
+lower shows up beside the rule that decided. Each entry gives its count, kind, form, and
+layer. The deciding set is marked `deciding`, and every other entry is marked `outranked`.
+Entries sort by dominance level, then by rule text. Level 0 is the deciding set. Level 1
+is what only level 0 outranks, and so on. A wrapper chain that competes with the ordinary
+rules is listed as `wrapper [...] over <inner rules>`. Its count, kind, form, and layer
+are those of its first inner rule, and its level comes from comparing it against every
+inner rule. The list shows allows only, never a `deny` or `restrict` rule that matched.
+Under `--output json`, each layer carries a `matches` array. The top-level result holds
+the typed command's layer, and each `chain` entry holds its own. Use the list to see why a
+pattern did not decide, such as one whose count the ranking could not read, and to see a
+path-form rule deciding over a bare-name one on a wrapped layer. The list is for reading
+only. The gate decides from the deciding set alone.
+
+A `restrict` rule stays a tier below `allow`. Specificity ranks the allow rules only. When
+several `deny` or `restrict` rules match, a refusal names the deciding set of them, each with
+its message, in rule-text order. A refusal behind wrappers names the outermost layer that
+has a matching deny.
+
 ### Home-relative paths
 
 A first token that starts with `~` is a home-relative path. It is a third shape
@@ -737,7 +809,21 @@ any layer refuses the call, whatever the allow rules say.
 `wrapper` is valid only under `allow`. It matches tokens the way `prefix` does,
 and at least one token must follow them. A bare `nice -n 19` is not matched, so
 allow it with an `exact` rule if you want it. Of several wrapper rules that
-match, the longest one peels.
+match, the longest one peels. At equal length a path-form rule peels over a
+bare-name one, and then a project rule over a global one. Wrapper rules that are
+still equal must each permit an `env` override.
+
+A peel competes with the ordinary allow rules. It ranks by the chain it settles: the
+wrapper's tokens plus the inner rule's count, with the inner rule's kind. A chain that
+outranks a covering `prefix: [nice]` decides, so `nice -n 19 make test` is judged by the
+rule for `make test`, and its permits are the ones that count. An `exact` carve-out that is
+equal to the chain on every step decides, not the chain. When the inner command has no rule,
+the chain does not compete, and the covering prefix decides.
+
+A chain is path-form only when every rule in it is. It is a project rule only when every
+rule in it is. Otherwise it takes the least specific layer of any rule in it. So a global
+carve-out loses to an equal all-project chain, and a chain with one global rule loses to an
+equal project allow.
 
 cg never reads the wrapper's flags. The rule's last token marks where the
 wrapper ends. The rule is a promise that the program, given exactly those
@@ -784,21 +870,27 @@ the wrapper's lookup stands. With `wrapper: [uv, run]`, that lookup may find
 rewriting under it would change which program runs. Remembered rules are path
 rules by default.
 
+When both rules match, the path-form rule outranks the bare-name one, so the layer is
+pinned. A tied set of mixed forms is not pinned. Neither is a layer where a chain ties with
+an ordinary allow.
+
 An `env` override that sets a dangerous variable such as `PATH` needs a
 `permit_unsafe_envs` entry on every rule in the chain, the wrapper rules and the
 rule that allows the inner command. When every layer permits `PATH` and a bare
 name decides the inner command, the caller's `PATH` chooses the inner binary.
 
 A deny rule that names a path is matched by the basename of its path on an inner
-layer, since the wrapper may find the denied file through its own lookup. Pin a
+layer, since the wrapper may find the denied file through its own lookup. A path-form
+deny matched that way ranks as a bare-name rule. Pin a
 deny with a `prefix` or `exact` rule. A path-form `glob` or `regex` deny has no
 token to take a basename from, so it can miss an inner layer that passes
 through.
 
-A plain `prefix: [nice]` allow beside a `wrapper: [nice, -n, "19"]` rule makes
-the wrapper rule pointless, and a `prefix` deny can make it dead. `cg lint`,
-`cg check`, and the `rule_warnings` field of `cg_info` report both. Warnings are
-a separate severity: a lint run with only warnings still exits 0.
+A plain `prefix: [nice]` allow beside a `wrapper: [nice, -n, "19"]` rule decides
+only when the inner command has no rule of its own. A `prefix` deny can make the
+wrapper rule dead. `cg lint`, `cg check`, and the `rule_warnings` field of
+`cg_info` report both. Warnings are a separate severity: a lint run with only
+warnings still exits 0.
 
 Every prompt pre-fills the whole command, with the path of the executable as the
 first token. For a wrapped command the form pre-fills the inner command.

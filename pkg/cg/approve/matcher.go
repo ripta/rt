@@ -63,8 +63,8 @@ func (f matchForm) quoted() string {
 // callers that need only the tier outcome. Evaluate is the full entry point.
 //
 // Mode allow-all and deny-all short-circuit; otherwise the tiers are consulted in
-// order deny > allow > restrict > prompt: the first matching deny rule refuses,
-// then a matching allow rule runs, then the first matching restrict rule refuses
+// order deny > allow > restrict > prompt: a matching deny rule refuses, then the
+// most specific matching allow rule decides, then a matching restrict rule refuses
 // an in-scope command with no allow carve-out, and an unmatched command prompts.
 // Deny is evaluated in full before allow, so a deny match always wins, and allow
 // is evaluated before restrict, so an allow carves out of a restrict scope. Both
@@ -189,6 +189,8 @@ func matchRuleTokens(rule *Rule, form matchForm, exact bool) bool {
 //
 // A first token that starts with ~ is already expanded to an absolute path by the time it gets here.
 func compileMatch(rule *Rule, projectRoot string) {
+	compileRank(rule)
+
 	switch rule.kind {
 	case KindGlob, KindRegex:
 		rule.wantBasename = rule.AsBasename
