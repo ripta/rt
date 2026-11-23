@@ -5,7 +5,7 @@ go 1.27.0
 require (
 	github.com/BurntSushi/toml v1.6.0
 	github.com/containerd/console v1.0.5
-	github.com/elk-language/go-prompt v1.6.7
+	github.com/elk-language/go-prompt v1.7.0
 	github.com/go-logfmt/logfmt v0.6.1
 	github.com/google/cel-go v0.30.0
 	github.com/google/jsonschema-go v0.4.3
@@ -33,7 +33,7 @@ require (
 	golang.org/x/time v0.16.0
 	google.golang.org/protobuf v1.36.12
 	gopkg.in/yaml.v3 v3.0.1
-	lukechampine.com/blake3 v1.4.1
+	lukechampine.com/blake3 v1.5.1
 	mvdan.cc/sh/v3 v3.14.1
 	olympos.io/encoding/edn v0.0.0-20201019073823-d3554ca0b0a3
 )
